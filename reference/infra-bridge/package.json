@@ -10,11 +10,13 @@
     }
   },
   "scripts": {
-    "check": "npm run build && npm run typecheck:tests && npm run lint && npm run test:run",
+    "check": "npm run build && npm run typecheck:tests && npm run typecheck:compare && npm run lint && npm run test:run",
     "build": "tsgo",
     "typecheck": "tsgo --noEmit",
     "typecheck:tests": "tsgo -p tsconfig.test.json --noEmit",
-    "lint": "eslint src tests",
+    "typecheck:compare": "tsgo -p tsconfig.compare.json --noEmit",
+    "lint": "eslint src tests scripts",
+    "compare:model": "tsx --tsconfig tsconfig.compare.json scripts/compareInfraBridge.ts",
     "pretest": "npm run build",
     "test": "vitest run",
     "test:run": "vitest run"

@@ -64,7 +64,11 @@ examples/output/
 docs/images/examples/
 
 # Local agent skill tooling (installed via `skills add`, not project source)
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/reconstruct-infra-family/
+!.agents/skills/reconstruct-infra-family/**
 .claude/skills/langfuse
 
 # verify-heal eval scratch fixtures

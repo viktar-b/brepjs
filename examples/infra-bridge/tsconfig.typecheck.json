@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "brepjs": ["../../dist/index.d.ts"],
+      "brepjs/*": ["../../dist/*.d.ts"],
+      "brepjs-bim": ["../../packages/brepjs-bim/dist/index.d.ts"],
+      "brepjs-families": ["../../packages/brepjs-families/dist/index.d.ts"],
+      "brepjs-families/*": ["../../packages/brepjs-families/dist/*.d.ts"]
+    }
+  }
+}

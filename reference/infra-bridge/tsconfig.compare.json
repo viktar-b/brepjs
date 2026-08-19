@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "noEmit": true,
+    "types": ["node"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "brepjs-families"
+  },
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "../../examples/infra-bridge/src/**/*.ts",
+    "../../examples/infra-bridge/src/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "dist", "tests"]
+}

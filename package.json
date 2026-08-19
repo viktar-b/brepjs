@@ -33,6 +33,7 @@
     "packages/brepjs-cad",
     "packages/brepjs-viewer",
     "packages/brepjs-vscode",
+    "examples/infra-bridge",
     "reference/infra-bridge",
     "apps/playground",
     "apps/docs"

@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Reconstruct Infra Family'
+  short_description: 'Author and verify one infrastructure Family'
+  default_prompt: 'Use $reconstruct-infra-family to reconstruct one infrastructure component as a clean TSX Family.'

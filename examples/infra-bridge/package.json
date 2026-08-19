@@ -1,0 +1,23 @@
+{
+  "name": "@brepjs/infra-bridge-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "typecheck": "tsgo --noEmit -p tsconfig.typecheck.json",
+    "lint": "eslint src tests",
+    "test": "vitest run",
+    "preview": "tsx src/preview.ts",
+    "export:ifc": "tsx src/exportIfc.ts",
+    "reference:compare": "npm -C ../../reference/infra-bridge run compare:model --"
+  },
+  "devDependencies": {
+    "brepjs": "*",
+    "brepjs-bim": "*",
+    "brepjs-families": "*",
+    "zod": "^4.4.3",
+    "typescript": "*",
+    "vitest": "^4.1.10"
+  }
+}

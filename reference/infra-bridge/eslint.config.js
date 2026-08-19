@@ -21,4 +21,13 @@ export default [
       },
     },
   },
+  {
+    files: ['scripts/**/*.ts'],
+    languageOptions: {
+      parserOptions: {
+        project: './tsconfig.compare.json',
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
 ];
