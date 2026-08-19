@@ -103,6 +103,9 @@ import {
   writeBridgePart,
   writeMemberEntity,
   writeMemberGeometry,
+  writeProductBodyTessellation,
+  writeSignEntity,
+  writeEarthworksFillEntity,
 } from '../ifc-writer/infrastructureWriter.js';
 import type { IfcTypeName } from '../ifc-writer/typeWriter.js';
 import { toIfcLengthM } from '../units/units.js';
@@ -116,6 +119,7 @@ import type { IfcGuid } from '../identity/ifcGuid.js';
 import { deriveIfcGuidSync } from '../identity/guidDerivation.js';
 import type { BimElement, WallOpeningSpec, SlabOpeningSpec } from '../types/bimTypes.js';
 import { isWallOpening, isSlabOpening } from '../types/bimTypes.js';
+import { productBodyMeshIsClosed } from '../types/productBody.js';
 import type { BimRelationship } from '../types/relationships.js';
 import { checkReferentialIntegrity } from '../validation/referentialIntegrity.js';
 import { checkSchema } from '../validation/schemaCheck.js';
@@ -143,6 +147,8 @@ export async function toIfc(
       [model.getBridges().length > 0, 'IfcBridge'],
       [model.getBridgeParts().length > 0, 'IfcBridgePart'],
       [model.getMembers().length > 0, 'IfcMember'],
+      [model.getSigns().length > 0, 'IfcSign'],
+      [model.getEarthworksFills().length > 0, 'IfcEarthworksFill'],
     ] as const
   ).find(([present, entity]) => present && !schemaSupports(schema, entity));
   if (unsupportedEntity !== undefined) {
@@ -185,6 +191,8 @@ export async function toIfc(
   const bridges = model.getBridges();
   const bridgeParts = model.getBridgeParts();
   const members = model.getMembers();
+  const signs = model.getSigns();
+  const earthworksFills = model.getEarthworksFills();
 
   const { ownerHistoryId, geomContextId, geomSubContextId, unitAssignmentId, lengthUnitId } =
     writeHeader(w, meta);
@@ -303,12 +311,16 @@ export async function toIfc(
     const containingId = findContainerOf(wall.localId, relationships);
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
-    const { localPlacementId, productDefinitionShapeId } = writeWallGeometry(
-      w,
-      wall.spec,
-      geomSubContextId,
-      storeyPlacementId
-    );
+    const { localPlacementId, productDefinitionShapeId } =
+      wall.productBody?.kind === 'TESSELLATED'
+        ? writeProductBodyTessellation(
+            w,
+            wall.spec,
+            wall.productBody,
+            geomSubContextId,
+            storeyPlacementId
+          )
+        : writeWallGeometry(w, wall.spec, geomSubContextId, storeyPlacementId);
     const wallExpressId = writeWallEntity(
       w,
       wall.guid,
@@ -338,12 +350,16 @@ export async function toIfc(
     const containingId = findContainerOf(slab.localId, relationships);
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
-    const { localPlacementId, productDefinitionShapeId } = writeSlabGeometry(
-      w,
-      slab.spec,
-      geomSubContextId,
-      storeyPlacementId
-    );
+    const { localPlacementId, productDefinitionShapeId } =
+      slab.productBody?.kind === 'TESSELLATED'
+        ? writeProductBodyTessellation(
+            w,
+            slab.spec,
+            slab.productBody,
+            geomSubContextId,
+            storeyPlacementId
+          )
+        : writeSlabGeometry(w, slab.spec, geomSubContextId, storeyPlacementId);
     const slabExpressId = writeSlabEntity(
       w,
       slab.guid,
@@ -374,12 +390,16 @@ export async function toIfc(
     const containingId = findContainerOf(beam.localId, relationships);
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
-    const { localPlacementId, productDefinitionShapeId } = writeBeamGeometry(
-      w,
-      beam.spec,
-      geomSubContextId,
-      storeyPlacementId
-    );
+    const { localPlacementId, productDefinitionShapeId } =
+      beam.productBody?.kind === 'TESSELLATED'
+        ? writeProductBodyTessellation(
+            w,
+            beam.spec,
+            beam.productBody,
+            geomSubContextId,
+            storeyPlacementId
+          )
+        : writeBeamGeometry(w, beam.spec, geomSubContextId, storeyPlacementId);
     const beamExpressId = writeBeamEntity(
       w,
       beam.guid,
@@ -406,6 +426,7 @@ export async function toIfc(
     const { localPlacementId, productDefinitionShapeId } = writeMemberGeometry(
       w,
       member.spec,
+      member.productBody ?? { kind: 'ANALYTIC' },
       geomSubContextId,
       parentPlacementId
     );
@@ -421,16 +442,66 @@ export async function toIfc(
     placementMap.set(member.localId, localPlacementId);
   }
 
+  for (const sign of signs) {
+    const containingId = findContainerOf(sign.localId, relationships);
+    const parentPlacementId =
+      containingId === null ? null : (placementMap.get(containingId) ?? null);
+    const { localPlacementId, productDefinitionShapeId } = writeMemberGeometry(
+      w,
+      sign.spec,
+      sign.productBody ?? { kind: 'ANALYTIC' },
+      geomSubContextId,
+      parentPlacementId
+    );
+    const expressId = writeSignEntity(
+      w,
+      sign.guid,
+      sign.spec,
+      ownerHistoryId,
+      localPlacementId,
+      productDefinitionShapeId
+    );
+    idMap.set(sign.localId, expressId);
+    placementMap.set(sign.localId, localPlacementId);
+  }
+
+  for (const fill of earthworksFills) {
+    const containingId = findContainerOf(fill.localId, relationships);
+    const parentPlacementId =
+      containingId === null ? null : (placementMap.get(containingId) ?? null);
+    const { localPlacementId, productDefinitionShapeId } = writeMemberGeometry(
+      w,
+      fill.spec,
+      fill.productBody ?? { kind: 'ANALYTIC' },
+      geomSubContextId,
+      parentPlacementId
+    );
+    const expressId = writeEarthworksFillEntity(
+      w,
+      fill.guid,
+      fill.spec,
+      ownerHistoryId,
+      localPlacementId,
+      productDefinitionShapeId
+    );
+    idMap.set(fill.localId, expressId);
+    placementMap.set(fill.localId, localPlacementId);
+  }
+
   for (const [i, column] of columns.entries()) {
     const containingId = findContainerOf(column.localId, relationships);
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
-    const { localPlacementId, productDefinitionShapeId } = writeColumnGeometry(
-      w,
-      column.spec,
-      geomSubContextId,
-      storeyPlacementId
-    );
+    const { localPlacementId, productDefinitionShapeId } =
+      column.productBody?.kind === 'TESSELLATED'
+        ? writeProductBodyTessellation(
+            w,
+            column.spec,
+            column.productBody,
+            geomSubContextId,
+            storeyPlacementId
+          )
+        : writeColumnGeometry(w, column.spec, geomSubContextId, storeyPlacementId);
     const columnExpressId = writeColumnEntity(
       w,
       column.guid,
@@ -566,12 +637,16 @@ export async function toIfc(
     const containingId = findContainerOf(footing.localId, relationships);
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
-    const { localPlacementId, productDefinitionShapeId } = writeFootingGeometry(
-      w,
-      footing.spec,
-      geomSubContextId,
-      storeyPlacementId
-    );
+    const { localPlacementId, productDefinitionShapeId } =
+      footing.productBody?.kind === 'TESSELLATED'
+        ? writeProductBodyTessellation(
+            w,
+            footing.spec,
+            footing.productBody,
+            geomSubContextId,
+            storeyPlacementId
+          )
+        : writeFootingGeometry(w, footing.spec, geomSubContextId, storeyPlacementId);
     const footingExpressId = writeFootingEntity(
       w,
       footing.guid,
@@ -700,8 +775,32 @@ export async function toIfc(
     const containingId = findContainerOf(railing.localId, relationships);
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
-    const { localPlacementId, productDefinitionShapeId, bodyItemId, usedFallback } =
-      writeRailingGeometry(w, railing.spec, railing.geometry, geomSubContextId, storeyPlacementId);
+    const representation =
+      railing.productBody?.kind === 'TESSELLATED'
+        ? {
+            ...writeProductBodyTessellation(
+              w,
+              railing.spec,
+              railing.productBody,
+              geomSubContextId,
+              storeyPlacementId
+            ),
+            bodyItemId: null,
+            usedFallback: false,
+          }
+        : railing.geometry === null
+          ? null
+          : writeRailingGeometry(
+              w,
+              railing.spec,
+              railing.geometry,
+              geomSubContextId,
+              storeyPlacementId
+            );
+    if (representation === null) {
+      return err(ifcError('MISSING_PRODUCT_BODY', `Railing ${i + 1} has no analytic geometry`));
+    }
+    const { localPlacementId, productDefinitionShapeId, bodyItemId, usedFallback } = representation;
     if (usedFallback) {
       console.warn(`Railing ${i + 1} tessellation failed; IFC body is a degenerate fallback.`);
     }
@@ -1201,18 +1300,11 @@ export async function toIfcValidated(
 function collectGeometryIssues(model: BimModel): ValidationReport {
   const issues: ValidationIssue[] = [];
   const groups: ReadonlyArray<readonly [string, ReadonlyArray<{ geometry: ValidSolid }>]> = [
-    ['Wall', model.getWalls()],
-    ['Slab', model.getSlabs()],
-    ['Beam', model.getBeams()],
-    ['Column', model.getColumns()],
     ['Proxy', model.getProxies()],
     ['Space', model.getSpaces()],
     ['Roof', model.getRoofs()],
-    ['Footing', model.getFootings()],
     ['Pile', model.getPiles()],
-    ['Railing', model.getRailings()],
     ['Covering', model.getCoverings()],
-    ['Member', model.getMembers()],
   ];
   for (const [label, elements] of groups) {
     elements.forEach((el, index) => {
@@ -1220,6 +1312,41 @@ function collectGeometryIssues(model: BimModel): ValidationReport {
       issues.push(...report.issues);
     });
   }
+
+  const projectedProducts = [
+    ...model.getWalls(),
+    ...model.getSlabs(),
+    ...model.getBeams(),
+    ...model.getColumns(),
+    ...model.getFootings(),
+    ...model.getRailings(),
+    ...model.getMembers(),
+    ...model.getSigns(),
+    ...model.getEarthworksFills(),
+  ];
+  projectedProducts.forEach((element, index) => {
+    const label = `${element.category} ${index + 1}`;
+    if (element.productBody?.kind === 'TESSELLATED') {
+      if (!productBodyMeshIsClosed(element.productBody.mesh)) {
+        issues.push(
+          issue(
+            'error',
+            'INVALID_PRODUCT_BODY',
+            'Tessellated Product Body is not a closed triangle shell',
+            label
+          )
+        );
+      }
+      return;
+    }
+    if (element.geometry === null) {
+      issues.push(
+        issue('error', 'MISSING_PRODUCT_BODY', 'Analytic Product Body has no solid', label)
+      );
+      return;
+    }
+    issues.push(...checkGeometryValidity(element.geometry, label).issues);
+  });
 
   // Ramp flights are emitted as simplified-but-valid inclined-slab solids; surface
   // this as an info-level note (does not block export). Stair flights are real

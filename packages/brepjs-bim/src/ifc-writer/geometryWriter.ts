@@ -59,7 +59,7 @@ export function writeWallGeometry(
     type: WebIFC.IFCRECTANGLEPROFILEDEF,
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
-    Position: w.ref(writeAxis2Placement2D(w)),
+    Position: w.ref(writeAxis2Placement2D(w, [thicknessM / 2, heightM / 2])),
     XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thicknessM),
     YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, heightM),
   });
@@ -299,12 +299,15 @@ export function writeRoofGeometry(
   return { localPlacementId, productDefinitionShapeId, usedFallback: false };
 }
 
-function writeAxis2Placement2D(w: IfcWriter): number {
+function writeAxis2Placement2D(w: IfcWriter, origin: readonly [number, number] = [0, 0]): number {
   const originId = w.nextId();
   w.writeLine({
     expressID: originId,
     type: WebIFC.IFCCARTESIANPOINT,
-    Coordinates: [w.mkType(WebIFC.IFCLENGTHMEASURE, 0), w.mkType(WebIFC.IFCLENGTHMEASURE, 0)],
+    Coordinates: [
+      w.mkType(WebIFC.IFCLENGTHMEASURE, origin[0]),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, origin[1]),
+    ],
   });
   const id = w.nextId();
   w.writeLine({

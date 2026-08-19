@@ -1,0 +1,279 @@
+{
+  "checksum": "241e6576a3a554086d3d2ae87415c5ba98a0123d329245810e7d42ecc504c183",
+  "mappings": [
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/filler-01",
+      "referenceGlobalId": "1ngF1j04v49eiBUKkKO16p"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/filler-02",
+      "referenceGlobalId": "1Ni63N3g9CwwsFbbNgF65B"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/arch-segment-01",
+      "referenceGlobalId": "0mUNenrM54pwFfq2oXhCct"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/arch-segment-02",
+      "referenceGlobalId": "3kuqbEQ55DwQX5rk3QQW6b"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/arch-segment-03",
+      "referenceGlobalId": "3dxS5_Bpz7vB8wbZiDy6FO"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/arch-segment-04",
+      "referenceGlobalId": "2YYLlceAvCKB$5luCgsyAd"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/name-sign-01",
+      "referenceGlobalId": "02Q1JJaeXCofF8bu9IDYbN"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/name-sign-02",
+      "referenceGlobalId": "38UHNG19HAuOHKeHr7iIlo"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/spandrel-wall-01",
+      "referenceGlobalId": "064CKbgdv2$uFEsgE5j3ba"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure/spandrel-wall-02",
+      "referenceGlobalId": "3LTGJZ50P17x4My$lMjBSo"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/substructure/pier-01/footing",
+      "referenceGlobalId": "3N1IPEdwr8ovT_ZOobkqBX"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/substructure/pier-01/pier-stem",
+      "referenceGlobalId": "1Ov2FEORP589f6FJ7Vsjbf"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/substructure/pier-02/footing",
+      "referenceGlobalId": "3QqyCHEVDF$gkEh307F1yY"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/substructure/pier-02/pier-stem",
+      "referenceGlobalId": "13HNHx2iHDah6c_2Ir0QFv"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/filler-01",
+      "referenceGlobalId": "2ZYxBDA4bC$vk_U2Y8GUqS"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/filler-02",
+      "referenceGlobalId": "2vnqnmqXH4Q9vBMUebOywv"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/arch-segment-01",
+      "referenceGlobalId": "0LwIg3tPb1axicmL$uibFc"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/arch-segment-02",
+      "referenceGlobalId": "1hByR6f1zEWg0gFVCzqiAV"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/arch-segment-03",
+      "referenceGlobalId": "14s9MtA2T3DOZ3vc6xj1mL"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/arch-segment-04",
+      "referenceGlobalId": "3Py7bxE7n5JOxOxHlYh2N3"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/name-sign-01",
+      "referenceGlobalId": "0GcdwGAXbEP8fxME368hA4"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/name-sign-02",
+      "referenceGlobalId": "0gB41TAsXCeg1sVvBm2u9j"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/spandrel-wall-01",
+      "referenceGlobalId": "2tKslGZJz0Nu12g9XAhM2h"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure/spandrel-wall-02",
+      "referenceGlobalId": "06ymNwhgjC9vHrcokNIGHx"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/substructure/pier-01/footing",
+      "referenceGlobalId": "2Q4p8yWJzFIvhoX9T$V40D"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/substructure/pier-01/pier-stem",
+      "referenceGlobalId": "0IBSrNevj23wueInn68pOs"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/substructure/pier-02/footing",
+      "referenceGlobalId": "1TNwPNu5vAJ8rWCr2_eafm"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/substructure/pier-02/pier-stem",
+      "referenceGlobalId": "0XPURiAkzB3g2LT4CHIL$P"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-01/cross-girder",
+      "referenceGlobalId": "0sH1yiI49B6w$h$tWL2i3T"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-01/footing",
+      "referenceGlobalId": "0NMvtFx717oPAWTAMXwXAy"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-01/pier-stem",
+      "referenceGlobalId": "1BTWAuNPH8_BiqEs5C5kK5"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-02/cross-girder",
+      "referenceGlobalId": "1glXn_b3PFhflp9CKhrvzD"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-02/footing",
+      "referenceGlobalId": "3kDaIrka18GwgJ2ayJZMBO"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-02/pier-stem",
+      "referenceGlobalId": "3ul67tVf5Dl82Y_LatCAFo"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-03/cross-girder",
+      "referenceGlobalId": "3hqwHdFaf66Oki_1cxKAnF"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-03/footing",
+      "referenceGlobalId": "1iUk9ABeL9eBJ7Sv9b$q0d"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-03/pier-stem",
+      "referenceGlobalId": "0Gl168Rv1ErxU_Zx$i1I5m"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/superstructure/main-girder-01",
+      "referenceGlobalId": "2kSK2Jw$z3JQs2YiiWmHXV"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/superstructure/main-girder-02",
+      "referenceGlobalId": "0fDVrF0456nhTwgIrF5CPd"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/superstructure/main-girder-03",
+      "referenceGlobalId": "1dmYPmycr2LPQju29cHK45"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/deck/bridge-deck",
+      "referenceGlobalId": "3ObOfBTNz2dhgWxUzdmDpl"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/deck/railing-01",
+      "referenceGlobalId": "1lX0aCXHj46eYgtlXl_65e"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/deck/railing-02",
+      "referenceGlobalId": "1PXj3pcJX7RgxexBEm0se9"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/approach-01/approach-slab",
+      "referenceGlobalId": "01itnAmhP3LAz9aL2vu3YJ"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/approach-01/abutment/abutment-support-beam",
+      "referenceGlobalId": "1Rd3zGyxjCSBQhmMuxTFJ7"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/approach-02/approach-slab",
+      "referenceGlobalId": "0W_tPyzHXFtwl0O2DZZAe3"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/approach-02/abutment/abutment-support-beam",
+      "referenceGlobalId": "322tROdCvE68UcU2Qe02GA"
+    }
+  ],
+  "spatialMappings": [
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01",
+      "referenceGlobalId": "2kjWGt90HF_gBQxs$Lsfkw"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/superstructure",
+      "referenceGlobalId": "0NGju11I55eP2T$y1Bu15n"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/substructure",
+      "referenceGlobalId": "1NcWEJCZP2QhD3Z7Ptly6p"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/substructure/pier-01",
+      "referenceGlobalId": "2hJMDFMXH0q8k_DMRtOb0x"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-01/rail-bridge-01/substructure/pier-02",
+      "referenceGlobalId": "2qHgQrSEbBmAN2Nh3C6_X0"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02",
+      "referenceGlobalId": "3JNhAW3zLAmRKwMCykb3V5"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/superstructure",
+      "referenceGlobalId": "1hMPjN1XP3D8IpowtvIj0R"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/substructure",
+      "referenceGlobalId": "16qYo484fEuvo5B_xQN5wZ"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/substructure/pier-01",
+      "referenceGlobalId": "0ZqHhx84T54vsUjUWpHX1r"
+    },
+    {
+      "semanticKey": "infra-bridge/rail-site-02/rail-bridge-02/substructure/pier-02",
+      "referenceGlobalId": "3UNm72MkH81wf0YgrOuk7D"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge",
+      "referenceGlobalId": "3vzNAxKB5AJA_Ehx4miINx"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure",
+      "referenceGlobalId": "1KPYb5dSn3C9_LNpDoIOdf"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-01",
+      "referenceGlobalId": "0vFQAzqYzD2P8vJwFIDXrV"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-02",
+      "referenceGlobalId": "0qDQIJzHH719PVQZWdQqW2"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/substructure/pier-03",
+      "referenceGlobalId": "0kTVfaOTj2pAN_WvUgOEdD"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/superstructure",
+      "referenceGlobalId": "2F86AY9Dn33gptJs5BIFJi"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/deck",
+      "referenceGlobalId": "2r51NsY5P0QvEz_Kok7DQt"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/approach-01",
+      "referenceGlobalId": "2LBqtx8tXFcR8Qzu5tSZdh"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/approach-01/abutment",
+      "referenceGlobalId": "2cU43jXGXEuv4mx7hSZu3S"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/approach-02",
+      "referenceGlobalId": "04kO$szQnDTAhzkZMdfItT"
+    },
+    {
+      "semanticKey": "infra-bridge/road-site/road-river-bridge/approach-02/abutment",
+      "referenceGlobalId": "2x$zQFzGD8YBtZ$7H7nm4c"
+    }
+  ]
+}

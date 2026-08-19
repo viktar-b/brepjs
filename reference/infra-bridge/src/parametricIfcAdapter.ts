@@ -124,6 +124,7 @@ export const parametricRepresentationDecoder: RepresentationDecoder = {
         { name: 'extrusion-depth', value: depthMm, unit: 'millimetre' },
       ],
       analyticEvidence: analyticEvidence(
+        vertices,
         baseNormal,
         endNormal,
         sideNormals,
@@ -135,30 +136,67 @@ export const parametricRepresentationDecoder: RepresentationDecoder = {
 };
 
 function analyticEvidence(
+  vertices: readonly ObservationVector[],
   baseNormal: ObservationVector,
   endNormal: ObservationVector,
   sideNormals: readonly ObservationVector[],
   edgeDirections: readonly ObservationVector[],
   extrusionDirection: ObservationVector
 ): AnalyticEvidence {
+  const edgeVertices = [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 0],
+    [4, 5],
+    [5, 6],
+    [6, 7],
+    [7, 4],
+    [0, 4],
+    [1, 5],
+    [2, 6],
+    [3, 7],
+  ] as const;
+  const curveDirections = [
+    ...edgeDirections,
+    ...edgeDirections,
+    extrusionDirection,
+    extrusionDirection,
+    extrusionDirection,
+    extrusionDirection,
+  ];
   return {
-    surfaces: [baseNormal, endNormal, ...sideNormals].map((normal) => ({
+    surfaces: [baseNormal, endNormal, ...sideNormals].map((normal, index) => ({
       kind: 'plane',
+      point: vertices[index === 0 ? 0 : index === 1 ? 4 : index - 2] ?? [0, 0, 0],
       normal,
     })),
-    curves: [
-      ...edgeDirections,
-      ...edgeDirections,
-      extrusionDirection,
-      extrusionDirection,
-      extrusionDirection,
-      extrusionDirection,
-    ].map((direction) => ({ kind: 'line', direction })),
+    curves: edgeVertices.map(([startIndex, endIndex], index) => {
+      const start = vertices[startIndex] ?? [0, 0, 0];
+      const end = vertices[endIndex] ?? [0, 0, 0];
+      return {
+        kind: 'line',
+        point: start,
+        direction: curveDirections[index] ?? [0, 0, 0],
+        start,
+        end,
+      };
+    }),
     topology: {
       vertexCount: 8,
       edgeCount: 12,
       faceCount: 6,
       closed: true,
+      vertices,
+      edges: edgeVertices.map((edge) => ({ vertices: edge })),
+      faces: [
+        { vertices: [0, 1, 2, 3], edges: [0, 1, 2, 3] },
+        { vertices: [4, 5, 6, 7], edges: [4, 5, 6, 7] },
+        { vertices: [0, 1, 5, 4], edges: [0, 9, 4, 8] },
+        { vertices: [1, 2, 6, 5], edges: [1, 10, 5, 9] },
+        { vertices: [2, 3, 7, 6], edges: [2, 11, 6, 10] },
+        { vertices: [3, 0, 4, 7], edges: [3, 8, 7, 11] },
+      ],
     },
   };
 }

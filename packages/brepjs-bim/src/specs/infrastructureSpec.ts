@@ -57,6 +57,19 @@ export type MemberPredefinedType =
   | 'USERDEFINED'
   | 'NOTDEFINED';
 
+export type SignPredefinedType = 'MARKER' | 'MIRROR' | 'PICTORIAL' | 'USERDEFINED' | 'NOTDEFINED';
+
+export type EarthworksFillPredefinedType =
+  | 'BACKFILL'
+  | 'COUNTERWEIGHT'
+  | 'EMBANKMENT'
+  | 'SLOPEFILL'
+  | 'SUBGRADE'
+  | 'SUBGRADEBED'
+  | 'TRANSITIONSECTION'
+  | 'USERDEFINED'
+  | 'NOTDEFINED';
+
 export interface RigidPlacementSpec {
   readonly origin: [number, number, number];
   readonly axisX: [number, number, number];
@@ -76,13 +89,24 @@ export interface BridgePartSpec extends RigidPlacementSpec {
   readonly predefinedType?: BridgePartPredefinedType | undefined;
 }
 
-/** A prismatic civil member: its centred profile is extruded along local +X. */
-export interface MemberSpec extends RigidPlacementSpec {
+/** Shared analytic prism contract: the centred profile is extruded along local +X. */
+export interface PrismaticInfrastructureSpec extends RigidPlacementSpec {
   readonly name: string;
   readonly length: number;
   readonly profile: Profile;
-  readonly predefinedType?: MemberPredefinedType | undefined;
   readonly materialName: string;
+}
+
+export interface MemberSpec extends PrismaticInfrastructureSpec {
+  readonly predefinedType?: MemberPredefinedType | undefined;
+}
+
+export interface SignSpec extends PrismaticInfrastructureSpec {
+  readonly predefinedType?: SignPredefinedType | undefined;
+}
+
+export interface EarthworksFillSpec extends PrismaticInfrastructureSpec {
+  readonly predefinedType?: EarthworksFillPredefinedType | undefined;
 }
 
 const unitVector = z
@@ -204,6 +228,42 @@ const MemberSpecSchema = orthogonal(
   }) as z.ZodType<MemberSpec>
 );
 
+const SignSpecSchema = orthogonal(
+  z.object({
+    name: z.string().min(1),
+    length: z.number().positive(),
+    profile: ProfileSchema,
+    ...placementFields,
+    predefinedType: z
+      .enum(['MARKER', 'MIRROR', 'PICTORIAL', 'USERDEFINED', 'NOTDEFINED'])
+      .optional(),
+    materialName: z.string().min(1),
+  }) as z.ZodType<SignSpec>
+);
+
+const EarthworksFillSpecSchema = orthogonal(
+  z.object({
+    name: z.string().min(1),
+    length: z.number().positive(),
+    profile: ProfileSchema,
+    ...placementFields,
+    predefinedType: z
+      .enum([
+        'BACKFILL',
+        'COUNTERWEIGHT',
+        'EMBANKMENT',
+        'SLOPEFILL',
+        'SUBGRADE',
+        'SUBGRADEBED',
+        'TRANSITIONSECTION',
+        'USERDEFINED',
+        'NOTDEFINED',
+      ])
+      .optional(),
+    materialName: z.string().min(1),
+  }) as z.ZodType<EarthworksFillSpec>
+);
+
 function parseWithSchema<T>(
   input: unknown,
   schema: z.ZodType<T>,
@@ -225,6 +285,20 @@ export function parseBridgePartSpec(input: unknown): Result<BridgePartSpec, BimE
 
 export function parseMemberSpec(input: unknown): Result<MemberSpec, BimError> {
   const result = parseWithSchema(input, MemberSpecSchema, 'INVALID_MEMBER_SPEC');
+  if (!result.ok) return result;
+  const profile = parseProfile(result.value.profile);
+  return profile.ok ? result : err(profile.error);
+}
+
+export function parseSignSpec(input: unknown): Result<SignSpec, BimError> {
+  const result = parseWithSchema(input, SignSpecSchema, 'INVALID_SIGN_SPEC');
+  if (!result.ok) return result;
+  const profile = parseProfile(result.value.profile);
+  return profile.ok ? result : err(profile.error);
+}
+
+export function parseEarthworksFillSpec(input: unknown): Result<EarthworksFillSpec, BimError> {
+  const result = parseWithSchema(input, EarthworksFillSpecSchema, 'INVALID_EARTHWORKS_FILL_SPEC');
   if (!result.ok) return result;
   const profile = parseProfile(result.value.profile);
   return profile.ok ? result : err(profile.error);

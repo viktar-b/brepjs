@@ -101,7 +101,7 @@ examples/infra-bridge/
 reference/infra-bridge/
 ├── package.json
 ├── README.md
-├── reference-manifest.json
+├── referenceManifest.json
 ├── src/
 │   ├── loadReference.ts
 │   ├── reconstructionTarget.ts

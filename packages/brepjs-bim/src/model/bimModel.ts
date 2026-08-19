@@ -49,7 +49,13 @@ import type { ElementAssemblySpec } from '../specs/assemblySpec.js';
 import type { ZoneSpec, SystemSpec } from '../specs/groupSpec.js';
 import type { SurfaceStyleSpec } from '../ifc-writer/styleWriter.js';
 import type { ProjectSpec, SiteSpec, BuildingSpec, StoreySpec } from '../specs/spatialSpec.js';
-import type { BridgeSpec, BridgePartSpec, MemberSpec } from '../specs/infrastructureSpec.js';
+import type {
+  BridgeSpec,
+  BridgePartSpec,
+  MemberSpec,
+  SignSpec,
+  EarthworksFillSpec,
+} from '../specs/infrastructureSpec.js';
 import { wallToSolid } from '../elementFns/wallFns.js';
 import { slabToSolid } from '../elementFns/slabFns.js';
 import { beamToSolid } from '../elementFns/beamFns.js';
@@ -63,11 +69,16 @@ import { footingToSolid, pileToSolid } from '../elementFns/foundationFns.js';
 import { railingToSolid } from '../elementFns/railingFns.js';
 import { coveringToSolid } from '../elementFns/coveringFns.js';
 import { memberToSolid } from '../elementFns/memberFns.js';
+import { productBodyMeshIsClosed, type ProductBody } from '../types/productBody.js';
 
 /** Optional identity override for created elements: a stable key (e.g. a
  *  families key path) that replaces the positional GlobalId derivation. */
 export interface ElementIdentityOptions {
   readonly stableKey?: string | undefined;
+}
+
+export interface ProductCreationOptions extends ElementIdentityOptions {
+  readonly productBody?: ProductBody | undefined;
 }
 
 /** Identity options for adders that create TWO elements: `stableKey` names
@@ -118,9 +129,11 @@ export class BimModel {
         el.category === 'PILE' ||
         el.category === 'RAILING' ||
         el.category === 'COVERING' ||
-        el.category === 'MEMBER'
+        el.category === 'MEMBER' ||
+        el.category === 'SIGN' ||
+        el.category === 'EARTHWORKS_FILL'
       ) {
-        el.geometry[Symbol.dispose]();
+        el.geometry?.[Symbol.dispose]();
       } else if (el.category === 'CURTAIN_WALL') {
         // Curtain wall geometry is a grid of component solids (panels + mullions).
         for (const panel of el.geometry.panels) panel.solid[Symbol.dispose]();
@@ -159,14 +172,63 @@ export class BimModel {
     return ok(this.#makeElement('BRIDGE_PART', spec, null, options?.stableKey));
   }
 
-  addMember(spec: MemberSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+  addMember(spec: MemberSpec, options?: ProductCreationOptions): Result<LocalId, BimError> {
     const keyCheck = this.#checkStableKey(options);
     if (!keyCheck.ok) return keyCheck;
-    const geometry = memberToSolid(spec);
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geometry = this.#productGeometry(productBody, () => memberToSolid(spec));
     if (!geometry.ok) return geometry;
-    const id = this.#makeElement('MEMBER', spec, geometry.value, options?.stableKey);
+    const id = this.#makeElement('MEMBER', spec, geometry.value, options?.stableKey, productBody);
     this.#associateMaterial(id, spec);
     return ok(id);
+  }
+
+  addSign(spec: SignSpec, options?: ProductCreationOptions): Result<LocalId, BimError> {
+    const keyCheck = this.#checkStableKey(options);
+    if (!keyCheck.ok) return keyCheck;
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geometry = this.#productGeometry(productBody, () => memberToSolid(spec));
+    if (!geometry.ok) return geometry;
+    const id = this.#makeElement('SIGN', spec, geometry.value, options?.stableKey, productBody);
+    this.#associateMaterial(id, spec);
+    return ok(id);
+  }
+
+  addEarthworksFill(
+    spec: EarthworksFillSpec,
+    options?: ProductCreationOptions
+  ): Result<LocalId, BimError> {
+    const keyCheck = this.#checkStableKey(options);
+    if (!keyCheck.ok) return keyCheck;
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geometry = this.#productGeometry(productBody, () => memberToSolid(spec));
+    if (!geometry.ok) return geometry;
+    const id = this.#makeElement(
+      'EARTHWORKS_FILL',
+      spec,
+      geometry.value,
+      options?.stableKey,
+      productBody
+    );
+    this.#associateMaterial(id, spec);
+    return ok(id);
+  }
+
+  #productGeometry(
+    productBody: ProductBody,
+    buildAnalytic: () => Result<ValidSolid, BimError>
+  ): Result<ValidSolid | null, BimError> {
+    if (productBody.kind === 'TESSELLATED') {
+      return productBodyMeshIsClosed(productBody.mesh)
+        ? ok(null)
+        : err(
+            specError(
+              'INVALID_PRODUCT_BODY',
+              'BimModel: tessellated Product Body must be a closed triangle shell'
+            )
+          );
+    }
+    return buildAnalytic();
   }
 
   /** Reject a duplicate stableKey BEFORE any geometry is built, so the
@@ -195,45 +257,49 @@ export class BimModel {
     return ok(undefined);
   }
 
-  addWall(spec: WallSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+  addWall(spec: WallSpec, options?: ProductCreationOptions): Result<LocalId, BimError> {
     const keyCheck = this.#checkStableKey(options);
     if (!keyCheck.ok) return keyCheck;
-    const geomResult = wallToSolid(spec);
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geomResult = this.#productGeometry(productBody, () => wallToSolid(spec));
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement('WALL', spec, geomResult.value, options?.stableKey);
+    const id = this.#makeElement('WALL', spec, geomResult.value, options?.stableKey, productBody);
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
   }
 
-  addSlab(spec: SlabSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+  addSlab(spec: SlabSpec, options?: ProductCreationOptions): Result<LocalId, BimError> {
     const keyCheck = this.#checkStableKey(options);
     if (!keyCheck.ok) return keyCheck;
-    const geomResult = slabToSolid(spec);
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geomResult = this.#productGeometry(productBody, () => slabToSolid(spec));
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement('SLAB', spec, geomResult.value, options?.stableKey);
+    const id = this.#makeElement('SLAB', spec, geomResult.value, options?.stableKey, productBody);
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
   }
 
-  addBeam(spec: BeamSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+  addBeam(spec: BeamSpec, options?: ProductCreationOptions): Result<LocalId, BimError> {
     const keyCheck = this.#checkStableKey(options);
     if (!keyCheck.ok) return keyCheck;
-    const geomResult = beamToSolid(spec);
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geomResult = this.#productGeometry(productBody, () => beamToSolid(spec));
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement('BEAM', spec, geomResult.value, options?.stableKey);
+    const id = this.#makeElement('BEAM', spec, geomResult.value, options?.stableKey, productBody);
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
   }
 
-  addColumn(spec: ColumnSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+  addColumn(spec: ColumnSpec, options?: ProductCreationOptions): Result<LocalId, BimError> {
     const keyCheck = this.#checkStableKey(options);
     if (!keyCheck.ok) return keyCheck;
-    const geomResult = columnToSolid(spec);
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geomResult = this.#productGeometry(productBody, () => columnToSolid(spec));
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement('COLUMN', spec, geomResult.value, options?.stableKey);
+    const id = this.#makeElement('COLUMN', spec, geomResult.value, options?.stableKey, productBody);
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
@@ -275,12 +341,19 @@ export class BimModel {
     return ok(id);
   }
 
-  addFooting(spec: FootingSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+  addFooting(spec: FootingSpec, options?: ProductCreationOptions): Result<LocalId, BimError> {
     const keyCheck = this.#checkStableKey(options);
     if (!keyCheck.ok) return keyCheck;
-    const geomResult = footingToSolid(spec);
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geomResult = this.#productGeometry(productBody, () => footingToSolid(spec));
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement('FOOTING', spec, geomResult.value, options?.stableKey);
+    const id = this.#makeElement(
+      'FOOTING',
+      spec,
+      geomResult.value,
+      options?.stableKey,
+      productBody
+    );
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
@@ -324,12 +397,19 @@ export class BimModel {
     return ok(id);
   }
 
-  addRailing(spec: RailingSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+  addRailing(spec: RailingSpec, options?: ProductCreationOptions): Result<LocalId, BimError> {
     const keyCheck = this.#checkStableKey(options);
     if (!keyCheck.ok) return keyCheck;
-    const geomResult = railingToSolid(spec);
+    const productBody = options?.productBody ?? { kind: 'ANALYTIC' };
+    const geomResult = this.#productGeometry(productBody, () => railingToSolid(spec));
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement('RAILING', spec, geomResult.value, options?.stableKey);
+    const id = this.#makeElement(
+      'RAILING',
+      spec,
+      geomResult.value,
+      options?.stableKey,
+      productBody
+    );
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
@@ -775,6 +855,14 @@ export class BimModel {
     wall: BimElement<'WALL'>,
     openingSpec: WallOpeningSpec
   ): Result<ValidSolid, BimError> {
+    if (wall.geometry === null) {
+      return err(
+        specError(
+          'INVALID_PRODUCT_BODY_OPERATION',
+          'Cannot cut an opening in tessellated wall geometry'
+        )
+      );
+    }
     const toolResult = openingToSolid(openingSpec, wall.spec.thickness);
     if (!toolResult.ok) return err(toolResult.error);
     using tool = toolResult.value;
@@ -791,13 +879,21 @@ export class BimModel {
     const oldGeometry = wall.geometry;
     const replaced: BimElement<'WALL'> = { ...wall, geometry: newGeometry };
     this.#elements.set(wall.localId, replaced);
-    oldGeometry[Symbol.dispose]();
+    oldGeometry?.[Symbol.dispose]();
   }
 
   #cutSlabGeometry(
     slab: BimElement<'SLAB'>,
     openingSpec: SlabOpeningSpec
   ): Result<ValidSolid, BimError> {
+    if (slab.geometry === null) {
+      return err(
+        specError(
+          'INVALID_PRODUCT_BODY_OPERATION',
+          'Cannot cut an opening in tessellated slab geometry'
+        )
+      );
+    }
     const toolResult = slabOpeningToSolid(openingSpec, slab.spec.thickness);
     if (!toolResult.ok) return err(toolResult.error);
     using tool = toolResult.value;
@@ -814,7 +910,7 @@ export class BimModel {
     const oldGeometry = slab.geometry;
     const replaced: BimElement<'SLAB'> = { ...slab, geometry: newGeometry };
     this.#elements.set(slab.localId, replaced);
-    oldGeometry[Symbol.dispose]();
+    oldGeometry?.[Symbol.dispose]();
   }
 
   getDoors(): BimElement<'DOOR'>[] {
@@ -1008,6 +1104,18 @@ export class BimModel {
     );
   }
 
+  getSigns(): BimElement<'SIGN'>[] {
+    return this.getAllElements().filter(
+      (element): element is BimElement<'SIGN'> => element.category === 'SIGN'
+    );
+  }
+
+  getEarthworksFills(): BimElement<'EARTHWORKS_FILL'>[] {
+    return this.getAllElements().filter(
+      (element): element is BimElement<'EARTHWORKS_FILL'> => element.category === 'EARTHWORKS_FILL'
+    );
+  }
+
   getProxies(): BimElement<'PROXY'>[] {
     const proxies: BimElement<'PROXY'>[] = [];
     for (const el of this.#elements.values()) {
@@ -1124,7 +1232,8 @@ export class BimModel {
     category: C,
     spec: Extract<AnyBimElement, { category: C }>['spec'],
     geometry: Extract<AnyBimElement, { category: C }>['geometry'],
-    stableKey?: string
+    stableKey?: string,
+    productBody?: ProductBody
   ): LocalId {
     const localId = this.#counter.next();
     // Deterministic GUID. Default key: (category, localId), so re-serializing
@@ -1143,7 +1252,14 @@ export class BimModel {
         ? `elem:${this.#modelScope}:${stableKey}`
         : makeElementKey(this.#modelScope, category, localId)
     );
-    const el = { guid, localId, category, spec, geometry } as AnyBimElement;
+    const el = {
+      guid,
+      localId,
+      category,
+      spec,
+      geometry,
+      ...(productBody === undefined ? {} : { productBody }),
+    } as AnyBimElement;
     this.#elements.set(localId, el);
     return localId;
   }

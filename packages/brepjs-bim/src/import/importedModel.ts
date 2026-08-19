@@ -71,6 +71,8 @@ export type ImportedElementCategory =
   | 'COVERING'
   | 'ELEMENT_ASSEMBLY'
   | 'MEMBER'
+  | 'SIGN'
+  | 'EARTHWORKS_FILL'
   | 'PROXY';
 
 export interface ImportedElement {

@@ -92,29 +92,72 @@ export const tessellatedRepresentationDecoder: RepresentationDecoder = {
       triangles.push(triangle);
     }
 
-    if (booleanValue(faceSet['Closed']) !== true) {
+    const welded = weldSurface(selectedPoints, triangles);
+    if (welded === null) {
+      return failure('INVALID_TOPOLOGY', 'The face set contains degenerate welded triangles', {
+        semanticKey,
+      });
+    }
+
+    const declaredClosed = booleanValue(faceSet['Closed']);
+    const topologyClosed = hasClosedTriangleTopology(welded.triangles);
+    if (declaredClosed !== true && (declaredClosed === false || !topologyClosed)) {
       return failure('OPEN_TOPOLOGY', 'The selected triangulated face set is not closed', {
         semanticKey,
       });
     }
-    if (!hasClosedTriangleTopology(triangles)) {
+    if (declaredClosed === true && !topologyClosed) {
       return failure(
         'INVALID_TOPOLOGY',
         'The closed face set is not a two-manifold triangle shell',
         { semanticKey }
       );
     }
-
     return success({
       comparisonSurface: {
         unit: 'millimetre',
-        vertices: selectedPoints,
-        triangles,
+        vertices: welded.vertices,
+        triangles: welded.triangles,
         closed: true,
       },
     });
   },
 };
+
+function weldSurface(
+  vertices: readonly ObservationVector[],
+  triangles: readonly Triangle[]
+): {
+  readonly vertices: readonly ObservationVector[];
+  readonly triangles: readonly Triangle[];
+} | null {
+  const weldedVertices: ObservationVector[] = [];
+  const indexByPoint = new Map<string, number>();
+  const sourceToWelded = new Map<number, number>();
+  for (let sourceIndex = 0; sourceIndex < vertices.length; sourceIndex++) {
+    const point = vertices[sourceIndex];
+    if (point === undefined) return null;
+    const key = point.map((value) => Math.round(value * 1e7)).join(':');
+    let weldedIndex = indexByPoint.get(key);
+    if (weldedIndex === undefined) {
+      weldedIndex = weldedVertices.length;
+      weldedVertices.push(point);
+      indexByPoint.set(key, weldedIndex);
+    }
+    sourceToWelded.set(sourceIndex, weldedIndex);
+  }
+  const weldedTriangles: Triangle[] = [];
+  for (const [sourceA, sourceB, sourceC] of triangles) {
+    const a = sourceToWelded.get(sourceA);
+    const b = sourceToWelded.get(sourceB);
+    const c = sourceToWelded.get(sourceC);
+    if (a === undefined || b === undefined || c === undefined || new Set([a, b, c]).size !== 3) {
+      return null;
+    }
+    weldedTriangles.push([a, b, c]);
+  }
+  return { vertices: weldedVertices, triangles: weldedTriangles };
+}
 
 function hasClosedTriangleTopology(triangles: readonly Triangle[]): boolean {
   if (triangles.length < 4) return false;

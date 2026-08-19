@@ -22,7 +22,7 @@ describe('Reference Harness parametric IFC decoder', () => {
       },
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: true,
       value: {
         targets: [

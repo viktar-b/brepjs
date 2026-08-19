@@ -1,5 +1,5 @@
 import { err, ok, type Result } from 'brepjs';
-import type { ResolvedElement } from 'brepjs-families';
+import type { EvaluatedModel, ResolvedElement } from 'brepjs-families';
 import type { BimError } from './errors/bimError.js';
 import { specError } from './errors/bimError.js';
 import type { LocalId } from './identity/localId.js';
@@ -10,6 +10,8 @@ export interface FamiliesToBimOptions {
   readonly project: ProjectSpec;
   readonly siteName?: string | undefined;
   readonly buildingName?: string | undefined;
+  /** Evaluated authored geometry used only when no supported analytic Product Body exists. */
+  readonly evaluatedModel?: EvaluatedModel | undefined;
 }
 
 export interface FamiliesBimResult {

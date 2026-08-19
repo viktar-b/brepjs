@@ -8,6 +8,7 @@ import {
   model,
   normalizeChildren,
   resolve,
+  evaluateModel,
   type ElementChild,
 } from 'brepjs-families';
 import {
@@ -36,6 +37,22 @@ interface MemberProps {
   readonly width: number;
   readonly height: number;
   readonly material: string;
+}
+
+interface BoxProductProps extends MemberProps {
+  readonly role: string;
+}
+
+interface ReusedCivilProductProps extends BoxProductProps {
+  readonly kind: 'beam' | 'column' | 'slab' | 'wall' | 'footing' | 'railing';
+}
+
+type RectangularPrismDatum = 'profile-centered-yz' | 'profile-centered-xy' | 'corner-xyz';
+
+function rectangularPrismDatum(kind: ReusedCivilProductProps['kind']): RectangularPrismDatum {
+  if (kind === 'beam') return 'profile-centered-yz';
+  if (kind === 'column') return 'profile-centered-xy';
+  return 'corner-xyz';
 }
 
 // The definition display names are deliberately unrelated to their engineering
@@ -87,7 +104,14 @@ const LinearBody = family<MemberProps>(
       kind: 'member',
       role: 'longitudinal',
       material,
-      properties: { name, length, width, height },
+      properties: {
+        name,
+        length,
+        width,
+        height,
+        geometryForm: 'rectangular-prism',
+        geometryDatum: 'profile-centered-yz',
+      },
     }),
   }
 );
@@ -102,7 +126,124 @@ const MateriallessBody = family<Omit<MemberProps, 'material'>>(
     semantics: ({ name, length, width, height }) => ({
       kind: 'member',
       role: 'longitudinal',
-      properties: { name, length, width, height },
+      properties: { name, length, width, height, geometryForm: 'rectangular-prism' },
+    }),
+  }
+);
+
+const DatumlessBody = family<MemberProps>(
+  'DatumlessBody',
+  ({ length, width, height }) =>
+    el('Geometry', {
+      node: csg.translate(csg.box(length, width, height), [0, -width / 2, -height / 2]),
+    }),
+  {
+    semantics: ({ name, length, width, height, material }) => ({
+      kind: 'member',
+      role: 'longitudinal',
+      material,
+      properties: { name, length, width, height, geometryForm: 'rectangular-prism' },
+    }),
+  }
+);
+
+const SignBody = family<BoxProductProps>(
+  'SignBody',
+  ({ length, width, height }) =>
+    el('Geometry', {
+      node: csg.translate(csg.box(length, width, height), [0, -width / 2, -height / 2]),
+    }),
+  {
+    semantics: ({ name, length, width, height, material, role }) => ({
+      kind: 'sign',
+      role,
+      material,
+      properties: {
+        name,
+        length,
+        width,
+        height,
+        geometryForm: 'rectangular-prism',
+        geometryDatum: 'profile-centered-yz',
+      },
+    }),
+  }
+);
+
+const EarthworksBody = family<BoxProductProps>(
+  'EarthworksBody',
+  ({ length, width, height }) =>
+    el('Geometry', {
+      node: csg.translate(csg.box(length, width, height), [0, -width / 2, -height / 2]),
+    }),
+  {
+    semantics: ({ name, length, width, height, material, role }) => ({
+      kind: 'earthworks-fill',
+      role,
+      material,
+      properties: {
+        name,
+        length,
+        width,
+        height,
+        geometryForm: 'rectangular-prism',
+        geometryDatum: 'profile-centered-yz',
+      },
+    }),
+  }
+);
+
+const ReusedCivilBody = family<ReusedCivilProductProps>(
+  'ReusedCivilBody',
+  ({ kind, length, width, height }) =>
+    el('Geometry', {
+      node:
+        kind === 'beam'
+          ? csg.translate(csg.box(length, width, height), [0, -width / 2, -height / 2])
+          : kind === 'column'
+            ? csg.translate(csg.box(length, width, height), [-length / 2, -width / 2, 0])
+            : csg.box(length, width, height),
+    }),
+  {
+    semantics: ({ kind, role, name, length, width, height, material }) => ({
+      kind,
+      role,
+      material,
+      properties: {
+        name,
+        length,
+        width,
+        height,
+        geometryForm: 'rectangular-prism',
+        geometryDatum: rectangularPrismDatum(kind),
+      },
+    }),
+  }
+);
+
+const EvaluatedMemberBody = family<{ readonly name: string; readonly material: string }>(
+  'EvaluatedMemberBody',
+  () => el('Geometry', { node: csg.fuse(csg.box(800, 120, 160), csg.box(160, 500, 160)) }),
+  {
+    semantics: ({ name, material }) => ({
+      kind: 'member',
+      role: 'brace',
+      material,
+      // Envelope dimensions alone do not license a rectangular analytic substitute.
+      properties: { name, length: 800, width: 500, height: 160 },
+    }),
+  }
+);
+
+const EvaluatedBeamBody = family<{ readonly name: string; readonly material: string }>(
+  'EvaluatedBeamBody',
+  () => el('Geometry', { node: csg.fuse(csg.box(700, 100, 140), csg.box(120, 420, 140)) }),
+  {
+    semantics: ({ name, material }) => ({
+      kind: 'beam',
+      role: 'cross-girder',
+      material,
+      properties: { name, length: 700, width: 420, height: 140 },
     }),
   }
 );
@@ -141,6 +282,102 @@ function buildSyntheticInfrastructure() {
   });
 }
 
+function buildAllCivilProducts() {
+  return RootComposition({
+    key: 'all-civil-products',
+    children: PlaceComposition({
+      key: 'site',
+      children: CrossingComposition({
+        key: 'bridge',
+        children: SpanComposition({
+          key: 'part',
+          children: [
+            LinearBody({
+              key: 'member',
+              name: 'Synthetic Member',
+              length: 1_000,
+              width: 100,
+              height: 200,
+              material: 'Structural Steel',
+            }),
+            SignBody({
+              key: 'sign',
+              name: 'Bridge Sign',
+              role: 'pictorial',
+              length: 40,
+              width: 1_200,
+              height: 600,
+              material: 'Aluminium',
+            }),
+            EarthworksBody({
+              key: 'backfill',
+              name: 'Abutment Backfill',
+              role: 'backfill',
+              length: 2_000,
+              width: 3_000,
+              height: 1_500,
+              material: 'Compacted Fill',
+            }),
+            ...(
+              [
+                ['beam', 'cross-girder', 'Cross Girder', 900, 140, 240, 'Steel'],
+                ['column', 'pier-stem', 'Pier Stem', 600, 450, 2_400, 'Concrete'],
+                ['slab', 'deck', 'Bridge Deck', 1_500, 900, 180, 'Concrete'],
+                ['wall', 'abutment', 'Abutment Wall', 1_200, 250, 1_100, 'Concrete'],
+                ['footing', 'pad', 'Pier Footing', 1_400, 1_100, 300, 'Concrete'],
+                ['railing', 'guardrail', 'Bridge Guardrail', 1_500, 80, 1_000, 'Steel'],
+              ] as const
+            ).map(([kind, role, name, length, width, height, material]) =>
+              ReusedCivilBody({
+                key: kind,
+                kind,
+                role,
+                name,
+                length,
+                width,
+                height,
+                material,
+              })
+            ),
+          ],
+        }),
+      }),
+    }),
+  });
+}
+
+function buildEvaluatedProductBody() {
+  return RootComposition({
+    key: 'evaluated-product-body',
+    children: PlaceComposition({
+      key: 'site',
+      children: CrossingComposition({
+        key: 'bridge',
+        children: SpanComposition({
+          key: 'part',
+          children: [
+            EvaluatedMemberBody({
+              key: 'curved-member',
+              name: 'Evaluated Brace',
+              material: 'Steel',
+              frame: frame({
+                origin: [250, 500, 750],
+                xAxis: [0, 1, 0],
+                zAxis: [0, 0, 1],
+              }),
+            }),
+            EvaluatedBeamBody({
+              key: 'cross-girder',
+              name: 'Evaluated Cross Girder',
+              material: 'Steel',
+            }),
+          ],
+        }),
+      }),
+    }),
+  });
+}
+
 function flattenSpatial(root: ImportedSpatialNode | null): ImportedSpatialNode[] {
   if (root === null) return [];
   return [root, ...root.children.flatMap((child) => flattenSpatial(child))];
@@ -151,6 +388,178 @@ beforeAll(async () => {
 }, 30_000);
 
 describe('families infrastructure projection', () => {
+  it('requires an explicit matching Datum before selecting analytic Product Body geometry', () => {
+    const resolved = resolve(
+      RootComposition({
+        key: 'datum-proof',
+        children: PlaceComposition({
+          key: 'site',
+          children: CrossingComposition({
+            key: 'bridge',
+            children: SpanComposition({
+              key: 'part',
+              children: DatumlessBody({
+                key: 'member',
+                name: 'Unproven Datum',
+                length: 1_000,
+                width: 100,
+                height: 200,
+                material: 'Steel',
+              }),
+            }),
+          }),
+        }),
+      })
+    );
+
+    expect(
+      familiesToBim(resolved, {
+        project: { name: 'Datum proof', projectId: 'gate-2-datum-proof' },
+      })
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'FAMILIES_INVALID_SEMANTIC_PROPERTY' },
+    });
+  });
+
+  it('uses evaluated authored tessellation as a typed Product Body fallback', async () => {
+    const resolved = resolve(buildEvaluatedProductBody());
+    using evaluator = new csg.Evaluator();
+    const evaluatedModel = evaluateModel(resolved, evaluator);
+    const projected = unwrap(
+      familiesToBim(resolved, {
+        project: { name: 'Evaluated Product Body', projectId: 'gate-2-product-body' },
+        evaluatedModel,
+      })
+    );
+    using bim = projected.model;
+
+    expect(bim.getMembers()[0]?.productBody?.kind).toBe('TESSELLATED');
+    expect(bim.getMembers()[0]?.geometry).toBeNull();
+    expect(bim.getBeams()[0]?.productBody?.kind).toBe('TESSELLATED');
+    expect(bim.getBeams()[0]?.geometry).toBeNull();
+    expect(bim.getProxies()).toHaveLength(0);
+    const bytes = unwrap(
+      await toIfc(bim, {
+        applicationName: 'brepjs Gate 2',
+        applicationVersion: '1',
+        ifcSchema: 'IFC4X3',
+      })
+    );
+    const step = new TextDecoder().decode(bytes).toUpperCase();
+    expect(step).toContain('IFCMEMBER(');
+    expect(step).toContain('IFCBEAM(');
+    expect(step).toContain('IFCTRIANGULATEDFACESET(');
+    expect(step).not.toContain('IFCBUILDINGELEMENTPROXY(');
+
+    const imported = unwrap(await fromIfc(bytes));
+    try {
+      const member = imported.elements.find((element) => element.category === 'MEMBER');
+      expect(member?.geometry.fidelity).toBe('TESSELLATED_LOSSY');
+      expect(member?.material?.name).toBe('Steel');
+    } finally {
+      disposeImportedModel(imported);
+    }
+  });
+
+  it('projects every required civil product through typed IFC4X3 entities', async () => {
+    const projected = unwrap(
+      familiesToBim(resolve(buildAllCivilProducts()), {
+        project: { name: 'All Civil Products', projectId: 'gate-2-all-civil-products' },
+      })
+    );
+    using bim = projected.model;
+
+    expect(bim.getMembers()).toHaveLength(1);
+    expect(bim.getSigns()).toHaveLength(1);
+    expect(bim.getEarthworksFills()).toHaveLength(1);
+    expect(bim.getBeams()).toHaveLength(1);
+    expect(bim.getColumns()).toHaveLength(1);
+    expect(bim.getSlabs()).toHaveLength(1);
+    expect(bim.getWalls()).toHaveLength(1);
+    expect(bim.getFootings()).toHaveLength(1);
+    expect(bim.getRailings()).toHaveLength(1);
+    expect(bim.getProxies()).toHaveLength(0);
+
+    const validated = unwrap(
+      await toIfcValidated(bim, {
+        applicationName: 'brepjs Gate 2',
+        applicationVersion: '1',
+        ifcSchema: 'IFC4X3',
+      })
+    );
+    expect(hasErrors(validated.report), validated.report.issues).toBe(false);
+    const step = new TextDecoder().decode(validated.bytes).toUpperCase();
+    expect(step).toContain('IFCMEMBER(');
+    expect(step).toContain('IFCSIGN(');
+    expect(step).toContain('IFCEARTHWORKSFILL(');
+    expect(step).toContain('IFCBEAM(');
+    expect(step).toContain('IFCCOLUMN(');
+    expect(step).toContain('IFCSLAB(');
+    expect(step).toContain('IFCWALL(');
+    expect(step).toContain('IFCFOOTING(');
+    expect(step).toContain('IFCRAILING(');
+    expect(step).not.toContain('IFCBUILDINGELEMENTPROXY(');
+
+    const imported = unwrap(await fromIfc(validated.bytes));
+    try {
+      expect(imported.elements.map((element) => element.category)).toEqual(
+        expect.arrayContaining([
+          'MEMBER',
+          'SIGN',
+          'EARTHWORKS_FILL',
+          'BEAM',
+          'COLUMN',
+          'SLAB',
+          'WALL',
+          'FOOTING',
+          'RAILING',
+        ])
+      );
+      expect(imported.elements.find((element) => element.category === 'SIGN')?.material?.name).toBe(
+        'Aluminium'
+      );
+      expect(
+        imported.elements.find((element) => element.category === 'EARTHWORKS_FILL')?.material?.name
+      ).toBe('Compacted Fill');
+      const expectedBounds = [
+        ['MEMBER', [0, 1_000, -50, 50, -100, 100]],
+        ['SIGN', [0, 40, -600, 600, -300, 300]],
+        ['EARTHWORKS_FILL', [0, 2_000, -1_500, 1_500, -750, 750]],
+        ['BEAM', [0, 900, -70, 70, -120, 120]],
+        ['COLUMN', [-300, 300, -225, 225, 0, 2_400]],
+        ['SLAB', [0, 1_500, 0, 900, 0, 180]],
+        ['WALL', [0, 1_200, 0, 250, 0, 1_100]],
+        ['FOOTING', [0, 1_400, 0, 1_100, 0, 300]],
+        ['RAILING', [0, 1_500, 0, 80, 0, 1_000]],
+      ] as const;
+      for (const [category, expected] of expectedBounds) {
+        const solid = imported.elements.find((element) => element.category === category)?.geometry
+          .solid;
+        expect(solid, category).not.toBeNull();
+        if (solid === null || solid === undefined) continue;
+        const bounds = getBounds(solid);
+        const actual = [
+          bounds.xMin,
+          bounds.xMax,
+          bounds.yMin,
+          bounds.yMax,
+          bounds.zMin,
+          bounds.zMax,
+        ];
+        for (let index = 0; index < expected.length; index++) {
+          expect(actual[index], `${category} bound ${index}`).toBeCloseTo(expected[index] ?? 0, 2);
+        }
+        expect(unwrap(measureVolume(solid)), category).toBeCloseTo(
+          (expected[1] - expected[0]) * (expected[3] - expected[2]) * (expected[5] - expected[4]),
+          -1
+        );
+      }
+    } finally {
+      disposeImportedModel(imported);
+    }
+  });
+
   it('projects Project → Site → Bridge → BridgePart → Member through the public seam', async () => {
     const projected = unwrap(
       familiesToBim(resolve(buildSyntheticInfrastructure()), {
@@ -328,6 +737,81 @@ describe('families infrastructure projection', () => {
     if (result.ok) {
       expect(new TextDecoder().decode(result.value).toUpperCase()).toContain('IFCMEMBER(');
     }
+  });
+
+  it('rejects an open direct Product Body through a structured BimError', () => {
+    using bim = new BimModel();
+    unwrap(bim.init({ name: 'Invalid Product Body' }));
+    const result = bim.addMember(
+      {
+        name: 'Invalid Member',
+        length: 10,
+        profile: { kind: 'RECTANGULAR', width: 10, height: 10 },
+        origin: [0, 0, 0],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+        materialName: 'Steel',
+      },
+      {
+        productBody: {
+          kind: 'TESSELLATED',
+          mesh: {
+            vertices: new Float32Array([0, 0, 0, 10, 0, 0, 0, 10, 0]),
+            triangles: new Uint32Array([0, 1, 2]),
+            normals: new Float32Array(9),
+            uvs: new Float32Array(),
+            faceGroups: [],
+          },
+        },
+      }
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_PRODUCT_BODY' } });
+  });
+
+  it.each([
+    [
+      'same-winding edge incidence',
+      new Uint32Array([
+        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3,
+        4, 0, 3, 4, 7,
+      ]),
+    ],
+    [
+      'zero-area triangle',
+      new Uint32Array([
+        0, 0, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3,
+        0, 4, 3, 4, 7,
+      ]),
+    ],
+  ])('rejects a direct Product Body with %s', (_case, triangles) => {
+    using bim = new BimModel();
+    unwrap(bim.init({ name: 'Invalid Product Body' }));
+    const result = bim.addMember(
+      {
+        name: 'Invalid Member',
+        length: 10,
+        profile: { kind: 'RECTANGULAR', width: 10, height: 10 },
+        origin: [0, 0, 0],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+        materialName: 'Steel',
+      },
+      {
+        productBody: {
+          kind: 'TESSELLATED',
+          mesh: {
+            vertices: new Float32Array([
+              0, 0, 0, 10, 0, 0, 10, 10, 0, 0, 10, 0, 0, 0, 10, 10, 0, 10, 10, 10, 10, 0, 10, 10,
+            ]),
+            triangles,
+            normals: new Float32Array(24),
+            uvs: new Float32Array(),
+            faceGroups: [],
+          },
+        },
+      }
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_PRODUCT_BODY' } });
   });
 
   it('returns FAMILIES_INVALID_CIVIL_HIERARCHY for a Member directly under a Site', () => {

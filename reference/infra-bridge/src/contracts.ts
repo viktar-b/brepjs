@@ -24,11 +24,14 @@ export interface DimensionObservation {
 
 export interface PlaneObservation {
   readonly kind: 'plane';
+  /** One exact point on the plane in component-local millimetres. */
+  readonly point: ObservationVector;
   readonly normal: ObservationVector;
 }
 
 export interface CylinderObservation {
   readonly kind: 'cylinder';
+  readonly origin: ObservationVector;
   readonly axis: ObservationVector;
   readonly radius: number;
 }
@@ -37,21 +40,40 @@ export type AnalyticSurfaceObservation = PlaneObservation | CylinderObservation;
 
 export interface LineObservation {
   readonly kind: 'line';
+  /** Exact line anchor and the retained topological trim. */
+  readonly point: ObservationVector;
   readonly direction: ObservationVector;
+  readonly start: ObservationVector;
+  readonly end: ObservationVector;
 }
 
 export interface CircleObservation {
   readonly kind: 'circle';
+  readonly center: ObservationVector;
+  readonly normal: ObservationVector;
   readonly radius: number;
 }
 
 export type AnalyticCurveObservation = LineObservation | CircleObservation;
+
+export interface TopologyEdgeObservation {
+  readonly vertices: readonly [number, number];
+}
+
+export interface TopologyFaceObservation {
+  /** Oriented boundary vertex and edge indices into this observation. */
+  readonly vertices: readonly number[];
+  readonly edges: readonly number[];
+}
 
 export interface TopologyObservation {
   readonly vertexCount: number;
   readonly edgeCount: number;
   readonly faceCount: number;
   readonly closed: boolean;
+  readonly vertices?: readonly ObservationVector[] | undefined;
+  readonly edges?: readonly TopologyEdgeObservation[] | undefined;
+  readonly faces?: readonly TopologyFaceObservation[] | undefined;
 }
 
 /** Optional analytic and topological facts retained beside the comparison surface. */
@@ -95,4 +117,10 @@ export type ReferenceSceneNode = ReferenceSpatialNode | ReferenceProductNode;
 export interface ReferenceScene {
   readonly unit: LengthUnit;
   readonly roots: readonly ReferenceSceneNode[];
+}
+
+/** Evidence that selected occurrences reuse one source representation, without source identity. */
+export interface ReferenceRepetitionObservation {
+  readonly semanticKeys: readonly string[];
+  readonly evidence: 'shared-representation';
 }

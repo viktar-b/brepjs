@@ -94,7 +94,14 @@ export function readBodyGeometry(
       return reconstructRevolution(reader, bodyItemId, scale, worldTransform, diagnostics);
     }
     if (isTessellatedType(itemType)) {
-      return reconstructTessellated(reader, productExpressId, diagnostics);
+      return reconstructTessellated(
+        reader,
+        productExpressId,
+        bodyItemId,
+        scale,
+        worldTransform,
+        diagnostics
+      );
     }
   } catch (e) {
     diagnostics.push(
@@ -182,9 +189,11 @@ function reconstructExtrusion(
     return NONE;
   }
 
-  // Compose: extrusion-local frame (Position) then the product world placement.
+  // Compose: profile Position, extrusion Position, then product world placement.
+  const profileDefinition = reader.getLine<Record<string, unknown>>(sweptArea.value);
+  const profileFrame = readAxis2Placement2D(reader, profileDefinition?.['Position'], scale);
   const localFrame = readAxis2Placement3D(reader, ext['Position'], scale);
-  const placed = placeSolid(solidResult.value, localFrame, worldTransform);
+  const placed = placeSolid(solidResult.value, profileFrame, localFrame, worldTransform);
   if (!placed.ok) {
     diagnostics.push(issue('warning', placed.error.code, placed.error.message, extrusionId));
     return NONE;
@@ -287,9 +296,14 @@ function reconstructRevolution(
 function reconstructTessellated(
   reader: SpfReader,
   productExpressId: number,
+  bodyItemId: number,
+  scale: number,
+  worldTransform: MatrixTransform | null,
   diagnostics: ValidationIssue[]
 ): GeometryResult {
-  const mesh = collectMesh(reader, productExpressId);
+  const mesh =
+    readTriangulatedFaceSet(reader, bodyItemId, scale, worldTransform) ??
+    collectMesh(reader, productExpressId);
   if (mesh === null || mesh.indices.length === 0) {
     diagnostics.push(
       issue(
@@ -304,7 +318,7 @@ function reconstructTessellated(
 
   // web-ifc emits geometry in metres; STL import expects mm to match the
   // parametric path's units.
-  const stl = packBinaryStl(mesh.vertices, mesh.indices, 1000);
+  const stl = packBinaryStl(mesh.vertices, mesh.indices, mesh.scaleToMm);
   let solid: ValidSolid | null = null;
   try {
     // getKernel().importSTL returns the kernel's KernelShape (typed `any` at the
@@ -356,9 +370,74 @@ function reconstructTessellated(
   };
 }
 
+/** Read the complete indexed face set directly before asking a generic geometry engine. */
+function readTriangulatedFaceSet(
+  reader: SpfReader,
+  faceSetId: number,
+  scale: number,
+  worldTransform: MatrixTransform | null
+): MeshData | null {
+  if (reader.getLineType(faceSetId) !== WebIFC.IFCTRIANGULATEDFACESET) return null;
+  const faceSet = reader.getLine<Record<string, unknown>>(faceSetId);
+  if (faceSet === null) return null;
+  const coordinatesRef = asRef(faceSet['Coordinates']);
+  if (coordinatesRef === undefined) return null;
+  const pointList = reader.getLine<Record<string, unknown>>(coordinatesRef.value);
+  if (pointList === null || !Array.isArray(pointList['CoordList'])) return null;
+
+  const coordinates: Array<readonly [number, number, number]> = [];
+  for (const row of pointList['CoordList']) {
+    const values = asMeasureArray(row);
+    if (values.length !== 3) return null;
+    coordinates.push([values[0] ?? 0, values[1] ?? 0, values[2] ?? 0]);
+  }
+  const pointMap = Array.isArray(faceSet['PnIndex'])
+    ? asMeasureArray(faceSet['PnIndex']).map((index) => index - 1)
+    : undefined;
+  if (!Array.isArray(faceSet['CoordIndex'])) return null;
+
+  const vertices = new Float32Array(coordinates.length * 3);
+  const factor = scale * 1000;
+  for (let i = 0; i < coordinates.length; i++) {
+    const point = coordinates[i];
+    if (point === undefined) return null;
+    const x = point[0] * factor;
+    const y = point[1] * factor;
+    const z = point[2] * factor;
+    const linear = worldTransform?.linear;
+    const translation = worldTransform?.translation ?? [0, 0, 0];
+    vertices[i * 3] =
+      linear === undefined ? x : linear[0] * x + linear[1] * y + linear[2] * z + translation[0];
+    vertices[i * 3 + 1] =
+      linear === undefined ? y : linear[3] * x + linear[4] * y + linear[5] * z + translation[1];
+    vertices[i * 3 + 2] =
+      linear === undefined ? z : linear[6] * x + linear[7] * y + linear[8] * z + translation[2];
+  }
+
+  const indices: number[] = [];
+  for (const row of faceSet['CoordIndex']) {
+    const triangle = asMeasureArray(row);
+    if (triangle.length !== 3) return null;
+    for (const rawIndex of triangle) {
+      const mapped = pointMap === undefined ? rawIndex - 1 : pointMap[rawIndex - 1];
+      if (
+        mapped === undefined ||
+        !Number.isInteger(mapped) ||
+        mapped < 0 ||
+        mapped >= coordinates.length
+      ) {
+        return null;
+      }
+      indices.push(mapped);
+    }
+  }
+  return { vertices, indices: Uint32Array.from(indices), scaleToMm: 1 };
+}
+
 interface MeshData {
   readonly vertices: Float32Array;
   readonly indices: Uint32Array;
+  readonly scaleToMm: number;
 }
 
 function collectMesh(reader: SpfReader, productExpressId: number): MeshData | null {
@@ -403,7 +482,11 @@ function collectMesh(reader: SpfReader, productExpressId: number): MeshData | nu
   });
 
   if (vertices.length === 0) return null;
-  return { vertices: new Float32Array(vertices), indices: new Uint32Array(indices) };
+  return {
+    vertices: new Float32Array(vertices),
+    indices: new Uint32Array(indices),
+    scaleToMm: 1000,
+  };
 }
 
 // Packs interleaved triangle data into a binary STL buffer. `scaleToMm` converts
@@ -648,11 +731,10 @@ function profileToFace(profile: Profile): Result<OrientedFace & PlanarFace, BimE
 
 function placeSolid(
   solid: Solid,
-  localFrame: MatrixTransform | null,
-  worldTransform: MatrixTransform | null
+  ...transforms: readonly (MatrixTransform | null)[]
 ): Result<Solid, BimError> {
   let current = solid;
-  for (const transform of [localFrame, worldTransform]) {
+  for (const transform of transforms) {
     if (transform === null || isIdentity(transform)) continue;
     const applied = applyMatrix(current, transform);
     if (!applied.ok) {
@@ -668,6 +750,28 @@ function placeSolid(
     current = applied.value;
   }
   return ok(current);
+}
+
+// Reads an IfcAxis2Placement2D as a transform in the swept area's XY plane.
+function readAxis2Placement2D(
+  reader: SpfReader,
+  ref: unknown,
+  scale: number
+): MatrixTransform | null {
+  const placementRef = asRef(ref);
+  if (placementRef === undefined) return null;
+  const placement = reader.getLine<Record<string, unknown>>(placementRef.value);
+  if (placement === null) return null;
+  const origin = readPoint2D(reader, placement['Location'], scale) ?? [0, 0, 0];
+  const direction = readDirection2D(reader, placement['RefDirection']) ?? [1, 0];
+  const magnitude = Math.hypot(direction[0], direction[1]);
+  if (magnitude < 1e-12) return null;
+  const x = direction[0] / magnitude;
+  const y = direction[1] / magnitude;
+  return {
+    linear: [x, -y, 0, y, x, 0, 0, 0, 1],
+    translation: origin,
+  };
 }
 
 function finalizeSolid(
@@ -856,6 +960,16 @@ function readPoint(reader: SpfReader, ref: unknown, scale: number): Vec3 | undef
   ];
 }
 
+function readPoint2D(reader: SpfReader, ref: unknown, scale: number): Vec3 | undefined {
+  const pointRef = asRef(ref);
+  if (pointRef === undefined) return undefined;
+  const point = reader.getLine<Record<string, unknown>>(pointRef.value);
+  if (point === null) return undefined;
+  const coordinates = asMeasureArray(point['Coordinates']);
+  if (coordinates.length < 2) return undefined;
+  return [(coordinates[0] ?? 0) * scale * 1000, (coordinates[1] ?? 0) * scale * 1000, 0];
+}
+
 function readDirection(reader: SpfReader, ref: unknown): Vec3 | undefined {
   const dirRef = asRef(ref);
   if (dirRef === undefined) return undefined;
@@ -864,6 +978,16 @@ function readDirection(reader: SpfReader, ref: unknown): Vec3 | undefined {
   const ratios = asMeasureArray(dir['DirectionRatios']);
   if (ratios.length < 3) return undefined;
   return [ratios[0] ?? 0, ratios[1] ?? 0, ratios[2] ?? 0];
+}
+
+function readDirection2D(reader: SpfReader, ref: unknown): readonly [number, number] | undefined {
+  const directionRef = asRef(ref);
+  if (directionRef === undefined) return undefined;
+  const direction = reader.getLine<Record<string, unknown>>(directionRef.value);
+  if (direction === null) return undefined;
+  const ratios = asMeasureArray(direction['DirectionRatios']);
+  if (ratios.length < 2) return undefined;
+  return [ratios[0] ?? 0, ratios[1] ?? 0];
 }
 
 function asRef(value: unknown): IfcRef | undefined {

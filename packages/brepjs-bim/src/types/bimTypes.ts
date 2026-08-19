@@ -19,7 +19,14 @@ import type { CoveringSpec } from '../specs/coveringSpec.js';
 import type { ElementAssemblySpec } from '../specs/assemblySpec.js';
 import type { ZoneSpec, SystemSpec } from '../specs/groupSpec.js';
 import type { ProjectSpec, SiteSpec, BuildingSpec, StoreySpec } from '../specs/spatialSpec.js';
-import type { BridgeSpec, BridgePartSpec, MemberSpec } from '../specs/infrastructureSpec.js';
+import type {
+  BridgeSpec,
+  BridgePartSpec,
+  MemberSpec,
+  SignSpec,
+  EarthworksFillSpec,
+} from '../specs/infrastructureSpec.js';
+import type { ProductBody } from './productBody.js';
 
 export type BimCategory =
   | 'WALL'
@@ -48,7 +55,9 @@ export type BimCategory =
   | 'STOREY'
   | 'BRIDGE'
   | 'BRIDGE_PART'
-  | 'MEMBER';
+  | 'MEMBER'
+  | 'SIGN'
+  | 'EARTHWORKS_FILL';
 
 export type WallOpeningSpec = {
   readonly kind: 'WALL_OPENING';
@@ -130,25 +139,28 @@ export type BimSpecFor<C extends BimCategory> = C extends 'WALL'
                                                     ? BridgePartSpec
                                                     : C extends 'MEMBER'
                                                       ? MemberSpec
-                                                      : never;
+                                                      : C extends 'SIGN'
+                                                        ? SignSpec
+                                                        : C extends 'EARTHWORKS_FILL'
+                                                          ? EarthworksFillSpec
+                                                          : never;
 
-export type BimGeometryFor<C extends BimCategory> = C extends 'CURTAIN_WALL'
-  ? CurtainWallGrid
-  : C extends
-        | 'WALL'
-        | 'SLAB'
-        | 'BEAM'
-        | 'COLUMN'
-        | 'PROXY'
-        | 'SPACE'
-        | 'ROOF'
-        | 'FOOTING'
-        | 'PILE'
-        | 'RAILING'
-        | 'COVERING'
-        | 'MEMBER'
-    ? ValidSolid
-    : null;
+export type BimGeometryFor<C extends BimCategory> = C extends
+  | 'MEMBER'
+  | 'SIGN'
+  | 'EARTHWORKS_FILL'
+  | 'WALL'
+  | 'SLAB'
+  | 'BEAM'
+  | 'COLUMN'
+  | 'FOOTING'
+  | 'RAILING'
+  ? ValidSolid | null
+  : C extends 'CURTAIN_WALL'
+    ? CurtainWallGrid
+    : C extends 'PROXY' | 'SPACE' | 'ROOF' | 'PILE' | 'COVERING'
+      ? ValidSolid
+      : null;
 
 export interface BimElement<C extends BimCategory> {
   readonly guid: IfcGuid;
@@ -156,6 +168,8 @@ export interface BimElement<C extends BimCategory> {
   readonly category: C;
   readonly spec: BimSpecFor<C>;
   readonly geometry: BimGeometryFor<C>;
+  /** Present on infrastructure products whose representation is selected at Projection. */
+  readonly productBody?: ProductBody | undefined;
 }
 
 export type AnyBimElement =
@@ -185,4 +199,6 @@ export type AnyBimElement =
   | BimElement<'STOREY'>
   | BimElement<'BRIDGE'>
   | BimElement<'BRIDGE_PART'>
-  | BimElement<'MEMBER'>;
+  | BimElement<'MEMBER'>
+  | BimElement<'SIGN'>
+  | BimElement<'EARTHWORKS_FILL'>;

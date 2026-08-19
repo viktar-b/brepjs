@@ -84,10 +84,10 @@ export function fromTriangulatedSolid(source: SyntheticTriangulatedSolid): Recon
 
 export const analyticEvidenceFixture: AnalyticEvidence = {
   surfaces: [
-    { kind: 'plane', normal: [0, 0, 1] },
-    { kind: 'cylinder', axis: [0, 0, 1], radius: 5 },
+    { kind: 'plane', point: [0, 0, 0], normal: [0, 0, 1] },
+    { kind: 'cylinder', origin: [0, 0, 0], axis: [0, 0, 1], radius: 5 },
   ],
-  curves: [{ kind: 'circle', radius: 5 }],
+  curves: [{ kind: 'circle', center: [0, 0, 0], normal: [0, 0, 1], radius: 5 }],
   topology: { vertexCount: 2, edgeCount: 3, faceCount: 2, closed: false },
 };
 

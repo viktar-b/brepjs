@@ -1,11 +1,20 @@
 import * as WebIFC from 'web-ifc';
 import type { IfcGuid } from '../identity/ifcGuid.js';
-import type { BridgePartSpec, BridgeSpec, MemberSpec } from '../specs/infrastructureSpec.js';
+import type {
+  BridgePartSpec,
+  BridgeSpec,
+  EarthworksFillSpec,
+  MemberSpec,
+  PrismaticInfrastructureSpec,
+  SignSpec,
+} from '../specs/infrastructureSpec.js';
 import { memberBodySpec } from '../elementFns/memberFns.js';
 import { toIfcLengthM } from '../units/units.js';
 import { writeAxis2Placement3D } from './headerWriter.js';
 import type { IfcWriter } from './ifcWriter.js';
 import { writeBeamGeometry } from './geometryWriter.js';
+import { writeMeshTessellation } from './tessellationWriter.js';
+import type { ProductBody } from '../types/productBody.js';
 
 function writeSpatialPlacement(
   w: IfcWriter,
@@ -87,17 +96,41 @@ export function writeBridgePart(
 
 export function writeMemberGeometry(
   w: IfcWriter,
-  spec: MemberSpec,
+  spec: PrismaticInfrastructureSpec,
+  productBody: ProductBody,
   geomSubContextId: number,
   parentPlacementId: number | null
 ): { readonly localPlacementId: number; readonly productDefinitionShapeId: number } {
+  if (productBody.kind === 'TESSELLATED') {
+    const localPlacementId = writeSpatialPlacement(w, spec, parentPlacementId);
+    const tessellation = writeMeshTessellation(w, productBody.mesh, geomSubContextId);
+    return { localPlacementId, productDefinitionShapeId: tessellation.productDefinitionShapeId };
+  }
   return writeBeamGeometry(w, memberBodySpec(spec), geomSubContextId, parentPlacementId);
 }
 
-export function writeMemberEntity(
+/** Write an evaluated Product Body with its resolved local Frame under any typed product. */
+export function writeProductBodyTessellation(
   w: IfcWriter,
+  spec: {
+    readonly origin: [number, number, number];
+    readonly axisX: [number, number, number];
+    readonly axisZ: [number, number, number];
+  },
+  productBody: Extract<ProductBody, { readonly kind: 'TESSELLATED' }>,
+  geomSubContextId: number,
+  parentPlacementId: number | null
+): { readonly localPlacementId: number; readonly productDefinitionShapeId: number } {
+  const localPlacementId = writeSpatialPlacement(w, spec, parentPlacementId);
+  const tessellation = writeMeshTessellation(w, productBody.mesh, geomSubContextId);
+  return { localPlacementId, productDefinitionShapeId: tessellation.productDefinitionShapeId };
+}
+
+function writePrismaticInfrastructureEntity(
+  w: IfcWriter,
+  entityType: number,
   guid: IfcGuid,
-  spec: MemberSpec,
+  spec: MemberSpec | SignSpec | EarthworksFillSpec,
   ownerHistoryId: number,
   localPlacementId: number,
   productDefinitionShapeId: number
@@ -105,7 +138,7 @@ export function writeMemberEntity(
   const entityId = w.nextId();
   w.writeLine({
     expressID: entityId,
-    type: WebIFC.IFCMEMBER,
+    type: entityType,
     GlobalId: w.mkType(WebIFC.IFCGLOBALLYUNIQUEID, guid),
     OwnerHistory: w.ref(ownerHistoryId),
     Name: w.mkType(WebIFC.IFCLABEL, spec.name),
@@ -117,4 +150,61 @@ export function writeMemberEntity(
     PredefinedType: { type: 3, value: spec.predefinedType ?? 'NOTDEFINED' },
   });
   return entityId;
+}
+
+export function writeMemberEntity(
+  w: IfcWriter,
+  guid: IfcGuid,
+  spec: MemberSpec,
+  ownerHistoryId: number,
+  localPlacementId: number,
+  productDefinitionShapeId: number
+): number {
+  return writePrismaticInfrastructureEntity(
+    w,
+    WebIFC.IFCMEMBER,
+    guid,
+    spec,
+    ownerHistoryId,
+    localPlacementId,
+    productDefinitionShapeId
+  );
+}
+
+export function writeSignEntity(
+  w: IfcWriter,
+  guid: IfcGuid,
+  spec: SignSpec,
+  ownerHistoryId: number,
+  localPlacementId: number,
+  productDefinitionShapeId: number
+): number {
+  return writePrismaticInfrastructureEntity(
+    w,
+    WebIFC.IFCSIGN,
+    guid,
+    spec,
+    ownerHistoryId,
+    localPlacementId,
+    productDefinitionShapeId
+  );
+}
+
+export function writeEarthworksFillEntity(
+  w: IfcWriter,
+  guid: IfcGuid,
+  spec: EarthworksFillSpec,
+  ownerHistoryId: number,
+  localPlacementId: number,
+  productDefinitionShapeId: number
+): number {
+  return writePrismaticInfrastructureEntity(
+    w,
+    WebIFC.IFCEARTHWORKSFILL,
+    guid,
+    spec,
+    ownerHistoryId,
+    localPlacementId,
+    productDefinitionShapeId
+  );
 }

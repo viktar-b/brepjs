@@ -3,10 +3,85 @@ import { loadReference, type LoadReferenceRequest } from '@brepjs/infra-bridge-r
 import {
   sha256,
   SYNTHETIC_MEMBER_GLOBAL_ID,
+  REPEATED_MEMBER_GLOBAL_ID,
   syntheticTessellatedIfc,
 } from './tessellatedIfcFixture.js';
 
 describe('Reference Harness tessellated IFC decoder', () => {
+  it('reports shared source geometry only as semantic-key repetition evidence', async () => {
+    const bytes = syntheticTessellatedIfc({ repeatedProduct: true });
+    const result = await loadReference({
+      bytes,
+      manifest: {
+        checksum: sha256(bytes),
+        mappings: [
+          { semanticKey: 'first-member', referenceGlobalId: SYNTHETIC_MEMBER_GLOBAL_ID },
+          { semanticKey: 'second-member', referenceGlobalId: REPEATED_MEMBER_GLOBAL_ID },
+        ],
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        repetitions: [
+          {
+            semanticKeys: ['first-member', 'second-member'],
+            evidence: 'shared-representation',
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(REPEATED_MEMBER_GLOBAL_ID);
+    expect(JSON.stringify(result)).not.toMatch(/expressId|itemId/i);
+  });
+
+  it('groups distinct mapped occurrences by their shared representation map and applies mapping transforms', async () => {
+    const bytes = syntheticTessellatedIfc({ repeatedProduct: true, mappedProducts: true });
+    const result = await loadReference({
+      bytes,
+      manifest: {
+        checksum: sha256(bytes),
+        mappings: [
+          { semanticKey: 'first-mapped', referenceGlobalId: SYNTHETIC_MEMBER_GLOBAL_ID },
+          { semanticKey: 'second-mapped', referenceGlobalId: REPEATED_MEMBER_GLOBAL_ID },
+        ],
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        targets: [
+          {
+            comparisonSurface: {
+              vertices: [
+                [10, 0, 0],
+                [20, 0, 0],
+                [10, 10, 0],
+                [10, 0, 10],
+              ],
+            },
+          },
+          {
+            comparisonSurface: {
+              vertices: [
+                [20, 0, 0],
+                [30, 0, 0],
+                [20, 10, 0],
+                [20, 0, 10],
+              ],
+            },
+          },
+        ],
+        repetitions: [
+          { semanticKeys: ['first-mapped', 'second-mapped'], evidence: 'shared-representation' },
+        ],
+      },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/representationMap|mappedItem|expressId|itemId/i);
+  });
+
   it('decodes a complete face set into a local target and separate scene placement', async () => {
     const bytes = syntheticTessellatedIfc();
     const result = await loadReference({
@@ -179,6 +254,34 @@ describe('Reference Harness tessellated IFC decoder', () => {
         ],
       },
     });
+  });
+
+  it('combines multiple complete Body items into one product-local target', async () => {
+    const result = await loadReference(requestFor(syntheticTessellatedIfc({ bodyItems: 'two' })));
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        targets: [
+          {
+            comparisonSurface: {
+              vertices: [
+                [0, 0, 0],
+                [10, 0, 0],
+                [0, 10, 0],
+                [0, 0, 10],
+                [20, 0, 0],
+                [30, 0, 0],
+                [20, 10, 0],
+                [20, 0, 10],
+              ],
+              closed: true,
+            },
+          },
+        ],
+      },
+    });
+    if (result.ok) expect(result.value.targets[0]?.comparisonSurface.triangles).toHaveLength(8);
   });
 
   it.each([

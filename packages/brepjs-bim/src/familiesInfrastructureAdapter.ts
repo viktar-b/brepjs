@@ -9,22 +9,28 @@ import {
 } from './familiesProjection.js';
 import type { LocalId } from './identity/localId.js';
 import { BimModel } from './model/bimModel.js';
+import { selectProductBody, type SelectedProductBody } from './productBodyProjection.js';
 import {
   parseBridgePartSpec,
   parseBridgeSpec,
+  parseEarthworksFillSpec,
   parseMemberSpec,
+  parseSignSpec,
   type BridgePartPredefinedType,
   type BridgePredefinedType,
   type FacilityUsageType,
   type MemberPredefinedType,
+  type SignPredefinedType,
+  type EarthworksFillPredefinedType,
 } from './specs/infrastructureSpec.js';
+import { parseBeamSpec, type BeamPredefinedType } from './specs/beamSpec.js';
+import { parseColumnSpec, type ColumnPredefinedType } from './specs/columnSpec.js';
+import { parseSlabSpec, type SlabPredefinedType } from './specs/slabSpec.js';
+import { parseWallSpec } from './specs/wallSpec.js';
+import { parseFootingSpec, type FootingPredefinedType } from './specs/foundationSpec.js';
+import { parseRailingSpec, type RailingPredefinedType } from './specs/railingSpec.js';
 
-type CivilKind = 'project' | 'site' | 'bridge' | 'bridge-part' | 'member';
-
-interface CivilParent {
-  readonly kind: CivilKind;
-  readonly localId: LocalId;
-}
+type SpatialKind = 'project' | 'site' | 'bridge' | 'bridge-part';
 
 const BRIDGE_ROLE: Readonly<Record<string, BridgePredefinedType>> = {
   arched: 'ARCHED',
@@ -71,6 +77,22 @@ const MEMBER_ROLE: Readonly<Record<string, MemberPredefinedType>> = {
   tiebar: 'TIEBAR',
 };
 
+const SIGN_ROLE: Readonly<Record<string, SignPredefinedType>> = {
+  marker: 'MARKER',
+  mirror: 'MIRROR',
+  pictorial: 'PICTORIAL',
+};
+
+const EARTHWORKS_FILL_ROLE: Readonly<Record<string, EarthworksFillPredefinedType>> = {
+  backfill: 'BACKFILL',
+  counterweight: 'COUNTERWEIGHT',
+  embankment: 'EMBANKMENT',
+  'slope-fill': 'SLOPEFILL',
+  subgrade: 'SUBGRADE',
+  'subgrade-bed': 'SUBGRADEBED',
+  'transition-section': 'TRANSITIONSECTION',
+};
+
 const FACILITY_USAGE: Readonly<Record<string, FacilityUsageType>> = {
   lateral: 'LATERAL',
   longitudinal: 'LONGITUDINAL',
@@ -78,24 +100,205 @@ const FACILITY_USAGE: Readonly<Record<string, FacilityUsageType>> = {
   vertical: 'VERTICAL',
 };
 
+const BEAM_ROLE: Readonly<Record<string, BeamPredefinedType>> = {
+  beam: 'BEAM',
+  'cross-girder': 'BEAM',
+  girder: 'BEAM',
+  joist: 'JOIST',
+  purlin: 'PURLIN',
+  rafter: 'RAFTER',
+};
+
+const COLUMN_ROLE: Readonly<Record<string, ColumnPredefinedType>> = {
+  column: 'COLUMN',
+  'pier-stem': 'COLUMN',
+  pilaster: 'PILASTER',
+};
+
+const SLAB_ROLE: Readonly<Record<string, SlabPredefinedType>> = {
+  deck: 'FLOOR',
+  floor: 'FLOOR',
+  landing: 'LANDING',
+  roof: 'ROOF',
+  'base-slab': 'BASESLAB',
+};
+
+const FOOTING_ROLE: Readonly<Record<string, FootingPredefinedType>> = {
+  pad: 'PAD_FOOTING',
+  'pad-footing': 'PAD_FOOTING',
+  'pile-cap': 'PILE_CAP',
+  strip: 'STRIP_FOOTING',
+  'strip-footing': 'STRIP_FOOTING',
+};
+
+const RAILING_ROLE: Readonly<Record<string, RailingPredefinedType>> = {
+  balustrade: 'BALUSTRADE',
+  guardrail: 'GUARDRAIL',
+  handrail: 'HANDRAIL',
+};
+
+interface ProductProjectionContext {
+  readonly element: ResolvedElement;
+  readonly semantics: EngineeringSemantics;
+  readonly material: string;
+  readonly selected: SelectedProductBody;
+}
+
+interface ProductRoute {
+  add(model: BimModel, context: ProductProjectionContext): Result<LocalId, BimError>;
+}
+
+function productOptions(context: ProductProjectionContext) {
+  return {
+    stableKey: context.element.keyPath,
+    productBody: context.selected.body,
+  };
+}
+
+function sharedPrismaticSpec(context: ProductProjectionContext) {
+  return {
+    name: semanticName(context.element),
+    length: context.selected.length,
+    profile: {
+      kind: 'RECTANGULAR' as const,
+      width: context.selected.width,
+      height: context.selected.height,
+    },
+    ...placement(context.element.localFrame),
+    materialName: context.material,
+  };
+}
+
+const PRODUCT_ROUTES = {
+  member: {
+    add(model, context) {
+      const spec = parseMemberSpec({
+        ...sharedPrismaticSpec(context),
+        predefinedType: MEMBER_ROLE[context.semantics.role ?? ''] ?? 'NOTDEFINED',
+      });
+      return spec.ok ? model.addMember(spec.value, productOptions(context)) : spec;
+    },
+  },
+  sign: {
+    add(model, context) {
+      const spec = parseSignSpec({
+        ...sharedPrismaticSpec(context),
+        predefinedType: SIGN_ROLE[context.semantics.role ?? ''] ?? 'NOTDEFINED',
+      });
+      return spec.ok ? model.addSign(spec.value, productOptions(context)) : spec;
+    },
+  },
+  'earthworks-fill': {
+    add(model, context) {
+      const spec = parseEarthworksFillSpec({
+        ...sharedPrismaticSpec(context),
+        predefinedType: EARTHWORKS_FILL_ROLE[context.semantics.role ?? ''] ?? 'NOTDEFINED',
+      });
+      return spec.ok ? model.addEarthworksFill(spec.value, productOptions(context)) : spec;
+    },
+  },
+  beam: {
+    add(model, context) {
+      const spec = parseBeamSpec({
+        ...sharedPrismaticSpec(context),
+        predefinedType: BEAM_ROLE[context.semantics.role ?? ''] ?? 'NOTDEFINED',
+      });
+      return spec.ok ? model.addBeam(spec.value, productOptions(context)) : spec;
+    },
+  },
+  column: {
+    add(model, context) {
+      const spec = parseColumnSpec({
+        name: semanticName(context.element),
+        height: context.selected.height,
+        profile: {
+          kind: 'RECTANGULAR',
+          width: context.selected.length,
+          height: context.selected.width,
+        },
+        ...placement(context.element.localFrame),
+        materialName: context.material,
+        predefinedType: COLUMN_ROLE[context.semantics.role ?? ''] ?? 'NOTDEFINED',
+      });
+      return spec.ok ? model.addColumn(spec.value, productOptions(context)) : spec;
+    },
+  },
+  slab: {
+    add(model, context) {
+      const spec = parseSlabSpec({
+        name: semanticName(context.element),
+        length: context.selected.length,
+        width: context.selected.width,
+        thickness: context.selected.height,
+        ...placement(context.element.localFrame),
+        materialName: context.material,
+        predefinedType: SLAB_ROLE[context.semantics.role ?? ''] ?? 'FLOOR',
+      });
+      return spec.ok ? model.addSlab(spec.value, productOptions(context)) : spec;
+    },
+  },
+  wall: {
+    add(model, context) {
+      const spec = parseWallSpec({
+        name: semanticName(context.element),
+        length: context.selected.length,
+        thickness: context.selected.width,
+        height: context.selected.height,
+        ...placement(context.element.localFrame),
+        materialName: context.material,
+      });
+      return spec.ok ? model.addWall(spec.value, productOptions(context)) : spec;
+    },
+  },
+  footing: {
+    add(model, context) {
+      const spec = parseFootingSpec({
+        name: semanticName(context.element),
+        length: context.selected.length,
+        width: context.selected.width,
+        thickness: context.selected.height,
+        ...placement(context.element.localFrame),
+        materialName: context.material,
+        predefinedType: FOOTING_ROLE[context.semantics.role ?? ''] ?? 'NOTDEFINED',
+      });
+      return spec.ok ? model.addFooting(spec.value, productOptions(context)) : spec;
+    },
+  },
+  railing: {
+    add(model, context) {
+      const spec = parseRailingSpec({
+        name: semanticName(context.element),
+        length: context.selected.length,
+        thickness: context.selected.width,
+        height: context.selected.height,
+        ...placement(context.element.localFrame),
+        materialName: context.material,
+        predefinedType: RAILING_ROLE[context.semantics.role ?? ''] ?? 'NOTDEFINED',
+      });
+      return spec.ok ? model.addRailing(spec.value, productOptions(context)) : spec;
+    },
+  },
+} satisfies Readonly<Record<string, ProductRoute>>;
+
+type ProductKind = keyof typeof PRODUCT_ROUTES;
+type CivilKind = SpatialKind | ProductKind;
+
+interface CivilParent {
+  readonly kind: CivilKind;
+  readonly localId: LocalId;
+}
+
+function isProductKind(kind: string): kind is ProductKind {
+  return Object.hasOwn(PRODUCT_ROUTES, kind);
+}
+
+function isCivilKind(kind: string): kind is Exclude<CivilKind, 'project'> {
+  return kind === 'site' || kind === 'bridge' || kind === 'bridge-part' || isProductKind(kind);
+}
+
 function semanticName(el: ResolvedElement): string {
   const value = el.semantics?.properties?.['name'];
   return typeof value === 'string' && value.trim().length > 0 ? value : el.keyPath;
-}
-
-function semanticNumber(
-  semantics: EngineeringSemantics,
-  property: string,
-  keyPath: string
-): Result<number, BimError> {
-  const value = semantics.properties?.[property];
-  if (typeof value === 'number' && Number.isFinite(value)) return ok(value);
-  return err(
-    specError(
-      'FAMILIES_INVALID_SEMANTIC_PROPERTY',
-      `familiesToBim: semantic '${semantics.kind}' at '${keyPath}' requires numeric property '${property}'`
-    )
-  );
 }
 
 function placement(frame: Frame): {
@@ -161,7 +364,7 @@ export function projectInfrastructure(
     }
 
     const kind = semantics.kind;
-    if (kind !== 'site' && kind !== 'bridge' && kind !== 'bridge-part' && kind !== 'member') {
+    if (!isCivilKind(kind)) {
       return err(
         specError(
           'FAMILIES_UNSUPPORTED_SEMANTIC_KIND',
@@ -206,36 +409,29 @@ export function projectInfrastructure(
       if (!spec.ok) return spec;
       added = model.addBridgePart(spec.value, { stableKey: el.keyPath });
     } else {
-      const length = semanticNumber(semantics, 'length', el.keyPath);
-      if (!length.ok) return length;
-      const width = semanticNumber(semantics, 'width', el.keyPath);
-      if (!width.ok) return width;
-      const height = semanticNumber(semantics, 'height', el.keyPath);
-      if (!height.ok) return height;
       if (typeof semantics.material !== 'string' || semantics.material.trim().length === 0) {
         return err(
           specError(
             'FAMILIES_MISSING_SEMANTIC_MATERIAL',
-            `familiesToBim: member semantic at '${el.keyPath}' requires material`
+            `familiesToBim: semantic '${kind}' at '${el.keyPath}' requires material`
           )
         );
       }
-      const spec = parseMemberSpec({
-        name: semanticName(el),
-        length: length.value,
-        profile: { kind: 'RECTANGULAR', width: width.value, height: height.value },
-        ...placement(el.localFrame),
-        predefinedType: MEMBER_ROLE[semantics.role ?? ''] ?? 'NOTDEFINED',
-        materialName: semantics.material,
+      const selectedBody = selectProductBody(el, semantics, options);
+      if (!selectedBody.ok) return selectedBody;
+      added = PRODUCT_ROUTES[kind].add(model, {
+        element: el,
+        semantics,
+        material: semantics.material,
+        selected: selectedBody.value,
       });
-      if (!spec.ok) return spec;
-      added = model.addMember(spec.value, { stableKey: el.keyPath });
     }
     if (!added.ok) return added;
 
     idByKeyPath.set(el.keyPath, added.value);
-    if (kind === 'member') model.placeIn(added.value, parent.localId);
-    else model.aggregate(parent.localId, added.value);
+    if (isProductKind(kind)) {
+      model.placeIn(added.value, parent.localId);
+    } else model.aggregate(parent.localId, added.value);
 
     const nextParent: CivilParent = { kind, localId: added.value };
     for (const child of el.children) {

@@ -19,6 +19,8 @@ const CONTAINABLE_CATEGORIES: ReadonlySet<BimCategory> = new Set<BimCategory>([
   'DOOR',
   'WINDOW',
   'MEMBER',
+  'SIGN',
+  'EARTHWORKS_FILL',
 ]);
 
 export interface ModelGraph {

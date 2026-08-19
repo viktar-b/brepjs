@@ -2,8 +2,10 @@ export {
   BimModel,
   type ElementIdentityOptions,
   type OpeningIdentityOptions,
+  type ProductCreationOptions,
 } from './model/bimModel.js';
 export type { BimTreeNode, BimTreeSummary } from './model/treeSummary.js';
+export type { ProductBody } from './types/productBody.js';
 export { placedSolids } from './elementFns/placedGeometry.js';
 export { toIfc, toIfcValidated } from './serialize/toIfc.js';
 export type { ValidatedIfcResult } from './serialize/toIfc.js';
@@ -20,6 +22,8 @@ export {
   parseBridgeSpec,
   parseBridgePartSpec,
   parseMemberSpec,
+  parseSignSpec,
+  parseEarthworksFillSpec,
 } from './specs/infrastructureSpec.js';
 export { parseColumnSpec } from './specs/columnSpec.js';
 export { parseProfile, isExtendedProfile } from './specs/profile.js';
@@ -98,6 +102,11 @@ export type {
   FacilityUsageType,
   MemberSpec,
   MemberPredefinedType,
+  SignSpec,
+  SignPredefinedType,
+  EarthworksFillSpec,
+  EarthworksFillPredefinedType,
+  PrismaticInfrastructureSpec,
   RigidPlacementSpec,
 } from './specs/infrastructureSpec.js';
 export type { ColumnSpec, ColumnPredefinedType } from './specs/columnSpec.js';

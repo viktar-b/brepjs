@@ -12,12 +12,15 @@ export {
   type CircleObservation,
   type AnalyticCurveObservation,
   type TopologyObservation,
+  type TopologyEdgeObservation,
+  type TopologyFaceObservation,
   type AnalyticEvidence,
   type ReconstructionTarget,
   type ReferenceSpatialNode,
   type ReferenceProductNode,
   type ReferenceSceneNode,
   type ReferenceScene,
+  type ReferenceRepetitionObservation,
 } from './contracts.js';
 export {
   referenceHarnessError,
@@ -27,9 +30,13 @@ export {
 } from './errors.js';
 export {
   loadReference,
+  inspectReference,
   type ReferenceManifestMapping,
   type ReferenceManifest,
   type LoadReferenceRequest,
   type LoadedReference,
   type ReferenceHarnessResult,
+  type ReferenceInspection,
+  type ReferenceInspectionProduct,
 } from './referenceHarness.js';
+export { scoreCandidate, type CandidateScore, type EnvelopeDeltas } from './scoring.js';

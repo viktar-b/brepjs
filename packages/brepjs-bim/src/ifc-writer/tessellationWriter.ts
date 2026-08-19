@@ -1,6 +1,6 @@
 import * as WebIFC from 'web-ifc';
 import { mesh } from 'brepjs';
-import type { ValidSolid } from 'brepjs';
+import type { ShapeMesh, ValidSolid } from 'brepjs';
 import type { IfcWriter } from './ifcWriter.js';
 import { toIfcLengthM } from '../units/units.js';
 
@@ -59,6 +59,15 @@ export function writeTessellation(
     return writeFacetedBrepFallback(w, geomSubContextId, reason);
   }
 
+  return writeMeshTessellation(w, meshData, geomSubContextId);
+}
+
+/** Write already-evaluated authored mesh data under a typed product Body. */
+export function writeMeshTessellation(
+  w: IfcWriter,
+  meshData: ShapeMesh,
+  geomSubContextId: number
+): TessellationOutput {
   const { vertices, triangles } = meshData;
   if (vertices.length === 0 || triangles.length === 0) {
     const reason = 'mesh() returned an empty triangle set';

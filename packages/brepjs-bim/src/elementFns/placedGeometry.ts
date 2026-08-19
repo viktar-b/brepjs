@@ -48,6 +48,7 @@ export function placedSolids(el: AnyBimElement): Result<readonly ValidSolid[], B
     case 'FOOTING':
     case 'PILE':
     case 'RAILING': {
+      if (el.geometry === null) return ok([]);
       const placed = place(el.geometry, el.spec);
       if (!placed.ok) return placed;
       return ok([placed.value]);

@@ -1,11 +1,11 @@
 import type { Result, ValidSolid } from 'brepjs';
 import type { BimError } from '../errors/bimError.js';
 import type { BeamSpec } from '../specs/beamSpec.js';
-import type { MemberSpec } from '../specs/infrastructureSpec.js';
+import type { PrismaticInfrastructureSpec } from '../specs/infrastructureSpec.js';
 import { beamToSolid } from './beamFns.js';
 
 /** Adapt the shared prismatic Product Body recipe without conflating IFC types. */
-export function memberBodySpec(spec: MemberSpec): BeamSpec {
+export function memberBodySpec(spec: PrismaticInfrastructureSpec): BeamSpec {
   return {
     length: spec.length,
     profile: spec.profile,
@@ -16,6 +16,6 @@ export function memberBodySpec(spec: MemberSpec): BeamSpec {
   };
 }
 
-export function memberToSolid(spec: MemberSpec): Result<ValidSolid, BimError> {
+export function memberToSolid(spec: PrismaticInfrastructureSpec): Result<ValidSolid, BimError> {
   return beamToSolid(memberBodySpec(spec));
 }
