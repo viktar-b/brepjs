@@ -8,6 +8,14 @@ brepjs models physical works as readable, reusable source while keeping referenc
 A reusable parametric definition of an engineering object, owned as source and independent of any particular placement.
 _Avoid_: IFC entity, template, donor component
 
+**Family Catalog**:
+A curated set of reusable Families and Assemblies that accelerates common authoring without defining the boundary of what the system can model.
+_Avoid_: exhaustive component list, supported IFC entities
+
+**BIM Capability Profile**:
+A measurable authoring and interoperability contract for a built-asset domain or use case, including its required semantics, representations, relationships, and Fidelity Gates.
+_Avoid_: full IFC support, entity checklist
+
 **Occurrence**:
 A keyed placement of a family within a model or assembly. Occurrences may share geometry while retaining distinct identity.
 _Avoid_: instance index, copied component
@@ -19,6 +27,14 @@ _Avoid_: group, container
 **Model**:
 The root authored composition of assemblies and occurrences that represents the intended physical work.
 _Avoid_: source IFC, inventory
+
+**Site**:
+A spatial Occurrence within a Model that establishes the civil context and parent frame for facilities and other physical works.
+_Avoid_: positioning wrapper, transform container
+
+**Set-out**:
+An authored civil placement instruction that locates an Occurrence relative to its parent using engineering controls such as an origin, bearing, and elevation.
+_Avoid_: Datum, world transform, baked coordinates
 
 **Reference IFC**:
 An external artifact used to calibrate and verify an authored model. It is never a runtime dependency or a source of production identity.
@@ -49,8 +65,8 @@ Target-independent meaning attached to an authored object, such as its structura
 _Avoid_: IFC class string, export metadata
 
 **Datum**:
-The documented engineering origin and axis convention around which a Family defines its geometry and from which its Local Frame is placed.
-_Avoid_: mesh origin, imported placement
+The documented engineering origin and axis convention around which a Family defines its geometry.
+_Avoid_: Set-out, occurrence placement, mesh origin, imported placement
 
 **Owned Asset**:
 A source-controlled project artifact intentionally used by an authored component when a shape cannot reasonably be expressed parametrically. It is not extracted from a Reference IFC.
