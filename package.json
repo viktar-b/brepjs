@@ -33,6 +33,7 @@
     "packages/brepjs-cad",
     "packages/brepjs-viewer",
     "packages/brepjs-vscode",
+    "reference/infra-bridge",
     "apps/playground",
     "apps/docs"
   ],
@@ -234,6 +235,7 @@
     "test:brepkit": "vitest run --project brepkit",
     "test:stress": "vitest run --config vitest.stress.config.ts",
     "check:boundaries": "bash scripts/check-layer-boundaries.sh",
+    "check:infra-bridge-reference": "npm run check --workspace=@brepjs/infra-bridge-reference",
     "bench": "vitest run --config vitest.bench.config.ts",
     "bench:compare": "BENCH_KERNELS=both vitest run --config vitest.bench.config.ts",
     "bench:json": "BENCH_KERNELS=both BENCH_OUTPUT_JSON=1 vitest run --config vitest.bench.config.ts",

@@ -19,6 +19,7 @@ import type { CoveringSpec } from '../specs/coveringSpec.js';
 import type { ElementAssemblySpec } from '../specs/assemblySpec.js';
 import type { ZoneSpec, SystemSpec } from '../specs/groupSpec.js';
 import type { ProjectSpec, SiteSpec, BuildingSpec, StoreySpec } from '../specs/spatialSpec.js';
+import type { BridgeSpec, BridgePartSpec, MemberSpec } from '../specs/infrastructureSpec.js';
 
 export type BimCategory =
   | 'WALL'
@@ -44,7 +45,10 @@ export type BimCategory =
   | 'PROJECT'
   | 'SITE'
   | 'BUILDING'
-  | 'STOREY';
+  | 'STOREY'
+  | 'BRIDGE'
+  | 'BRIDGE_PART'
+  | 'MEMBER';
 
 export type WallOpeningSpec = {
   readonly kind: 'WALL_OPENING';
@@ -120,7 +124,13 @@ export type BimSpecFor<C extends BimCategory> = C extends 'WALL'
                                               ? BuildingSpec
                                               : C extends 'STOREY'
                                                 ? StoreySpec
-                                                : never;
+                                                : C extends 'BRIDGE'
+                                                  ? BridgeSpec
+                                                  : C extends 'BRIDGE_PART'
+                                                    ? BridgePartSpec
+                                                    : C extends 'MEMBER'
+                                                      ? MemberSpec
+                                                      : never;
 
 export type BimGeometryFor<C extends BimCategory> = C extends 'CURTAIN_WALL'
   ? CurtainWallGrid
@@ -136,6 +146,7 @@ export type BimGeometryFor<C extends BimCategory> = C extends 'CURTAIN_WALL'
         | 'PILE'
         | 'RAILING'
         | 'COVERING'
+        | 'MEMBER'
     ? ValidSolid
     : null;
 
@@ -171,4 +182,7 @@ export type AnyBimElement =
   | BimElement<'PROJECT'>
   | BimElement<'SITE'>
   | BimElement<'BUILDING'>
-  | BimElement<'STOREY'>;
+  | BimElement<'STOREY'>
+  | BimElement<'BRIDGE'>
+  | BimElement<'BRIDGE_PART'>
+  | BimElement<'MEMBER'>;

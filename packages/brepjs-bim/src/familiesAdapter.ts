@@ -5,15 +5,19 @@
  * while the IR path serves the viewport and dedup. GlobalIds derive from
  * families key paths (stable under reordering), not insertion order.
  *
- * Scope: Storey containers, Wall/Slab/Column/Beam/Roof/Stair elements, and wall openings — a
- * fill-role void (Door/Window family) maps onto addDoor/addWindow, which cut
- * the wall and wire IfcRelVoidsElement + IfcRelFillsElement; the opening and
- * filler GlobalIds derive from the synthesized key paths. Anonymous (non-fill)
- * voids stay IR-only and never reach the spec path.
+ * Scope: the legacy building projection. The IFC4X3 civil vertical slice lives
+ * behind the focused infrastructure projection module and shares this public
+ * Interface.
  */
 
 import { ok, err, type Result, type csg } from 'brepjs';
 import type { ResolvedElement } from 'brepjs-families';
+import { projectInfrastructure } from './familiesInfrastructureAdapter.js';
+import {
+  requireKeyed,
+  type FamiliesBimResult,
+  type FamiliesToBimOptions,
+} from './familiesProjection.js';
 import { BimModel, type OpeningIdentityOptions } from './model/bimModel.js';
 import type { LocalId } from './identity/localId.js';
 import { parseWallSpec } from './specs/wallSpec.js';
@@ -23,21 +27,10 @@ import { parseBeamSpec } from './specs/beamSpec.js';
 import { parseRoofSpec } from './specs/roofSpec.js';
 import { parseStairSpec } from './specs/stairSpec.js';
 import { parseDoorSpec, parseWindowSpec } from './specs/openingSpec.js';
-import type { ProjectSpec } from './specs/spatialSpec.js';
 import { specError, type BimError } from './errors/bimError.js';
 import type { FillsOpeningRel } from './types/relationships.js';
 
-export interface FamiliesToBimOptions {
-  readonly project: ProjectSpec;
-  readonly siteName?: string | undefined;
-  readonly buildingName?: string | undefined;
-}
-
-export interface FamiliesBimResult {
-  readonly model: BimModel;
-  /** LocalId per geometry-bearing families key path. */
-  readonly idByKeyPath: ReadonlyMap<string, LocalId>;
-}
+export type { FamiliesBimResult, FamiliesToBimOptions } from './familiesProjection.js';
 
 const SPEC_DEFAULTS = {
   origin: [0, 0, 0] as [number, number, number],
@@ -249,19 +242,6 @@ function addOpenings(
   return ok(undefined);
 }
 
-/** Every element that mints an IFC identity needs an explicit key: an
- *  index-fallback path is order-dependent, which would silently break the
- *  reorder-stable GlobalId contract. */
-function requireKeyed(el: ResolvedElement): Result<void, BimError> {
-  if (el.keyed) return ok(undefined);
-  return err(
-    specError(
-      'FAMILIES_UNKEYED_ELEMENT',
-      `familiesToBim: '${el.keyPath}' has no explicit key — IFC identity needs order-independent key paths (add a key to the element)`
-    )
-  );
-}
-
 /**
  * Project a resolved families tree into an eager BimModel. The caller owns
  * the returned model (`using`); families stays domain-neutral — this adapter
@@ -271,6 +251,8 @@ export function familiesToBim(
   root: ResolvedElement,
   options: FamiliesToBimOptions
 ): Result<FamiliesBimResult, BimError> {
+  if (root.semantics?.kind === 'project') return projectInfrastructure(root, options);
+
   const model = new BimModel();
   const initResult = model.init(options.project);
   if (!initResult.ok) return initResult;

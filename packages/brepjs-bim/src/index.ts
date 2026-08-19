@@ -16,6 +16,11 @@ export type { SpfReaderSettings } from './import/spfReader.js';
 export { parseWallSpec } from './specs/wallSpec.js';
 export { parseSlabSpec } from './specs/slabSpec.js';
 export { parseBeamSpec } from './specs/beamSpec.js';
+export {
+  parseBridgeSpec,
+  parseBridgePartSpec,
+  parseMemberSpec,
+} from './specs/infrastructureSpec.js';
 export { parseColumnSpec } from './specs/columnSpec.js';
 export { parseProfile, isExtendedProfile } from './specs/profile.js';
 export { extendedProfileToFace, extendedProfileArea } from './specs/profilesExtended.js';
@@ -85,6 +90,16 @@ export { specError, ifcError, geometryError, fromBrepError } from './errors/bimE
 export type { WallSpec } from './specs/wallSpec.js';
 export type { SlabSpec, SlabPredefinedType } from './specs/slabSpec.js';
 export type { BeamSpec, BeamPredefinedType } from './specs/beamSpec.js';
+export type {
+  BridgeSpec,
+  BridgePredefinedType,
+  BridgePartSpec,
+  BridgePartPredefinedType,
+  FacilityUsageType,
+  MemberSpec,
+  MemberPredefinedType,
+  RigidPlacementSpec,
+} from './specs/infrastructureSpec.js';
 export type { ColumnSpec, ColumnPredefinedType } from './specs/columnSpec.js';
 export type {
   Profile,

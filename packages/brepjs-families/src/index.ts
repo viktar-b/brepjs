@@ -8,11 +8,25 @@
 
 export {
   family,
+  assembly,
+  model,
   el,
+  normalizeChildren,
   type Element,
+  type ElementChild,
+  type DefinitionKind,
+  type DefinitionComponent,
   type FamilyComponent,
+  type AssemblyComponent,
+  type ModelComponent,
+  type DefinitionInvocation,
+  type SemanticKey,
+  type EngineeringProperty,
+  type EngineeringSemantics,
+  type DefinitionOptions,
   type FamilyOptions,
 } from './element.js';
+export { frame, type Frame, type FrameVector } from './frame.js';
 export { jsx, jsxs, Fragment } from './jsxRuntime.js';
 export {
   resolve,

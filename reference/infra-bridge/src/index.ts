@@ -1,0 +1,35 @@
+export {
+  type LengthUnit,
+  type ObservationVector,
+  type Triangle,
+  type ObservedFrame,
+  type SurfaceObservation,
+  type DimensionObservation,
+  type PlaneObservation,
+  type CylinderObservation,
+  type AnalyticSurfaceObservation,
+  type LineObservation,
+  type CircleObservation,
+  type AnalyticCurveObservation,
+  type TopologyObservation,
+  type AnalyticEvidence,
+  type ReconstructionTarget,
+  type ReferenceSpatialNode,
+  type ReferenceProductNode,
+  type ReferenceSceneNode,
+  type ReferenceScene,
+} from './contracts.js';
+export {
+  referenceHarnessError,
+  type ReferenceHarnessErrorCode,
+  type ReferenceHarnessErrorContext,
+  type ReferenceHarnessError,
+} from './errors.js';
+export {
+  loadReference,
+  type ReferenceManifestMapping,
+  type ReferenceManifest,
+  type LoadReferenceRequest,
+  type LoadedReference,
+  type ReferenceHarnessResult,
+} from './referenceHarness.js';

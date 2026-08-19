@@ -39,6 +39,10 @@ export interface ProjectCrs {
 export interface SiteSpec {
   readonly name: string;
   readonly description?: string;
+  /** Optional rigid world placement. Existing building callers default to identity. */
+  readonly origin?: [number, number, number] | undefined;
+  readonly axisX?: [number, number, number] | undefined;
+  readonly axisZ?: [number, number, number] | undefined;
 }
 
 export interface BuildingSpec {

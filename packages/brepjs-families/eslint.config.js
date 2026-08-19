@@ -5,7 +5,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
         project: './tsconfig.json',
@@ -24,7 +24,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['tests/**/*.ts', 'registry/**/*.ts'],
+    files: ['tests/**/*.{ts,tsx}', 'registry/**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
         project: './tsconfig.test.json',

@@ -10,7 +10,15 @@
  */
 
 import { csg } from 'brepjs';
-import { isFamily, typeNameOf, type Element } from './element.js';
+import {
+  isDefinition,
+  isFamily,
+  typeNameOf,
+  type DefinitionKind,
+  type Element,
+} from './element.js';
+import type { EngineeringSemantics, SemanticKey } from './element.js';
+import { IDENTITY_FRAME, applyFrame, composeFrames, type Frame } from './frame.js';
 
 export interface TransformOp {
   readonly op: 'translate';
@@ -28,6 +36,11 @@ export interface Relationship {
 
 export interface ResolvedElement {
   readonly type: string;
+  readonly definitionKind: DefinitionKind | 'Intrinsic' | 'Synthetic';
+  readonly semanticKey: SemanticKey | undefined;
+  readonly localFrame: Frame;
+  readonly worldFrame: Frame;
+  readonly semantics: EngineeringSemantics | undefined;
   /** Ancestor chain joined with '/'; prop-embedded elements use
    *  `${hostPath}/${propName}:${slotKey}`. */
   readonly keyPath: string;
@@ -62,7 +75,7 @@ function renderToIntrinsic(elem: Element): { intrinsic: Element; typeName: strin
   const typeName = typeNameOf(elem);
   let cur = elem;
   while (isFamily(cur.type)) {
-    cur = cur.type.renderErased(cur.props);
+    cur = cur.type.renderErased(cur.props, cur.children);
   }
   return { intrinsic: cur, typeName };
 }
@@ -77,10 +90,7 @@ function baseGeometry(intrinsic: Element): csg.IRNode {
     return csg.box(size[0], size[1], size[2]);
   }
   if (intrinsic.type === 'Cylinder') {
-    return csg.cylinder(
-      intrinsic.props['radius'] as number,
-      intrinsic.props['height'] as number
-    );
+    return csg.cylinder(intrinsic.props['radius'] as number, intrinsic.props['height'] as number);
   }
   // The bridge to the full csg vocabulary (Profile, Extrude, Revolve, Sweep,
   // Loft, booleans, ...): render functions build any IR node and hand it over;
@@ -88,9 +98,7 @@ function baseGeometry(intrinsic: Element): csg.IRNode {
   if (intrinsic.type === 'Geometry') {
     const node = intrinsic.props['node'];
     if (!isIRNode(node)) {
-      throw new Error(
-        "brepjs-families: 'Geometry' requires a csg IR node in props.node"
-      );
+      throw new Error("brepjs-families: 'Geometry' requires a csg IR node in props.node");
     }
     return node;
   }
@@ -135,6 +143,15 @@ function transformResolved(node: ResolvedElement, ops: readonly TransformOp[]): 
   };
 }
 
+function placeResolved(node: ResolvedElement, parentFrame: Frame): ResolvedElement {
+  return {
+    ...node,
+    worldFrame: composeFrames(parentFrame, node.worldFrame),
+    geometry: applyFrame(node.geometry, parentFrame),
+    children: node.children.map((child) => placeResolved(child, parentFrame)),
+  };
+}
+
 function desugar(intrinsic: Element, hostPath: string | null): DesugarOut {
   let geometry = baseGeometry(intrinsic);
   let openings: ResolvedElement[] = [];
@@ -158,6 +175,11 @@ function desugar(intrinsic: Element, hostPath: string | null): DesugarOut {
       const fill = resolveAt(v, `${openingPath}/fill`, v.key !== undefined);
       openings.push({
         type: 'Opening',
+        definitionKind: 'Synthetic',
+        semanticKey: v.key,
+        localFrame: IDENTITY_FRAME,
+        worldFrame: IDENTITY_FRAME,
+        semantics: undefined,
         keyPath: openingPath,
         keyed: v.key !== undefined,
         geometry: fill.geometry,
@@ -198,33 +220,106 @@ function assertKeyAllowed(key: string, path: string): void {
   }
 }
 
-function resolveAt(elem: Element, path: string, keyed: boolean): ResolvedElement {
-  const { intrinsic, typeName } = renderToIntrinsic(elem);
-  const d = desugar(intrinsic, path);
-  const relationships: Relationship[] = [...d.hostRelationships];
+function flattenFragments(children: readonly Element[]): Element[] {
+  return children.flatMap((child) =>
+    child.type === 'Fragment' ? flattenFragments(child.children) : [child]
+  );
+}
+
+function resolveChildren(
+  authoredChildren: readonly Element[],
+  path: string,
+  parentWorldFrame: Frame
+): {
+  readonly children: readonly ResolvedElement[];
+  readonly relationships: readonly Relationship[];
+} {
+  const relationships: Relationship[] = [];
   const children: ResolvedElement[] = [];
   const seen = new Set<string>();
-  intrinsic.children.forEach((c, i) => {
+  flattenFragments(authoredChildren).forEach((c, i) => {
     if (c.key !== undefined) assertKeyAllowed(c.key, path);
     const seg = c.key ?? `${typeNameOf(c)}[${i}]`;
     if (seen.has(seg)) {
       throw new Error(`brepjs-families: duplicate sibling key '${seg}' under '${path}'`);
     }
     seen.add(seg);
-    const rc = resolveAt(c, `${path}/${seg}`, c.key !== undefined);
+    const rc = resolveAt(c, `${path}/${seg}`, c.key !== undefined, parentWorldFrame);
     children.push(rc);
     relationships.push({ kind: 'Contains', target: rc.keyPath });
   });
-  children.push(...d.openings);
+  return { children, relationships };
+}
+
+function resolveAt(
+  elem: Element,
+  path: string,
+  keyed: boolean,
+  parentWorldFrame: Frame = IDENTITY_FRAME
+): ResolvedElement {
+  const localFrame = elem.frame ?? IDENTITY_FRAME;
+  const worldFrame = composeFrames(parentWorldFrame, localFrame);
+  if (isDefinition(elem.type)) {
+    const semantics = elem.type.resolveSemanticsErased(elem.props, elem.children);
+    const rendered = elem.type.renderErased(elem.props, elem.children);
+    if (isDefinition(rendered.type)) {
+      const resolved = resolveChildren([rendered], path, worldFrame);
+      const child = resolved.children[0];
+      if (child === undefined) throw new Error(`brepjs-families: '${path}' rendered no definition`);
+      return {
+        type: elem.type.definitionName,
+        definitionKind: elem.type.definitionKind,
+        semanticKey: elem.key,
+        localFrame,
+        worldFrame,
+        semantics,
+        keyPath: path,
+        keyed,
+        geometry: child.geometry,
+        props: elem.props,
+        attributes: identityAttributes(elem),
+        relationships: resolved.relationships,
+        children: resolved.children,
+      };
+    }
+
+    const d = desugar(rendered, path);
+    const resolved = resolveChildren(rendered.children, path, worldFrame);
+    const openings = d.openings.map((opening) => placeResolved(opening, worldFrame));
+    return {
+      type: elem.type.definitionName,
+      definitionKind: elem.type.definitionKind,
+      semanticKey: elem.key,
+      localFrame,
+      worldFrame,
+      semantics,
+      keyPath: path,
+      keyed,
+      geometry: applyFrame(d.geometry, worldFrame),
+      props: elem.props,
+      attributes: identityAttributes(elem),
+      relationships: [...d.hostRelationships, ...resolved.relationships],
+      children: [...resolved.children, ...openings],
+    };
+  }
+
+  const d = desugar(elem, path);
+  const resolved = resolveChildren(elem.children, path, worldFrame);
+  const openings = d.openings.map((opening) => placeResolved(opening, worldFrame));
   return {
-    type: typeName,
+    type: typeNameOf(elem),
+    definitionKind: 'Intrinsic',
+    semanticKey: elem.key,
+    localFrame,
+    worldFrame,
+    semantics: undefined,
     keyPath: path,
     keyed,
-    geometry: d.geometry,
+    geometry: applyFrame(d.geometry, worldFrame),
     props: elem.props,
     attributes: identityAttributes(elem),
-    relationships,
-    children,
+    relationships: [...d.hostRelationships, ...resolved.relationships],
+    children: [...resolved.children, ...openings],
   };
 }
 

@@ -1,5 +1,6 @@
 import type { BimModel } from '../model/bimModel.js';
 import type { BimModelMeta } from '../ifc-writer/headerWriter.js';
+import { DEFAULT_IFC_SCHEMA, schemaSupports } from '../ifc-writer/schemaVersion.js';
 import { IfcWriter } from '../ifc-writer/ifcWriter.js';
 import { writeHeader, writeMapConversion } from '../ifc-writer/headerWriter.js';
 import {
@@ -97,6 +98,12 @@ import {
 } from '../ifc-writer/openingWriter.js';
 import { writeProxyGeometry, writeProxyEntity } from '../ifc-writer/proxyWriter.js';
 import { writeIfcType } from '../ifc-writer/typeWriter.js';
+import {
+  writeBridge,
+  writeBridgePart,
+  writeMemberEntity,
+  writeMemberGeometry,
+} from '../ifc-writer/infrastructureWriter.js';
 import type { IfcTypeName } from '../ifc-writer/typeWriter.js';
 import { toIfcLengthM } from '../units/units.js';
 import { checkGeometryValidity } from '../validation/geometryValidity.js';
@@ -128,6 +135,18 @@ export async function toIfc(
   const project = model.getProject();
   if (!project) {
     return err(ifcError('NO_PROJECT', 'BimModel has no project — call model.init() first'));
+  }
+
+  const schema = meta.ifcSchema ?? DEFAULT_IFC_SCHEMA;
+  const unsupportedEntity = (
+    [
+      [model.getBridges().length > 0, 'IfcBridge'],
+      [model.getBridgeParts().length > 0, 'IfcBridgePart'],
+      [model.getMembers().length > 0, 'IfcMember'],
+    ] as const
+  ).find(([present, entity]) => present && !schemaSupports(schema, entity));
+  if (unsupportedEntity !== undefined) {
+    return err(ifcError('IFC4X3_REQUIRED', `${unsupportedEntity[1]} requires ifcSchema: IFC4X3`));
   }
 
   const authorName = [meta.author?.givenName, meta.author?.familyName]
@@ -163,6 +182,9 @@ export async function toIfc(
   const assemblies = model.getElementAssemblies();
   const zones = model.getZones();
   const systems = model.getSystems();
+  const bridges = model.getBridges();
+  const bridgeParts = model.getBridgeParts();
+  const members = model.getMembers();
 
   const { ownerHistoryId, geomContextId, geomSubContextId, unitAssignmentId, lengthUnitId } =
     writeHeader(w, meta);
@@ -189,7 +211,7 @@ export async function toIfc(
 
   for (const el of elements) {
     if (el.category !== 'SITE') continue;
-    const { entityId, placementId } = writeSite(w, el.guid, el.spec.name, ownerHistoryId);
+    const { entityId, placementId } = writeSite(w, el.guid, el.spec.name, ownerHistoryId, el.spec);
     idMap.set(el.localId, entityId);
     placementMap.set(el.localId, placementId);
   }
@@ -225,6 +247,34 @@ export async function toIfc(
     );
     idMap.set(el.localId, entityId);
     placementMap.set(el.localId, placementId);
+  }
+
+  for (const bridge of bridges) {
+    const parentId = findParentOf(bridge.localId, relationships);
+    const parentPlacementId = parentId === null ? null : (placementMap.get(parentId) ?? null);
+    const { entityId, placementId } = writeBridge(
+      w,
+      bridge.guid,
+      bridge.spec,
+      ownerHistoryId,
+      parentPlacementId
+    );
+    idMap.set(bridge.localId, entityId);
+    placementMap.set(bridge.localId, placementId);
+  }
+
+  for (const part of bridgeParts) {
+    const parentId = findParentOf(part.localId, relationships);
+    const parentPlacementId = parentId === null ? null : (placementMap.get(parentId) ?? null);
+    const { entityId, placementId } = writeBridgePart(
+      w,
+      part.guid,
+      part.spec,
+      ownerHistoryId,
+      parentPlacementId
+    );
+    idMap.set(part.localId, entityId);
+    placementMap.set(part.localId, placementId);
   }
 
   const openingsByWall = new Map<LocalId, WallOpeningSpec[]>();
@@ -347,6 +397,28 @@ export async function toIfc(
       writeCustomPsets(w, ownerHistoryId, beamExpressId, beam.spec.customProperties);
     }
     writeBeamBaseQuantities(w, ownerHistoryId, beamExpressId, beam.spec);
+  }
+
+  for (const member of members) {
+    const containingId = findContainerOf(member.localId, relationships);
+    const parentPlacementId =
+      containingId === null ? null : (placementMap.get(containingId) ?? null);
+    const { localPlacementId, productDefinitionShapeId } = writeMemberGeometry(
+      w,
+      member.spec,
+      geomSubContextId,
+      parentPlacementId
+    );
+    const expressId = writeMemberEntity(
+      w,
+      member.guid,
+      member.spec,
+      ownerHistoryId,
+      localPlacementId,
+      productDefinitionShapeId
+    );
+    idMap.set(member.localId, expressId);
+    placementMap.set(member.localId, localPlacementId);
   }
 
   for (const [i, column] of columns.entries()) {
@@ -1140,6 +1212,7 @@ function collectGeometryIssues(model: BimModel): ValidationReport {
     ['Pile', model.getPiles()],
     ['Railing', model.getRailings()],
     ['Covering', model.getCoverings()],
+    ['Member', model.getMembers()],
   ];
   for (const [label, elements] of groups) {
     elements.forEach((el, index) => {

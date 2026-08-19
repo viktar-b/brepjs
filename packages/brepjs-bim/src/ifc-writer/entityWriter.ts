@@ -33,9 +33,19 @@ export function writeSite(
   w: IfcWriter,
   guid: IfcGuid,
   name: string,
-  ownerHistoryId: number
+  ownerHistoryId: number,
+  placement?: {
+    readonly origin?: [number, number, number] | undefined;
+    readonly axisX?: [number, number, number] | undefined;
+    readonly axisZ?: [number, number, number] | undefined;
+  }
 ): { entityId: number; placementId: number } {
-  const placement3DId = writeAxis2Placement3D(w, [0, 0, 0]);
+  const placement3DId = writeAxis2Placement3D(
+    w,
+    (placement?.origin ?? [0, 0, 0]).map(toIfcLengthM) as [number, number, number],
+    placement?.axisZ,
+    placement?.axisX
+  );
   const localPlacementId = w.nextId();
   w.writeLine({
     expressID: localPlacementId,

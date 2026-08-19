@@ -62,6 +62,6 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "brepjs-families": ">=0.1.0 <1.0.0"
+    "brepjs-families": ">=0.7.0 <1.0.0"
   }
 }

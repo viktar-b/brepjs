@@ -70,6 +70,7 @@ export type ImportedElementCategory =
   | 'RAILING'
   | 'COVERING'
   | 'ELEMENT_ASSEMBLY'
+  | 'MEMBER'
   | 'PROXY';
 
 export interface ImportedElement {
@@ -79,6 +80,8 @@ export interface ImportedElement {
   readonly category: ImportedElementCategory;
   readonly predefinedType?: string | undefined;
   readonly storeyExpressId?: number | undefined;
+  /** The containing spatial node, which may be a Storey or an infrastructure part. */
+  readonly spatialContainerExpressId?: number | undefined;
   readonly geometry: ImportedGeometry;
   readonly psets: readonly ImportedPset[];
   readonly material: ImportedMaterial | null;
@@ -93,7 +96,7 @@ export interface ImportedSpatialNode {
   readonly expressId: number;
   readonly guid: IfcGuid;
   readonly name: string;
-  readonly category: 'PROJECT' | 'SITE' | 'BUILDING' | 'STOREY';
+  readonly category: 'PROJECT' | 'SITE' | 'BUILDING' | 'STOREY' | 'BRIDGE' | 'BRIDGE_PART';
   readonly elevationMm?: number | undefined;
   readonly children: readonly ImportedSpatialNode[];
   readonly containedElements: readonly number[];

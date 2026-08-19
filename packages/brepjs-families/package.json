@@ -29,6 +29,7 @@
   "scripts": {
     "build": "vite build",
     "typecheck": "tsgo --noEmit",
+    "typecheck:interfaces": "tsgo -p tsconfig.interface-test.json --noEmit",
     "lint": "eslint src tests registry",
     "test": "vitest run"
   },
@@ -55,6 +56,16 @@
       }
     },
     "./jsx-runtime": {
+      "import": {
+        "types": "./dist/jsxRuntime.d.ts",
+        "default": "./dist/jsxRuntime.js"
+      },
+      "require": {
+        "types": "./dist/jsxRuntime.d.ts",
+        "default": "./dist/jsxRuntime.cjs"
+      }
+    },
+    "./jsx-dev-runtime": {
       "import": {
         "types": "./dist/jsxRuntime.d.ts",
         "default": "./dist/jsxRuntime.js"

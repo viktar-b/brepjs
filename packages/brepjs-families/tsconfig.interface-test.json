@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "brepjs-families",
+    "paths": {
+      "brepjs-families": ["./src/index.ts"],
+      "brepjs-families/jsx-runtime": ["./src/jsxRuntime.ts"],
+      "brepjs-families/jsx-dev-runtime": ["./src/jsxRuntime.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "tests/declarativeInterface.types.tsx"],
+  "exclude": ["node_modules", "dist"]
+}

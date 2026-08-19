@@ -3,8 +3,15 @@
   "compilerOptions": {
     "rootDir": ".",
     "noEmit": true,
-    "types": ["vitest/globals", "node"]
+    "types": ["vitest/globals", "node"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "brepjs-families",
+    "paths": {
+      "brepjs-families": ["./src/index.ts"],
+      "brepjs-families/jsx-runtime": ["./src/jsxRuntime.ts"],
+      "brepjs-families/jsx-dev-runtime": ["./src/jsxRuntime.ts"]
+    }
   },
-  "include": ["tests/**/*.ts", "src/**/*.ts", "registry/**/*.ts"],
+  "include": ["tests/**/*.ts", "tests/**/*.tsx", "src/**/*.ts", "registry/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

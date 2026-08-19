@@ -1,0 +1,29 @@
+{
+  "name": "@brepjs/infra-bridge-reference",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "check": "npm run build && npm run typecheck:tests && npm run lint && npm run test:run",
+    "build": "tsgo",
+    "typecheck": "tsgo --noEmit",
+    "typecheck:tests": "tsgo -p tsconfig.test.json --noEmit",
+    "lint": "eslint src tests",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "web-ifc": "^0.0.77"
+  },
+  "devDependencies": {
+    "typescript": "*",
+    "vitest": "^4.1.10"
+  }
+}

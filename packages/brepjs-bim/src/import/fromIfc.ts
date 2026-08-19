@@ -43,9 +43,9 @@ export interface FromIfcOptions {
 
 /**
  * Each enumerated physical-element IFC type and the {@link ImportedElementCategory}
- * it maps to. Curtain-wall sub-components (IfcPlate/IfcMember) and stair/ramp
- * flights are mapped to their assembly-level category; anything not listed falls
- * back to PROXY.
+ * it maps to. IfcMember is exposed as a typed member (including member
+ * subcomponents authored by other assemblies); stair/ramp flights retain their
+ * assembly-level categories. Products not listed here are not imported.
  */
 const ELEMENT_TYPES: ReadonlyArray<readonly [number, ImportedElementCategory]> = [
   [WebIFC.IFCWALL, 'WALL'],
@@ -68,6 +68,7 @@ const ELEMENT_TYPES: ReadonlyArray<readonly [number, ImportedElementCategory]> =
   [WebIFC.IFCRAILING, 'RAILING'],
   [WebIFC.IFCCOVERING, 'COVERING'],
   [WebIFC.IFCELEMENTASSEMBLY, 'ELEMENT_ASSEMBLY'],
+  [WebIFC.IFCMEMBER, 'MEMBER'],
   [WebIFC.IFCBUILDINGELEMENTPROXY, 'PROXY'],
 ];
 
@@ -199,7 +200,12 @@ function readElement(
     const psets = readPsets(reader, expressId).map(toImportedPset);
     const material = readMaterial(reader, expressId, scale);
     const classification = readClassification(reader, expressId);
-    const storeyExpressId = containment.get(expressId);
+    const spatialContainerExpressId = containment.get(expressId);
+    const storeyExpressId =
+      spatialContainerExpressId !== undefined &&
+      reader.getLineType(spatialContainerExpressId) === WebIFC.IFCBUILDINGSTOREY
+        ? spatialContainerExpressId
+        : undefined;
 
     return {
       expressId,
@@ -208,6 +214,7 @@ function readElement(
       category,
       ...(predefinedType !== undefined ? { predefinedType } : {}),
       ...(storeyExpressId !== undefined ? { storeyExpressId } : {}),
+      ...(spatialContainerExpressId !== undefined ? { spatialContainerExpressId } : {}),
       geometry,
       psets,
       material,

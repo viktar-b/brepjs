@@ -49,6 +49,7 @@ import type { ElementAssemblySpec } from '../specs/assemblySpec.js';
 import type { ZoneSpec, SystemSpec } from '../specs/groupSpec.js';
 import type { SurfaceStyleSpec } from '../ifc-writer/styleWriter.js';
 import type { ProjectSpec, SiteSpec, BuildingSpec, StoreySpec } from '../specs/spatialSpec.js';
+import type { BridgeSpec, BridgePartSpec, MemberSpec } from '../specs/infrastructureSpec.js';
 import { wallToSolid } from '../elementFns/wallFns.js';
 import { slabToSolid } from '../elementFns/slabFns.js';
 import { beamToSolid } from '../elementFns/beamFns.js';
@@ -61,6 +62,7 @@ import { curtainWallToGrid } from '../elementFns/curtainWallFns.js';
 import { footingToSolid, pileToSolid } from '../elementFns/foundationFns.js';
 import { railingToSolid } from '../elementFns/railingFns.js';
 import { coveringToSolid } from '../elementFns/coveringFns.js';
+import { memberToSolid } from '../elementFns/memberFns.js';
 
 /** Optional identity override for created elements: a stable key (e.g. a
  *  families key path) that replaces the positional GlobalId derivation. */
@@ -86,16 +88,18 @@ export class BimModel {
   #modelScope = '';
   readonly #usedStableKeys = new Set<string>();
 
-  init(spec: ProjectSpec): Result<LocalId, BimError> {
+  init(spec: ProjectSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
     if (this.#projectId !== null) {
       return err(
         specError('DUPLICATE_PROJECT', 'BimModel.init() called twice — only one project per model')
       );
     }
+    const keyCheck = this.#checkStableKey(options);
+    if (!keyCheck.ok) return keyCheck;
     // Prefer an explicit, globally-unique projectId; otherwise fall back to the
     // project name+description (stable, but unique only per distinct name).
     this.#modelScope = spec.projectId ?? `${spec.name}::${spec.description ?? ''}`;
-    const id = this.#makeElement('PROJECT', spec, null);
+    const id = this.#makeElement('PROJECT', spec, null, options?.stableKey);
     this.#projectId = id;
     return ok(id);
   }
@@ -113,7 +117,8 @@ export class BimModel {
         el.category === 'FOOTING' ||
         el.category === 'PILE' ||
         el.category === 'RAILING' ||
-        el.category === 'COVERING'
+        el.category === 'COVERING' ||
+        el.category === 'MEMBER'
       ) {
         el.geometry[Symbol.dispose]();
       } else if (el.category === 'CURTAIN_WALL') {
@@ -140,6 +145,28 @@ export class BimModel {
     const keyCheck = this.#checkStableKey(options);
     if (!keyCheck.ok) return keyCheck;
     return ok(this.#makeElement('STOREY', spec, null, options?.stableKey));
+  }
+
+  addBridge(spec: BridgeSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+    const keyCheck = this.#checkStableKey(options);
+    if (!keyCheck.ok) return keyCheck;
+    return ok(this.#makeElement('BRIDGE', spec, null, options?.stableKey));
+  }
+
+  addBridgePart(spec: BridgePartSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+    const keyCheck = this.#checkStableKey(options);
+    if (!keyCheck.ok) return keyCheck;
+    return ok(this.#makeElement('BRIDGE_PART', spec, null, options?.stableKey));
+  }
+
+  addMember(spec: MemberSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+    const keyCheck = this.#checkStableKey(options);
+    if (!keyCheck.ok) return keyCheck;
+    const geometry = memberToSolid(spec);
+    if (!geometry.ok) return geometry;
+    const id = this.#makeElement('MEMBER', spec, geometry.value, options?.stableKey);
+    this.#associateMaterial(id, spec);
+    return ok(id);
   }
 
   /** Reject a duplicate stableKey BEFORE any geometry is built, so the
@@ -858,6 +885,24 @@ export class BimModel {
     return el?.category === 'PROJECT' ? el : null;
   }
 
+  getSites(): BimElement<'SITE'>[] {
+    return this.getAllElements().filter(
+      (element): element is BimElement<'SITE'> => element.category === 'SITE'
+    );
+  }
+
+  getBuildings(): BimElement<'BUILDING'>[] {
+    return this.getAllElements().filter(
+      (element): element is BimElement<'BUILDING'> => element.category === 'BUILDING'
+    );
+  }
+
+  getStoreys(): BimElement<'STOREY'>[] {
+    return this.getAllElements().filter(
+      (element): element is BimElement<'STOREY'> => element.category === 'STOREY'
+    );
+  }
+
   getElement(id: LocalId): AnyBimElement | null {
     return this.#elements.get(id) ?? null;
   }
@@ -943,6 +988,24 @@ export class BimModel {
       if (el.category === 'COLUMN') columns.push(el);
     }
     return columns;
+  }
+
+  getBridges(): BimElement<'BRIDGE'>[] {
+    return this.getAllElements().filter(
+      (element): element is BimElement<'BRIDGE'> => element.category === 'BRIDGE'
+    );
+  }
+
+  getBridgeParts(): BimElement<'BRIDGE_PART'>[] {
+    return this.getAllElements().filter(
+      (element): element is BimElement<'BRIDGE_PART'> => element.category === 'BRIDGE_PART'
+    );
+  }
+
+  getMembers(): BimElement<'MEMBER'>[] {
+    return this.getAllElements().filter(
+      (element): element is BimElement<'MEMBER'> => element.category === 'MEMBER'
+    );
   }
 
   getProxies(): BimElement<'PROXY'>[] {

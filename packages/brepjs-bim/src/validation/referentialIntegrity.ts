@@ -18,6 +18,7 @@ const CONTAINABLE_CATEGORIES: ReadonlySet<BimCategory> = new Set<BimCategory>([
   'COLUMN',
   'DOOR',
   'WINDOW',
+  'MEMBER',
 ]);
 
 export interface ModelGraph {
