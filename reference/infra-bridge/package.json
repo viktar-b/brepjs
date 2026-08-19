@@ -16,7 +16,10 @@
     "typecheck:tests": "tsgo -p tsconfig.test.json --noEmit",
     "typecheck:compare": "tsgo -p tsconfig.compare.json --noEmit",
     "lint": "eslint src tests scripts",
+    "precompare:model": "npm run build",
     "compare:model": "tsx --tsconfig tsconfig.compare.json scripts/compareInfraBridge.ts",
+    "prereport:inventory": "npm run build",
+    "report:inventory": "tsx --tsconfig tsconfig.compare.json scripts/reportInfraBridge.ts",
     "pretest": "npm run build",
     "test": "vitest run",
     "test:run": "vitest run"
