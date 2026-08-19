@@ -5,9 +5,11 @@ import { resolve, type ResolvedElement } from 'brepjs-families';
 import { RailArchBridge } from '../src/assemblies/railArchBridge.js';
 import { RailArchSuperstructure } from '../src/assemblies/railArchSuperstructure.js';
 import { RailPier } from '../src/assemblies/railPier.js';
+import { RailSite } from '../src/assemblies/railSite.js';
 import { RoadAbutment } from '../src/assemblies/roadAbutment.js';
 import { RoadGirderBridge } from '../src/assemblies/roadGirderBridge.js';
 import { RoadPier } from '../src/assemblies/roadPier.js';
+import { RoadSite } from '../src/assemblies/roadSite.js';
 import { MATERIALS } from '../src/materials.js';
 import { loadProjectFont } from '../src/fonts/projectFont.js';
 
@@ -101,6 +103,31 @@ describe('owned infrastructure Assemblies', () => {
       'approach-01',
       'approach-02',
     ]);
+  });
+
+  it('owns one road Site definition with the keyed road Bridge', () => {
+    const root = resolve(<RoadSite key="road-site" />);
+    expect(root).toMatchObject({
+      type: 'RoadSite',
+      definitionKind: 'Assembly',
+      semantics: { kind: 'site', properties: { name: 'Road river bridge site' } },
+    });
+    expect(childKeys(root)).toEqual(['road-river-bridge']);
+  });
+
+  it('reuses one typed rail Site definition with distinct bridge keys', () => {
+    const first = resolve(
+      <RailSite key="rail-site-01" bridgeKey="rail-bridge-01" siteName="Rail site 01" />
+    );
+    const second = resolve(
+      <RailSite key="rail-site-02" bridgeKey="rail-bridge-02" siteName="Rail site 02" />
+    );
+    expect(first.type).toBe('RailSite');
+    expect(second.type).toBe('RailSite');
+    expect(first.semantics?.properties?.['name']).toBe('Rail site 01');
+    expect(second.semantics?.properties?.['name']).toBe('Rail site 02');
+    expect(childKeys(first)).toEqual(['rail-bridge-01']);
+    expect(childKeys(second)).toEqual(['rail-bridge-02']);
   });
 });
 

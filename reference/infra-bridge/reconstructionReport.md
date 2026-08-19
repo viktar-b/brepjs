@@ -52,22 +52,22 @@ The sign uses no BimModel geometry fallback. Its bundled owned OpenType font is 
 
 ## Independent fidelity gates
 
-| Gate                                 |                                        Threshold |                               Measured result | Status                 |
-| ------------------------------------ | -----------------------------------------------: | --------------------------------------------: | ---------------------- |
-| Scoped hierarchy                     |         3 Bridges / 18 BridgeParts / 47 products |                                   3 / 18 / 47 | Pass                   |
-| Product class, containment, material |       Exact source versus reimport for every key |                          47/47 per-key matrix | Pass                   |
-| Generated GlobalIds                  |            Deterministic from Semantic Key paths |         Two independent projections identical | Pass                   |
-| Simple dimensions/envelopes          |                                           ≤ 2 mm |      worst product envelope delta 0.002625 mm | Pass                   |
-| Control-point placement              |                                           ≤ 5 mm |                worst origin delta 0.000401 mm | Pass                   |
-| Frame orientation                    |                             project gate ≤ 0.01° |          worst X-axis delta 0.00000121°; Z 0° | Pass                   |
-| Whole-bridge envelope                |                                 ≤ 10 mm per face |                        worst face 0.001925 mm | Pass                   |
-| Comparable volumes                   |                                             ≤ 2% |                   worst relative error 0.319% | Pass                   |
-| Curved surface distance              |                         p95 ≤ 25 mm; max ≤ 75 mm |                    p95 7.995 mm; max 9.757 mm | Pass                   |
-| Curved normal agreement              | reported independently; project gate mean ≥ 0.99 |                    worst mean cosine 0.998552 | Pass                   |
-| IFC validation                       |                           zero structured errors |                                   zero errors | Pass                   |
-| IFC reimport                         |                        successful, typed 3/18/47 |                                    successful | Pass                   |
-| Text-to-BRep sign                    |             public font-outline declarative path | bundled OpenType → Profile IR → raised relief | Pass                   |
-| Visual artifacts                     |         separate isometric, plan, elevation, GLB | generated under `examples/infra-bridge/dist/` | Pending human approval |
+| Gate                                 |                                          Threshold |                                                                        Measured result | Status                 |
+| ------------------------------------ | -------------------------------------------------: | -------------------------------------------------------------------------------------: | ---------------------- |
+| Scoped hierarchy                     |           3 Bridges / 18 BridgeParts / 47 products |                                                                            3 / 18 / 47 | Pass                   |
+| Product class, containment, material |         Exact source versus reimport for every key |                                                                   47/47 per-key matrix | Pass                   |
+| Generated GlobalIds                  |              Deterministic from Semantic Key paths |                                                  Two independent projections identical | Pass                   |
+| Simple dimensions/envelopes          |                                             ≤ 2 mm |                                               worst product envelope delta 0.002625 mm | Pass                   |
+| Control-point placement              |                                             ≤ 5 mm |                                                         worst origin delta 0.000401 mm | Pass                   |
+| Frame orientation                    |                               project gate ≤ 0.01° |                                                   worst X-axis delta 0.00000121°; Z 0° | Pass                   |
+| Whole-bridge envelope                |                                   ≤ 10 mm per face |                                                                 worst face 0.001925 mm | Pass                   |
+| Comparable volumes                   |                                               ≤ 2% |                                                            worst relative error 0.319% | Pass                   |
+| Curved surface distance              |                           p95 ≤ 25 mm; max ≤ 75 mm |                                                             p95 7.995 mm; max 9.757 mm | Pass                   |
+| Curved normal agreement              |   reported independently; project gate mean ≥ 0.99 |                                                             worst mean cosine 0.998552 | Pass                   |
+| IFC validation                       |                             zero structured errors |                                                                            zero errors | Pass                   |
+| IFC reimport                         |                          successful, typed 3/18/47 |                                                                             successful | Pass                   |
+| Text-to-BRep sign                    |               public font-outline declarative path |                                          bundled OpenType → Profile IR → raised relief | Pass                   |
+| Visual artifacts                     | matched Reference/output/overlay plus authored GLB | generated under `reference/infra-bridge/tmp/visual/` and `examples/infra-bridge/dist/` | Pending human approval |
 
 Supporting IoU is reported but is not used to conceal or replace the normative gates. The minimum 32³ voxel IoU is 0.8879 on the thin raised sign lettering; thin disconnected railing members also make coarse voxel IoU less diagnostic than the exact envelope/surface/volume checks.
 

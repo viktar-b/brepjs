@@ -28,6 +28,10 @@
     "web-ifc": "^0.0.77"
   },
   "devDependencies": {
+    "@brepjs/infra-bridge-example": "*",
+    "brepjs": "*",
+    "brepjs-bim": "*",
+    "brepjs-families": "*",
     "typescript": "*",
     "vitest": "^4.1.10"
   }

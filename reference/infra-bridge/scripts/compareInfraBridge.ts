@@ -16,6 +16,13 @@ import { evaluateModel, resolve, type Frame, type ResolvedElement } from 'brepjs
 import { buildInfraBridge } from '../../../examples/infra-bridge/src/main.js';
 import { projectInfraBridge } from '../../../examples/infra-bridge/src/projectInfraBridge.js';
 import {
+  renderMatchedComparison,
+  renderSnapshot,
+  SNAPSHOT_VIEWS,
+  type SnapshotCamera,
+  type SnapshotEntry,
+} from '../../../examples/infra-bridge/src/snapshotRenderer.js';
+import {
   inspectReference,
   loadReference,
   scoreCandidate,
@@ -105,15 +112,19 @@ if (hasErrors(candidateExport.report)) {
   );
 }
 const candidateImport = unwrap(await fromIfc(candidateExport.bytes));
-const semanticFidelity = compareSemanticFidelity(
-  manifest,
-  inspected.value.products,
-  projected.idByKeyPath,
-  candidateModel,
-  candidateImport.elements,
-  candidateImport.spatialTree
-);
-disposeImportedModel(candidateImport);
+let semanticFidelity: readonly SemanticFidelityRow[];
+try {
+  semanticFidelity = compareSemanticFidelity(
+    manifest,
+    inspected.value.products,
+    projected.idByKeyPath,
+    candidateModel,
+    candidateImport.elements,
+    candidateImport.spatialTree
+  );
+} finally {
+  disposeImportedModel(candidateImport);
+}
 const comparisons: readonly ComparisonCase[] = loaded.value.targets.map(({ semanticKey }) => {
   const canonicalAxes = canonicalAxesFor(semanticKey);
   return {
@@ -165,10 +176,16 @@ const bridgeEnvelopes = compareBridgeEnvelopes(
   resolvedNodes,
   evaluated.byKeyPath
 );
+const visualEvidence = await writeMatchedVisualEvidence(
+  loaded.value.targets,
+  scenes,
+  evaluated.byKeyPath
+);
 const report = {
   comparisons: reports,
   bridgeEnvelopes,
   semanticFidelity,
+  visualEvidence,
   pass:
     reports.every(({ pass }) => pass) &&
     bridgeEnvelopes.every(({ pass }) => pass) &&
@@ -188,6 +205,7 @@ process.stdout.write(
         passed: semanticFidelity.filter(({ pass }) => pass).length,
         failures: semanticFidelity.filter(({ pass }) => !pass),
       },
+      visualEvidence,
       bridgeEnvelopes,
       failures: reports
         .filter(({ pass }) => !pass)
@@ -449,6 +467,86 @@ function compareBridgeEnvelopes(
     );
     return { bridgeKey: key, deltasMm, maximumAbsoluteDeltaMm, pass: maximumAbsoluteDeltaMm <= 10 };
   });
+}
+
+async function writeMatchedVisualEvidence(
+  referenceTargets: readonly ReconstructionTarget[],
+  referenceScenes: ReadonlyMap<string, ReferenceProductNode & { readonly targetKey: string }>,
+  evaluatedNodes: ReadonlyMap<
+    string,
+    { readonly mesh: { readonly ok: boolean; readonly value?: ShapeMesh } }
+  >
+): Promise<{
+  readonly outputDirectory: string;
+  readonly referenceProducts: number;
+  readonly outputProducts: number;
+  readonly views: Readonly<Record<string, SnapshotCamera>>;
+}> {
+  const referenceEntries: SnapshotEntry[] = [];
+  const outputEntries: SnapshotEntry[] = [];
+  for (const target of referenceTargets) {
+    const referenceScene = referenceScenes.get(target.semanticKey);
+    if (referenceScene === undefined) {
+      throw new Error(`Reference scene node is missing: ${target.semanticKey}`);
+    }
+    const candidate = evaluatedNodes.get(target.semanticKey)?.mesh;
+    if (candidate?.ok !== true || candidate.value === undefined) {
+      throw new Error(`Candidate evaluation failed: ${target.semanticKey}`);
+    }
+    referenceEntries.push({
+      mesh: targetWorldMesh(target, referenceScene.worldFrame),
+      color: '#a87543',
+    });
+    outputEntries.push({ mesh: candidate.value, color: '#5f7891' });
+  }
+
+  const outputDirectory = new URL('../tmp/visual/', import.meta.url);
+  await mkdir(outputDirectory, { recursive: true });
+  const views: Record<string, SnapshotCamera> = {};
+  for (const view of SNAPSHOT_VIEWS) {
+    const matched = renderMatchedComparison(referenceEntries, outputEntries, view);
+    views[view.key] = matched.camera;
+    await Promise.all([
+      writeFile(new URL(`${view.key}Comparison.svg`, outputDirectory), matched.svg),
+      writeFile(
+        new URL(`${view.key}Reference.svg`, outputDirectory),
+        renderSnapshot(referenceEntries, `Reference · ${view.name}`, view, matched.camera)
+      ),
+      writeFile(
+        new URL(`${view.key}Output.svg`, outputDirectory),
+        renderSnapshot(outputEntries, `Authored output · ${view.name}`, view, matched.camera)
+      ),
+    ]);
+  }
+  const evidence = {
+    outputDirectory: fileURLToPath(outputDirectory),
+    referenceProducts: referenceEntries.length,
+    outputProducts: outputEntries.length,
+    views,
+  };
+  await writeFile(
+    new URL('matchedCameras.json', outputDirectory),
+    `${JSON.stringify(evidence, null, 2)}\n`
+  );
+  return evidence;
+}
+
+function targetWorldMesh(target: ReconstructionTarget, frame: Frame): ShapeMesh {
+  const vertices = new Float32Array(target.comparisonSurface.vertices.length * 3);
+  for (const [index, point] of target.comparisonSurface.vertices.entries()) {
+    vertices.set(localToWorld(point, frame), index * 3);
+  }
+  const triangles = new Uint32Array(target.comparisonSurface.triangles.length * 3);
+  for (const [index, triangle] of target.comparisonSurface.triangles.entries()) {
+    triangles.set(triangle, index * 3);
+  }
+  return {
+    vertices,
+    triangles,
+    normals: new Float32Array(),
+    uvs: new Float32Array(),
+    faceGroups: [],
+  };
 }
 
 function bridgeKey(semanticKey: string): string {
