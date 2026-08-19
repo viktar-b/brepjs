@@ -81,6 +81,32 @@ describe('completed road-bridge Families', () => {
     });
     expectBounds(resolved, [-9_900, 9, 0, 290.055, -336, 620]);
   });
+
+  it('derives RoadRailing semantics from a non-default rail envelope', () => {
+    const resolved = resolve(
+      <RoadRailing
+        key="variant"
+        length={3_000}
+        setoutInset={0}
+        longitudinalSide="positive"
+        railWidth={500}
+        railHeight={100}
+        lowerRailBase={-400}
+        upperRailBase={700}
+        postPitch={1_000}
+        postThickness={96}
+        postRunIn={500}
+        postRunOut={500}
+        material={MATERIALS.bridgeTimber}
+      />
+    );
+    expect(resolved.semantics?.properties).toMatchObject({
+      length: 3_000,
+      width: 500,
+      height: 1_200,
+    });
+    expectBounds(resolved, [0, 3_000, 0, 500, -400, 800]);
+  });
 });
 
 function expectBounds(resolved: ResolvedElement, expected: readonly number[]): void {

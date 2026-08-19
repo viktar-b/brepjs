@@ -1,73 +1,54 @@
 /** @jsxImportSource brepjs-families */
 
-import { csg } from 'brepjs';
+import {
+  blueprintToContour,
+  csg,
+  textBlueprints,
+  unwrap,
+  type Blueprint,
+  type CompoundBlueprint,
+} from 'brepjs';
 import { el, family, type EngineeringSemantics } from 'brepjs-families';
 import { z } from 'zod';
+import { PROJECT_SIGN_FONT_FAMILY } from '../fonts/projectFont.js';
 
-/** Declared fallback font until CSG IR can embed the public text-to-BRep result. */
+/** Metrics for the bundled project OpenType font. */
 export const PROJECT_SIGN_FONT = {
-  family: 'Infra Bridge Block',
+  family: PROJECT_SIGN_FONT_FAMILY,
   glyphWidth: 180,
   glyphHeight: 200,
-  stroke: 18,
   advance: 230,
 } as const;
 
-const bridgeNameSignProps = z.object({
-  text: z.string().trim().min(1),
-  width: z.number().positive(),
-  height: z.number().positive(),
-  plateDepth: z.number().positive(),
-  reliefDepth: z.number().positive(),
-  material: z.string().trim().min(1),
-  name: z.string().trim().min(1).default('Bridge name sign'),
-});
+const bridgeNameSignProps = z
+  .object({
+    text: z
+      .string()
+      .trim()
+      .min(1)
+      .regex(/^[BREPJS]+$/i, 'contains a glyph outside the project block font')
+      .transform((value) => value.toUpperCase()),
+    width: z.number().positive(),
+    height: z.number().positive(),
+    plateDepth: z.number().positive(),
+    reliefDepth: z.number().positive(),
+    material: z.string().trim().min(1),
+    name: z.string().trim().min(1).default('Bridge name sign'),
+  })
+  .superRefine(({ text, width, height }, context) => {
+    const textWidth =
+      text.length * PROJECT_SIGN_FONT.advance -
+      (PROJECT_SIGN_FONT.advance - PROJECT_SIGN_FONT.glyphWidth);
+    if (textWidth > width) {
+      context.addIssue({ code: 'custom', path: ['text'], message: 'does not fit the sign width' });
+    }
+    if (PROJECT_SIGN_FONT.glyphHeight > height) {
+      context.addIssue({ code: 'custom', path: ['text'], message: 'does not fit the sign height' });
+    }
+  });
 
 export type BridgeNameSignProps = z.output<typeof bridgeNameSignProps>;
 export type BridgeNameSignInput = z.input<typeof bridgeNameSignProps>;
-
-type Segment =
-  'top' | 'middle' | 'bottom' | 'upper-left' | 'upper-right' | 'lower-left' | 'lower-right';
-
-const GLYPH_SEGMENTS: Readonly<Record<string, readonly Segment[]>> = {
-  B: ['top', 'middle', 'bottom', 'upper-left', 'lower-left', 'upper-right', 'lower-right'],
-  R: ['top', 'middle', 'upper-left', 'upper-right', 'lower-left', 'lower-right'],
-  E: ['top', 'middle', 'bottom', 'upper-left', 'lower-left'],
-  P: ['top', 'middle', 'upper-left', 'upper-right', 'lower-left'],
-  J: ['top', 'bottom', 'upper-right', 'lower-right', 'lower-left'],
-  S: ['top', 'middle', 'bottom', 'upper-left', 'lower-right'],
-};
-
-function glyph(text: string, originX: number, originZ: number, depth: number): csg.IRNode {
-  const { glyphWidth: width, glyphHeight: height, stroke } = PROJECT_SIGN_FONT;
-  const halfHeight = height / 2;
-  const separation = 2;
-  const middleBase = halfHeight - stroke / 2;
-  const lowerVerticalBase = stroke + separation;
-  const lowerVerticalHeight = middleBase - separation - lowerVerticalBase;
-  const upperVerticalBase = middleBase + stroke + separation;
-  const upperVerticalHeight = height - stroke - separation - upperVerticalBase;
-  const horizontal = (zOffset: number) =>
-    csg.translate(csg.box(width, depth, stroke), [originX, -depth, originZ + zOffset]);
-  const vertical = (xOffset: number, zOffset: number, verticalHeight: number) =>
-    csg.translate(csg.box(stroke, depth, verticalHeight), [
-      originX + xOffset,
-      -depth,
-      originZ + zOffset,
-    ]);
-  const builders: Readonly<Record<Segment, () => csg.IRNode>> = {
-    top: () => horizontal(height - stroke),
-    middle: () => horizontal(halfHeight - stroke / 2),
-    bottom: () => horizontal(0),
-    'upper-left': () => vertical(0, upperVerticalBase, upperVerticalHeight),
-    'upper-right': () => vertical(width - stroke, upperVerticalBase, upperVerticalHeight),
-    'lower-left': () => vertical(0, lowerVerticalBase, lowerVerticalHeight),
-    'lower-right': () => vertical(width - stroke, lowerVerticalBase, lowerVerticalHeight),
-  };
-  return csg.compound(
-    (GLYPH_SEGMENTS[text] ?? GLYPH_SEGMENTS['E'] ?? []).map((segment) => builders[segment]())
-  );
-}
 
 function semantics(props: BridgeNameSignProps): EngineeringSemantics {
   return {
@@ -86,7 +67,7 @@ function semantics(props: BridgeNameSignProps): EngineeringSemantics {
   };
 }
 
-/** Framed visible lettering using the project block-font fallback. */
+/** Backed sign with visible lettering converted from the bundled font to Profile IR. */
 export const BridgeNameSign = family<BridgeNameSignProps, BridgeNameSignInput>(
   'BridgeNameSign',
   ({ text, width, height, plateDepth, reliefDepth }) => {
@@ -94,18 +75,33 @@ export const BridgeNameSign = family<BridgeNameSignProps, BridgeNameSignInput>(
     const textWidth =
       text.length * PROJECT_SIGN_FONT.advance -
       (PROJECT_SIGN_FONT.advance - PROJECT_SIGN_FONT.glyphWidth);
-    const letters = Array.from(text).map((letter, index) =>
-      csg.translate(
-        glyph(
-          letter.toUpperCase(),
-          -textWidth / 2 + index * PROJECT_SIGN_FONT.advance,
-          (height - PROJECT_SIGN_FONT.glyphHeight) / 2,
-          reliefDepth + 1
-        ),
-        [0, -(plateDepth - 1), 0]
+    using outlines = textBlueprints(text, {
+      fontFamily: PROJECT_SIGN_FONT.family,
+      fontSize: PROJECT_SIGN_FONT.glyphHeight,
+    });
+    const flatRelief = csg.compound(
+      outlines.blueprints.map((blueprint) =>
+        csg.extrude(profileFromBlueprint(blueprint), [0, 0, reliefDepth + 1])
       )
     );
-    return el('Geometry', { node: csg.compound([plate, ...letters]) });
+    const letters = csg.translate(csg.rotate(flatRelief, 90, { axis: [1, 0, 0] }), [
+      -textWidth / 2,
+      -(plateDepth - 1),
+      (height - PROJECT_SIGN_FONT.glyphHeight) / 2,
+    ]);
+    return el('Geometry', { node: csg.compound([plate, letters]) });
   },
   { props: bridgeNameSignProps, semantics }
 );
+
+function profileFromBlueprint(blueprint: Blueprint | CompoundBlueprint) {
+  if ('blueprints' in blueprint) {
+    const [outline, ...holes] = blueprint.blueprints;
+    if (outline === undefined) throw new Error('Project font produced an empty compound outline');
+    return csg.profile(
+      unwrap(blueprintToContour(outline)),
+      holes.map((hole) => unwrap(blueprintToContour(hole)))
+    );
+  }
+  return csg.profile(unwrap(blueprintToContour(blueprint)));
+}

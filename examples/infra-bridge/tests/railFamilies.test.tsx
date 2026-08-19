@@ -9,9 +9,11 @@ import { EarthFill } from '../src/families/earthFill.js';
 import { RailPierStem } from '../src/families/railPierStem.js';
 import { SpandrelWall } from '../src/families/spandrelWall.js';
 import { MATERIALS } from '../src/materials.js';
+import { loadProjectFont } from '../src/fonts/projectFont.js';
 
 beforeAll(async () => {
   await import('brepjs/quick');
+  await loadProjectFont();
 }, 30_000);
 
 describe('rail-arch bridge Families', () => {
@@ -118,7 +120,49 @@ describe('rail-arch bridge Families', () => {
         font: PROJECT_SIGN_FONT.family,
       },
     });
+    expect(resolved.geometry.kind).toBe('Compound');
+    if (resolved.geometry.kind === 'Compound') {
+      const lettering = resolved.geometry.children[1];
+      expect(lettering?.kind).toBe('Translate');
+      if (lettering?.kind === 'Translate' && lettering.target.kind === 'Rotate') {
+        const relief = lettering.target.target;
+        expect(relief.kind).toBe('Compound');
+        if (relief.kind === 'Compound') {
+          expect(relief.children.length).toBeGreaterThan(0);
+          expect(
+            relief.children.every(
+              (node) => node.kind === 'Extrude' && node.profile.kind === 'Profile'
+            )
+          ).toBe(true);
+        }
+      }
+    }
     expectBounds(resolved, [-800, 800, -50, 0, 0, 400]);
+  });
+
+  it('rejects sign text that the declared block font cannot render or fit', () => {
+    expect(() => (
+      <BridgeNameSign
+        key="unsupported"
+        text="BRIDGE"
+        width={1_600}
+        height={400}
+        plateDepth={30}
+        reliefDepth={20}
+        material={MATERIALS.copper}
+      />
+    )).toThrow(/invalid props for family 'BridgeNameSign'/);
+    expect(() => (
+      <BridgeNameSign
+        key="overflow"
+        text="BREPJS"
+        width={1_000}
+        height={400}
+        plateDepth={30}
+        reliefDepth={20}
+        material={MATERIALS.copper}
+      />
+    )).toThrow(/invalid props for family 'BridgeNameSign'/);
   });
 });
 

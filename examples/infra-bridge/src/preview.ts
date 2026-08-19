@@ -7,7 +7,7 @@ import { buildInfraBridge } from './main.js';
 
 await import('brepjs/quick');
 
-const root = resolve(buildInfraBridge());
+const root = resolve(await buildInfraBridge());
 using evaluator = new csg.Evaluator();
 const evaluated = evaluateModel(root, evaluator);
 const evaluatedProducts = [...evaluated.byKeyPath.values()];

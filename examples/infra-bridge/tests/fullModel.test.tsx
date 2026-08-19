@@ -31,8 +31,8 @@ const PRODUCT_CATEGORY = {
 } as const;
 
 describe('complete declarative infrastructure bridge model', () => {
-  it('resolves exactly three Bridges, eighteen BridgeParts, and 47 scoped products', () => {
-    const root = resolve(buildInfraBridge());
+  it('resolves exactly three Bridges, eighteen BridgeParts, and 47 scoped products', async () => {
+    const root = resolve(await buildInfraBridge());
     const nodes = flatten(root);
     expect(root).toMatchObject({
       type: 'InfraBridge',
@@ -49,8 +49,8 @@ describe('complete declarative infrastructure bridge model', () => {
     expect(new Set(nodes.map(({ keyPath }) => keyPath)).size).toBe(nodes.length);
   });
 
-  it('projects every occurrence with its semantic class, containment, material, and stable identity', () => {
-    const root = resolve(buildInfraBridge());
+  it('projects every occurrence with its semantic class, containment, material, and stable identity', async () => {
+    const root = resolve(await buildInfraBridge());
     using evaluator = new csg.Evaluator();
     const evaluated = evaluateModel(root, evaluator);
     const first = unwrap(projectInfraBridge(root, evaluated));
@@ -110,7 +110,7 @@ describe('complete declarative infrastructure bridge model', () => {
   });
 
   it('serializes valid typed IFC4X3 and reimports the complete hierarchy', async () => {
-    const root = resolve(buildInfraBridge());
+    const root = resolve(await buildInfraBridge());
     using evaluator = new csg.Evaluator();
     const evaluated = evaluateModel(root, evaluator);
     const projected = unwrap(projectInfraBridge(root, evaluated));
@@ -147,30 +147,38 @@ describe('complete declarative infrastructure bridge model', () => {
       });
       expect(imported.elements.every(({ material }) => material?.name !== undefined)).toBe(true);
 
-      expect(quantities(imported.elements, 'SLAB', 'Qto_SlabBaseQuantities', 'Length')).toContain(
+      expectAnyQuantityCloseTo(
+        quantities(imported.elements, 'SLAB', 'Qto_SlabBaseQuantities', 'Length'),
         9.909
       );
-      expect(quantities(imported.elements, 'SLAB', 'Qto_SlabBaseQuantities', 'Width')).toContain(
+      expectAnyQuantityCloseTo(
+        quantities(imported.elements, 'SLAB', 'Qto_SlabBaseQuantities', 'Width'),
         3.368
       );
-      expect(quantities(imported.elements, 'BEAM', 'Qto_BeamBaseQuantities', 'Length')).toEqual([
-        3.6, 3.6, 4, 4, 4, 9.891, 9.891, 9.891,
-      ]);
-      expect(quantities(imported.elements, 'COLUMN', 'Qto_ColumnBaseQuantities', 'Length')).toEqual(
+      expectQuantitiesCloseTo(
+        quantities(imported.elements, 'BEAM', 'Qto_BeamBaseQuantities', 'Length'),
+        [3.6, 3.6, 4, 4, 4, 9.891, 9.891, 9.891]
+      );
+      expectQuantitiesCloseTo(
+        quantities(imported.elements, 'COLUMN', 'Qto_ColumnBaseQuantities', 'Length'),
         [2.286321, 2.286321, 2.286321, 3.780346, 3.780346, 3.780346, 3.780346]
       );
-      expect(quantities(imported.elements, 'WALL', 'Qto_WallBaseQuantities', 'Length')).toEqual([
-        20, 20, 20, 20,
-      ]);
-      expect(quantities(imported.elements, 'WALL', 'Qto_WallBaseQuantities', 'Width')).toEqual([
-        0.45, 0.45, 0.45, 0.45,
-      ]);
-      expect(
-        quantities(imported.elements, 'FOOTING', 'Qto_FootingBaseQuantities', 'Length')
-      ).toEqual([5, 5, 5, 6.4, 6.4, 6.4, 6.4]);
-      expect(
-        quantities(imported.elements, 'FOOTING', 'Qto_FootingBaseQuantities', 'Height')
-      ).toEqual([0.7, 0.7, 0.7, 1, 1, 1, 1]);
+      expectQuantitiesCloseTo(
+        quantities(imported.elements, 'WALL', 'Qto_WallBaseQuantities', 'Length'),
+        [20, 20, 20, 20]
+      );
+      expectQuantitiesCloseTo(
+        quantities(imported.elements, 'WALL', 'Qto_WallBaseQuantities', 'Width'),
+        [0.45, 0.45, 0.45, 0.45]
+      );
+      expectQuantitiesCloseTo(
+        quantities(imported.elements, 'FOOTING', 'Qto_FootingBaseQuantities', 'Length'),
+        [5, 5, 5, 6.4, 6.4, 6.4, 6.4]
+      );
+      expectQuantitiesCloseTo(
+        quantities(imported.elements, 'FOOTING', 'Qto_FootingBaseQuantities', 'Height'),
+        [0.7, 0.7, 0.7, 1, 1, 1, 1]
+      );
     } finally {
       disposeImportedModel(imported);
     }
@@ -228,4 +236,21 @@ function quantities(
       return typeof value === 'number' ? [value] : [];
     })
     .sort((left, right) => left - right);
+}
+
+function expectAnyQuantityCloseTo(actual: readonly number[], expected: number): void {
+  const closest = [...actual].sort(
+    (left, right) => Math.abs(left - expected) - Math.abs(right - expected)
+  )[0];
+  expect(closest).toBeDefined();
+  if (closest !== undefined) expect(closest).toBeCloseTo(expected, 6);
+}
+
+function expectQuantitiesCloseTo(actual: readonly number[], expected: readonly number[]): void {
+  expect(actual).toHaveLength(expected.length);
+  actual.forEach((value, index) => {
+    const expectedValue = expected[index];
+    expect(expectedValue).toBeDefined();
+    if (expectedValue !== undefined) expect(value).toBeCloseTo(expectedValue, 6);
+  });
 }

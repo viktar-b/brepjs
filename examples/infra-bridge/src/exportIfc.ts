@@ -9,7 +9,7 @@ import { projectInfraBridge } from './projectInfraBridge.js';
 
 await import('brepjs/quick');
 
-const root = resolve(buildInfraBridge());
+const root = resolve(await buildInfraBridge());
 using evaluator = new csg.Evaluator();
 const evaluatedModel = evaluateModel(root, evaluator);
 const projected = unwrap(projectInfraBridge(root, evaluatedModel));

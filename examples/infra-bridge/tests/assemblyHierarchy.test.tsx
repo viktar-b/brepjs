@@ -1,6 +1,6 @@
 /** @jsxImportSource brepjs-families */
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { resolve, type ResolvedElement } from 'brepjs-families';
 import { RailArchBridge } from '../src/assemblies/railArchBridge.js';
 import { RailArchSuperstructure } from '../src/assemblies/railArchSuperstructure.js';
@@ -9,6 +9,12 @@ import { RoadAbutment } from '../src/assemblies/roadAbutment.js';
 import { RoadGirderBridge } from '../src/assemblies/roadGirderBridge.js';
 import { RoadPier } from '../src/assemblies/roadPier.js';
 import { MATERIALS } from '../src/materials.js';
+import { loadProjectFont } from '../src/fonts/projectFont.js';
+
+beforeAll(async () => {
+  await import('brepjs/quick');
+  await loadProjectFont();
+}, 30_000);
 
 describe('owned infrastructure Assemblies', () => {
   it('keeps RoadAbutment as a validated BridgePart definition boundary', () => {

@@ -26,16 +26,18 @@ const RoadSite = assembly<EmptyProps, EmptyInput>(
   { props: emptyProps, semantics: siteSemantics('Road river bridge site') }
 );
 
-const RailSiteOne = assembly<EmptyProps, EmptyInput>(
-  'RailSiteOne',
-  () => <RailArchBridge key="rail-bridge-01" name="Rail bridge" />,
-  { props: emptyProps, semantics: siteSemantics('Rail bridge site 01') }
-);
+const railSiteProps = z.object({
+  bridgeKey: z.string().trim().min(1),
+  bridgeName: z.string().trim().min(1).default('Rail bridge'),
+  siteName: z.string().trim().min(1),
+});
+type RailSiteProps = z.output<typeof railSiteProps>;
+type RailSiteInput = z.input<typeof railSiteProps>;
 
-const RailSiteTwo = assembly<EmptyProps, EmptyInput>(
-  'RailSiteTwo',
-  () => <RailArchBridge key="rail-bridge-02" name="Rail bridge" />,
-  { props: emptyProps, semantics: siteSemantics('Rail bridge site 02') }
+const RailSite = assembly<RailSiteProps, RailSiteInput>(
+  'RailSite',
+  ({ bridgeKey, bridgeName }) => <RailArchBridge key={bridgeKey} name={bridgeName} />,
+  { props: railSiteProps, semantics: ({ siteName }) => siteSemantics(siteName) }
 );
 
 /** Root authored infrastructure Model with one road and two repeated rail bridges. */
@@ -47,12 +49,16 @@ export const InfraBridge = model<EmptyProps, EmptyInput>(
         key="road-site"
         frame={yawFrame(ROAD_SITE_SET_OUT.origin, ROAD_SITE_SET_OUT.bearingDegrees)}
       />
-      <RailSiteOne
+      <RailSite
         key="rail-site-01"
+        bridgeKey="rail-bridge-01"
+        siteName="Rail bridge site 01"
         frame={yawFrame(RAIL_BRIDGE_SET_OUTS[0].origin, RAIL_BRIDGE_SET_OUTS[0].bearingDegrees)}
       />
-      <RailSiteTwo
+      <RailSite
         key="rail-site-02"
+        bridgeKey="rail-bridge-02"
+        siteName="Rail bridge site 02"
         frame={yawFrame(RAIL_BRIDGE_SET_OUTS[1].origin, RAIL_BRIDGE_SET_OUTS[1].bearingDegrees)}
       />
     </>

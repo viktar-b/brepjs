@@ -86,7 +86,7 @@ const targets = new Map(loaded.value.targets.map((target) => [target.semanticKey
 const scenes = new Map(
   loaded.value.scene.roots.filter(isTargetProduct).map((node) => [node.targetKey, node])
 );
-const root = resolve(buildInfraBridge());
+const root = resolve(await buildInfraBridge());
 const resolvedNodes = indexResolved(root);
 using evaluator = new csg.Evaluator();
 const evaluated = evaluateModel(root, evaluator);
