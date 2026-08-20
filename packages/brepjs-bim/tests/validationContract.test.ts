@@ -288,6 +288,16 @@ describe('bim/bridge/v1 Validation Contract report', () => {
         ...input(),
         gateResults: [{ ...gate, evidence: [{ kind: 42, value: 'model' }] }],
       },
+      { ...input(), gateResults: [{ ...gate, status: new String('pass') }] },
+      {
+        ...input(),
+        gateResults: [
+          {
+            ...gate,
+            issues: [issue('warning', 'BAD_ENTITY', 'Bad entity', Number.NaN)],
+          },
+        ],
+      },
     ] as unknown as BridgeValidationInput[];
 
     for (const malformed of malformedInputs) {

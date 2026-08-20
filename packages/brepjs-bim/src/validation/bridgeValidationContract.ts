@@ -303,7 +303,8 @@ function validateInput(input: BridgeValidationInput): BimError | null {
     }
     resultIds.add(result.gateId);
     if (
-      !['pass', 'fail', 'unavailable', 'not-applicable'].includes(String(result.status)) ||
+      typeof result.status !== 'string' ||
+      !['pass', 'fail', 'unavailable', 'not-applicable'].includes(result.status) ||
       !Array.isArray(result.issues) ||
       !Array.isArray(result.evidence)
     ) {
@@ -324,7 +325,8 @@ function validateInput(input: BridgeValidationInput): BimError | null {
     }
     if (
       result.status === 'unavailable' &&
-      !['unsupported', 'skipped', 'missing', 'crashed'].includes(String(unavailableReason))
+      (typeof unavailableReason !== 'string' ||
+        !['unsupported', 'skipped', 'missing', 'crashed'].includes(unavailableReason))
     ) {
       return contractError(`Unavailable gate "${result.gateId}" requires a reason`);
     }
@@ -345,7 +347,8 @@ function validateInput(input: BridgeValidationInput): BimError | null {
         (next: ValidationIssue) =>
           next === null ||
           typeof next !== 'object' ||
-          !['error', 'warning', 'info'].includes(String(next.severity)) ||
+          typeof next.severity !== 'string' ||
+          !['error', 'warning', 'info'].includes(next.severity) ||
           typeof next.code !== 'string' ||
           next.code.length === 0 ||
           typeof next.message !== 'string' ||
@@ -353,6 +356,7 @@ function validateInput(input: BridgeValidationInput): BimError | null {
           (next.entity !== undefined &&
             typeof next.entity !== 'string' &&
             typeof next.entity !== 'number') ||
+          (typeof next.entity === 'number' && !Number.isFinite(next.entity)) ||
           (next.context !== undefined &&
             (next.context === null ||
               typeof next.context !== 'object' ||
