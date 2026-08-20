@@ -11,6 +11,8 @@ import { IfcWriter } from '../src/ifc-writer/ifcWriter.js';
 import type { IfcLengthUnit } from '../src/ifc-writer/serializationContext.js';
 import { writeHeader } from '../src/ifc-writer/headerWriter.js';
 import { writeWallGeometry } from '../src/ifc-writer/geometryWriter.js';
+import { writeDoorEntity } from '../src/ifc-writer/openingWriter.js';
+import { deriveIfcGuidSync } from '../src/identity/guidDerivation.js';
 
 beforeAll(async () => {
   await initOCCT();
@@ -128,6 +130,51 @@ describe('Phase 2 door/window geometry', () => {
       expect(asValue(profile['XDim'])).toBeCloseTo(250 * expectedScale, 6);
       expect(asValue(profile['YDim'])).toBeCloseTo(3_000 * expectedScale, 6);
       expect(asValue(extrusion['Depth'])).toBeCloseTo(5_000 * expectedScale, 6);
+      api.CloseModel(mid);
+    }
+  });
+
+  it('accepts authored millimetres at the door writer boundary', async () => {
+    for (const [lengthUnit, expectedWidth, expectedHeight] of [
+      ['METRE', 0.9, 2.1],
+      ['MILLIMETRE', 900, 2_100],
+    ] as const) {
+      const writer = await makeWriter(lengthUnit);
+      const { ownerHistoryId, geomSubContextId } = writeHeader(writer, META);
+      const wallGeometry = writeWallGeometry(
+        writer,
+        {
+          length: 5_000,
+          height: 3_000,
+          thickness: 250,
+          origin: [0, 0, 0],
+          axisX: [1, 0, 0],
+          axisZ: [0, 0, 1],
+          materialName: 'Concrete',
+        },
+        geomSubContextId,
+        null
+      );
+      writeDoorEntity(
+        writer,
+        deriveIfcGuidSync(`door-writer-${lengthUnit}`),
+        'Door',
+        ownerHistoryId,
+        wallGeometry.localPlacementId,
+        geomSubContextId,
+        900,
+        2_100
+      );
+      const saved = writer.save();
+      if (!saved.ok) throw new Error(saved.error.message);
+
+      const { api, mid } = await open(saved.value);
+      const door = api.GetLine(mid, api.GetLineIDsWithType(mid, WebIFC.IFCDOOR).get(0)) as Record<
+        string,
+        unknown
+      >;
+      expect(asValue(door['OverallWidth'])).toBeCloseTo(expectedWidth, 6);
+      expect(asValue(door['OverallHeight'])).toBeCloseTo(expectedHeight, 6);
       api.CloseModel(mid);
     }
   });

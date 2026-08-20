@@ -967,8 +967,8 @@ export async function toIfc(
       ownerHistoryId,
       openingPlacementId,
       geomSubContextId,
-      w.serializationContext.lengthFromMm(door.spec.width),
-      w.serializationContext.lengthFromMm(door.spec.height)
+      door.spec.width,
+      door.spec.height
     );
     idMap.set(door.localId, doorExpressId);
     writeRelFillsElement(w, fillsRel.guid, ownerHistoryId, openingEntityId, doorExpressId);
@@ -990,8 +990,8 @@ export async function toIfc(
       ownerHistoryId,
       openingPlacementId,
       geomSubContextId,
-      w.serializationContext.lengthFromMm(win.spec.width),
-      w.serializationContext.lengthFromMm(win.spec.height)
+      win.spec.width,
+      win.spec.height
     );
     idMap.set(win.localId, windowExpressId);
     writeRelFillsElement(w, fillsRel.guid, ownerHistoryId, openingEntityId, windowExpressId);

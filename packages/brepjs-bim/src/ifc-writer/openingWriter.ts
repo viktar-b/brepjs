@@ -290,8 +290,8 @@ export function writeDoorEntity(
   ownerHistoryId: number,
   openingPlacementId: number,
   geomSubContextId: number,
-  overallWidth: number,
-  overallHeight: number,
+  overallWidthMm: number,
+  overallHeightMm: number,
   nominalDepthMm?: number
 ): number {
   const placement3DId = writeAxis2Placement3D(w, [0, 0, 0]);
@@ -303,14 +303,10 @@ export function writeDoorEntity(
     RelativePlacement: w.ref(placement3DId),
   });
 
+  const width = w.serializationContext.lengthFromMm(overallWidthMm);
+  const height = w.serializationContext.lengthFromMm(overallHeightMm);
   const depth = w.serializationContext.lengthFromMm(nominalDepthMm ?? DEFAULT_PANEL_DEPTH_MM);
-  const productDefinitionShapeId = writePanelBody(
-    w,
-    overallWidth,
-    overallHeight,
-    depth,
-    geomSubContextId
-  );
+  const productDefinitionShapeId = writePanelBody(w, width, height, depth, geomSubContextId);
 
   const id = w.nextId();
   w.writeLine({
@@ -324,8 +320,8 @@ export function writeDoorEntity(
     ObjectPlacement: w.ref(localPlacementId),
     Representation: w.ref(productDefinitionShapeId),
     Tag: null,
-    OverallHeight: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, overallHeight),
-    OverallWidth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, overallWidth),
+    OverallHeight: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, height),
+    OverallWidth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, width),
     PredefinedType: null,
     OperationType: null,
     UserDefinedOperationType: null,
@@ -340,8 +336,8 @@ export function writeWindowEntity(
   ownerHistoryId: number,
   openingPlacementId: number,
   geomSubContextId: number,
-  overallWidth: number,
-  overallHeight: number,
+  overallWidthMm: number,
+  overallHeightMm: number,
   nominalDepthMm?: number
 ): number {
   const placement3DId = writeAxis2Placement3D(w, [0, 0, 0]);
@@ -353,14 +349,10 @@ export function writeWindowEntity(
     RelativePlacement: w.ref(placement3DId),
   });
 
+  const width = w.serializationContext.lengthFromMm(overallWidthMm);
+  const height = w.serializationContext.lengthFromMm(overallHeightMm);
   const depth = w.serializationContext.lengthFromMm(nominalDepthMm ?? DEFAULT_PANEL_DEPTH_MM);
-  const productDefinitionShapeId = writePanelBody(
-    w,
-    overallWidth,
-    overallHeight,
-    depth,
-    geomSubContextId
-  );
+  const productDefinitionShapeId = writePanelBody(w, width, height, depth, geomSubContextId);
 
   const id = w.nextId();
   w.writeLine({
@@ -374,8 +366,8 @@ export function writeWindowEntity(
     ObjectPlacement: w.ref(localPlacementId),
     Representation: w.ref(productDefinitionShapeId),
     Tag: null,
-    OverallHeight: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, overallHeight),
-    OverallWidth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, overallWidth),
+    OverallHeight: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, height),
+    OverallWidth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, width),
     PredefinedType: null,
     PartitioningType: null,
     UserDefinedPartitioningType: null,

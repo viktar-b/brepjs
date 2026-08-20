@@ -6,44 +6,70 @@ import {
   computeWeightKg,
   writeWeightQuantity,
 } from '../src/psets/qtoWeights.js';
-import type { IfcWriter } from '../src/ifc-writer/ifcWriter.js';
-import { createIfcSerializationContext } from '../src/ifc-writer/serializationContext.js';
+import { IfcWriter } from '../src/ifc-writer/ifcWriter.js';
 import { writeWallBaseQuantities } from '../src/ifc-writer/psetWriter.js';
+import { writeHeader } from '../src/ifc-writer/headerWriter.js';
+import { writeWallGeometry } from '../src/ifc-writer/geometryWriter.js';
+import { writeWallEntity } from '../src/ifc-writer/entityWriter.js';
+import { deriveIfcGuidSync } from '../src/identity/guidDerivation.js';
 
-function quantityWriter(lengthUnit: 'METRE' | 'MILLIMETRE'): {
-  writer: IfcWriter;
-  written: Array<{ expressID: number } & Record<string, unknown>>;
-} {
-  let nextId = 100;
-  const written: Array<{ expressID: number } & Record<string, unknown>> = [];
-  const writer = {
-    serializationContext: createIfcSerializationContext(lengthUnit),
-    nextId: () => nextId++,
-    guidFor: (expressId: number) => `guid-${expressId}`,
-    ref: (expressId: number) => ({ value: expressId }),
-    mkType: (type: number, value: unknown) => ({ type, value }),
-    writeLine: (entity: { expressID: number } & Record<string, unknown>) => {
-      written.push(entity);
-      return entity.expressID;
-    },
-  } as unknown as IfcWriter;
-  return { writer, written };
-}
+const META = { applicationName: 'brepjs-bim', applicationVersion: '0.1.0' };
 
 function quantityValue(
-  written: Array<{ expressID: number } & Record<string, unknown>>,
+  api: WebIFC.IfcAPI,
+  modelId: number,
   type: number,
   name: string,
   valueField: string
 ): number {
-  const line = written.find(
-    (candidate) =>
-      candidate.type === type &&
-      (candidate['Name'] as { value?: string } | undefined)?.value === name
-  );
+  const ids = api.GetLineIDsWithType(modelId, type);
+  let line: Record<string, unknown> | undefined;
+  for (let index = 0; index < ids.size(); index++) {
+    const candidate = api.GetLine(modelId, ids.get(index)) as Record<string, unknown>;
+    if ((candidate['Name'] as { value?: string } | undefined)?.value === name) {
+      line = candidate;
+      break;
+    }
+  }
   const value = (line?.[valueField] as { value?: number } | undefined)?.value;
   if (value === undefined) throw new Error(`${name} quantity missing`);
   return value;
+}
+
+async function serializedWallQuantities(lengthUnit: 'METRE' | 'MILLIMETRE'): Promise<{
+  api: WebIFC.IfcAPI;
+  modelId: number;
+}> {
+  const writerResult = await IfcWriter.create(undefined, undefined, undefined, lengthUnit);
+  if (!writerResult.ok) throw new Error(writerResult.error.message);
+  const writer = writerResult.value;
+  writer.setModelScope(`quantity-${lengthUnit}`);
+  const { ownerHistoryId, geomSubContextId } = writeHeader(writer, META);
+  const spec = {
+    length: 5_000,
+    height: 3_000,
+    thickness: 250,
+    origin: [0, 0, 0] as [number, number, number],
+    axisX: [1, 0, 0] as [number, number, number],
+    axisZ: [0, 0, 1] as [number, number, number],
+    materialName: 'Concrete',
+  };
+  const geometry = writeWallGeometry(writer, spec, geomSubContextId, null);
+  const wallId = writeWallEntity(
+    writer,
+    deriveIfcGuidSync(`quantity-wall-${lengthUnit}`),
+    'Quantity Wall',
+    ownerHistoryId,
+    geometry.localPlacementId,
+    geometry.productDefinitionShapeId
+  );
+  writeWallBaseQuantities(writer, ownerHistoryId, wallId, spec, [], 2_400);
+  const saved = writer.save();
+  if (!saved.ok) throw new Error(saved.error.message);
+
+  const api = new WebIFC.IfcAPI();
+  await api.Init();
+  return { api, modelId: api.OpenModel(saved.value) };
 }
 
 describe('qtoWeights — weight computation', () => {
@@ -120,41 +146,25 @@ describe('qtoWeights — quantity builder', () => {
 });
 
 describe('base quantities — serialization unit context', () => {
-  it('derives length, area, and volume measures from the writer unit context', () => {
+  it('derives length, area, and volume measures from the writer unit context', async () => {
     for (const [lengthUnit, expected] of [
       ['METRE', { length: 5, area: 15, volume: 3.75 }],
       ['MILLIMETRE', { length: 5_000, area: 15_000_000, volume: 3_750_000_000 }],
     ] as const) {
-      const { writer, written } = quantityWriter(lengthUnit);
-      writeWallBaseQuantities(
-        writer,
-        1,
-        2,
-        {
-          length: 5_000,
-          height: 3_000,
-          thickness: 250,
-          origin: [0, 0, 0],
-          axisX: [1, 0, 0],
-          axisZ: [0, 0, 1],
-          materialName: 'Concrete',
-        },
-        [],
-        2_400
-      );
-
-      expect(quantityValue(written, WebIFC.IFCQUANTITYLENGTH, 'Length', 'LengthValue')).toBe(
+      const { api, modelId } = await serializedWallQuantities(lengthUnit);
+      expect(quantityValue(api, modelId, WebIFC.IFCQUANTITYLENGTH, 'Length', 'LengthValue')).toBe(
         expected.length
       );
-      expect(quantityValue(written, WebIFC.IFCQUANTITYAREA, 'GrossSideArea', 'AreaValue')).toBe(
-        expected.area
-      );
       expect(
-        quantityValue(written, WebIFC.IFCQUANTITYVOLUME, 'GrossVolume', 'VolumeValue')
+        quantityValue(api, modelId, WebIFC.IFCQUANTITYAREA, 'GrossSideArea', 'AreaValue')
+      ).toBe(expected.area);
+      expect(
+        quantityValue(api, modelId, WebIFC.IFCQUANTITYVOLUME, 'GrossVolume', 'VolumeValue')
       ).toBeCloseTo(expected.volume, 9);
-      expect(quantityValue(written, WebIFC.IFCQUANTITYWEIGHT, 'GrossWeight', 'WeightValue')).toBe(
-        9_000
-      );
+      expect(
+        quantityValue(api, modelId, WebIFC.IFCQUANTITYWEIGHT, 'GrossWeight', 'WeightValue')
+      ).toBe(9_000);
+      api.CloseModel(modelId);
     }
   });
 });
