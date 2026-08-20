@@ -807,7 +807,7 @@ describe('families infrastructure projection', () => {
                   key: 'superstructure',
                   frame: frame({
                     origin: [0, 3, 0],
-                    xAxis: [1, 0, 0],
+                    xAxis: [0, -1, 0],
                     zAxis: [0, 0, 1],
                   }),
                 },
@@ -825,7 +825,7 @@ describe('families infrastructure projection', () => {
                     key: 'main-girder',
                     frame: frame({
                       origin: [1, 1, 1],
-                      xAxis: [1, 0, 0],
+                      xAxis: [0, 1, 0],
                       zAxis: [0, 0, 1],
                     }),
                     name: 'Main girder',
@@ -853,12 +853,36 @@ describe('families infrastructure projection', () => {
     const [superstructure, deck] = bim.getBridgeParts();
     const [girder] = bim.getBeams();
 
-    expect(environment?.spec.origin).toEqual([100, 200, 0]);
-    expect(bridgeSite?.spec.origin).toEqual([10, 20, 0]);
-    expect(bridge?.spec.origin).toEqual([5, 0, 0]);
-    expect(superstructure?.spec.origin).toEqual([0, 3, 0]);
-    expect(deck?.spec.origin).toEqual([0, 0, 2]);
-    expect(girder?.spec.origin).toEqual([1, 1, 1]);
+    expect(environment?.spec).toMatchObject({
+      origin: [100, 200, 0],
+      axisX: [1, 0, 0],
+      axisZ: [0, 0, 1],
+    });
+    expect(bridgeSite?.spec).toMatchObject({
+      origin: [10, 20, 0],
+      axisX: [0, 1, 0],
+      axisZ: [0, 0, 1],
+    });
+    expect(bridge?.spec).toMatchObject({
+      origin: [5, 0, 0],
+      axisX: [1, 0, 0],
+      axisZ: [0, 0, 1],
+    });
+    expect(superstructure?.spec).toMatchObject({
+      origin: [0, 3, 0],
+      axisX: [0, -1, 0],
+      axisZ: [0, 0, 1],
+    });
+    expect(deck?.spec).toMatchObject({
+      origin: [0, 0, 2],
+      axisX: [1, 0, 0],
+      axisZ: [0, 0, 1],
+    });
+    expect(girder?.spec).toMatchObject({
+      origin: [1, 1, 1],
+      axisX: [0, 1, 0],
+      axisZ: [0, 0, 1],
+    });
 
     const id = (path: string) => {
       const value = projected.idByKeyPath.get(path);
