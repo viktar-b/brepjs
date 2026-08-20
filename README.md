@@ -1,6 +1,6 @@
 <div align="center">
 
-# brepjs
+# brepjs.
 
 CAD modeling for JavaScript.
 
