@@ -290,14 +290,16 @@ function compareSetField(
   first: readonly string[],
   second: readonly string[]
 ): ValidationIssue[] {
-  if (JSON.stringify(first) === JSON.stringify(second)) return [];
   const firstSet = new Set(first);
   const secondSet = new Set(second);
+  const missing = [...firstSet].filter((value) => !secondSet.has(value));
+  const added = [...secondSet].filter((value) => !firstSet.has(value));
+  if (missing.length === 0 && added.length === 0) return [];
   return [
     issue('error', code, `${label} changed across round-trip`, undefined, {
       path: label,
-      missing: first.filter((value) => !secondSet.has(value)),
-      added: second.filter((value) => !firstSet.has(value)),
+      missing,
+      added,
     }),
   ];
 }
@@ -319,9 +321,9 @@ function compareField(
 }
 
 /**
- * Write→read→re-write round-trip self-check. Opens the produced IFC bytes,
- * re-saves them, re-opens the re-saved bytes, and reports any count delta in the
- * total entity-line count or the key per-type counts (per the severity model).
+ * Write→read→re-write round-trip self-check. Compares entity counts, GlobalIds,
+ * decomposition, containment, spatial semantics, parent-relative placements,
+ * declared units, CRS metadata, and map conversion facts after re-saving.
  */
 export async function checkRoundTrip(bytes: Uint8Array): Promise<RoundTripReport> {
   const firstPass = await observeIfc(bytes);

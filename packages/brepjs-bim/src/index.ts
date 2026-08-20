@@ -53,7 +53,7 @@ export { deriveIfcGuid, deriveIfcGuidSync } from './identity/guidDerivation.js';
 export { makeLocalIdCounter } from './identity/localId.js';
 export { checkReferentialIntegrity } from './validation/referentialIntegrity.js';
 export { checkSchema } from './validation/schemaCheck.js';
-export { checkRoundTrip, observeIfc, compareIfcObservations } from './validation/roundTrip.js';
+export { checkRoundTrip, compareIfcObservations } from './validation/roundTrip.js';
 export { checkGeometryValidity } from './validation/geometryValidity.js';
 export { checkGherkinRules } from './validation/gherkinChecks.js';
 export { issue, emptyReport, hasErrors, countBySeverity } from './validation/severity.js';

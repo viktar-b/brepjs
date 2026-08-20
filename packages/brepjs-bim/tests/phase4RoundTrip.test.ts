@@ -428,6 +428,9 @@ describe('Phase 4 round-trip — fromIfc(toIfc(model))', () => {
       ),
     };
     expect(compareIfcObservations(base, renamedOnly)).toEqual([]);
+    expect(
+      compareIfcObservations(base, { ...base, globalIds: [...base.globalIds].reverse() })
+    ).toEqual([]);
   });
   it('reconstructs the spatial tree shape with preserved GlobalIds', async () => {
     const { model } = buildRoundTripModel();
