@@ -12,6 +12,10 @@ _Avoid_: IFC entity, template, donor component
 A curated set of reusable Families and Assemblies that accelerates common authoring without defining the boundary of what the system can model.
 _Avoid_: exhaustive component list, supported IFC entities
 
+**Scaffold Template**:
+A versioned project-generation recipe that creates an initial copy-owned repository structure and starter source. It is tooling for beginning a project, not a reusable physical definition or a runtime dependency.
+_Avoid_: Family, BIM Capability Profile, managed project
+
 **BIM Capability Profile**:
 A measurable authoring and interoperability contract for a built-asset domain or use case, including its required semantics, representations, relationships, and Fidelity Gates.
 _Avoid_: full IFC support, entity checklist
@@ -23,6 +27,22 @@ _Avoid_: instance index, copied component
 **Assembly**:
 A reusable composition of keyed occurrences whose positions are expressed relative to the assembly.
 _Avoid_: group, container
+
+**Spatial Assembly**:
+An Assembly whose keyed Occurrence establishes an authored spatial boundary and parent frame within a Model. Sites, Facilities, and Spatial Parts are Spatial Assemblies; Projection maps them to target-specific spatial entities and relationships.
+_Avoid_: IFC entity tree, filesystem hierarchy, transform container
+
+**Facility**:
+A principal built-asset Occurrence beneath a Site, such as a building or bridge, that owns its spatial breakdown through Spatial Parts.
+_Avoid_: IfcFacility instance, generic container, whole project
+
+**Spatial Part**:
+A keyed spatial Occurrence that subdivides a Facility, such as a building storey or bridge part, and contains lower Spatial Parts or physical-product Occurrences.
+_Avoid_: IfcFacilityPart instance, arbitrary group, folder
+
+**Spatial Composition**:
+The authored decomposition meaning of a Spatial Assembly Occurrence: a collection of subordinate spatial Occurrences, an independently usable element, or a partial subdivision of another spatial Occurrence.
+_Avoid_: IFC composition enum, nesting depth, folder structure
 
 **Model**:
 The root authored composition of assemblies and occurrences that represents the intended physical work.
@@ -61,7 +81,7 @@ An external verifier that compares an authored model with a Reference IFC withou
 _Avoid_: reconstruction runtime, donor adapter
 
 **Engineering Semantics**:
-Target-independent meaning attached to an authored object, such as its structural role, material, and intentional properties. Projection translates this meaning into target-specific entities.
+Target-independent meaning attached to an authored object, including its structural kind, domain category, engineering role, material, and intentional properties. Projection translates this meaning into target-specific entities.
 _Avoid_: IFC class string, export metadata
 
 **Datum**:
