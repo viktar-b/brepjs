@@ -26,7 +26,7 @@ export function geometryError(code: string, message: string, cause?: unknown): B
 /**
  * IFC-import error factory. Codes used by the reader subsystem:
  * - `OPEN_MODEL_FAILED` — web-ifc returned an invalid model id on OpenModel
- * - `SCHEMA_UNSUPPORTED` — schema string not in `['IFC2X3', 'IFC4', 'IFC4X3']`
+ * - `SCHEMA_UNSUPPORTED` — schema string is not a supported IFC import schema
  * - `UNSUPPORTED_PROFILE` — profile entity type not in the supported set
  * - `GEOMETRY_RECONSTRUCTION_FAILED` — parametric reconstruction threw
  * - `TESSELLATION_NOT_MANIFOLD` — STL round-trip did not produce a closed solid

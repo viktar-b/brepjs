@@ -58,7 +58,10 @@ export {
 export {
   IFC_SCHEMAS,
   DEFAULT_IFC_SCHEMA,
+  IFC4X3_ADD2_REFERENCE_VIEW,
   fileSchemaString,
+  webIfcSchemaString,
+  isIfc4x3Add2ReferenceView,
   isIfcSchema,
   schemaSupports,
 } from './ifc-writer/schemaVersion.js';
@@ -243,7 +246,7 @@ export type {
 export type { ModelGraph, IntegrityInput } from './validation/referentialIntegrity.js';
 export type { RoundTripReport, EntityCounts } from './validation/roundTrip.js';
 export type { IfcTypeName, TypeWriteResult } from './ifc-writer/typeWriter.js';
-export type { IfcSchema } from './ifc-writer/schemaVersion.js';
+export type { IfcSchema, IfcSchemaProvenance } from './ifc-writer/schemaVersion.js';
 export type { OwnerHistoryAuthor, OwnerHistoryMeta } from './ifc-writer/ownerHistoryWriter.js';
 
 // COBie export (deriveCobieModel is the canonical name; exportCobie is the

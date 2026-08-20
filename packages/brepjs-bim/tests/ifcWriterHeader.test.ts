@@ -10,6 +10,7 @@ import {
 import { unwrap } from 'brepjs';
 import { BimModel } from '../src/model/bimModel.js';
 import { toIfc } from '../src/serialize/toIfc.js';
+import { IFC4X3_ADD2_REFERENCE_VIEW } from '../src/ifc-writer/schemaVersion.js';
 
 beforeAll(async () => {
   await initOCCT();
@@ -62,6 +63,18 @@ function stableIfcBytes(bytes: Uint8Array): Uint8Array {
 }
 
 describe('IfcWriter STEP header', () => {
+  it('declares exact IFC4X3_ADD2 and Reference View through the runtime', async () => {
+    const created = await IfcWriter.create(IFC4X3_ADD2_REFERENCE_VIEW, 'IFC4X3_ADD2', {});
+    if (!created.ok) throw new Error(created.error.message);
+    const saved = created.value.save();
+    if (!saved.ok) throw new Error(saved.error.message);
+
+    const text = new TextDecoder().decode(saved.value.subarray(0, 1024));
+    expect(text).toContain("FILE_SCHEMA(('IFC4X3_ADD2'))");
+    expect(text).not.toContain("FILE_SCHEMA(('IFC4X3'))");
+    expect(text).toContain(`ViewDefinition [${IFC4X3_ADD2_REFERENCE_VIEW}]`);
+  });
+
   it('emits a spec-conformant FILE_NAME (no null author/organization/authorization)', async () => {
     const text = await headerText({ author: 'Ada Lovelace', organization: 'Analytical Engines' });
     const line = text.split('\n').find((l) => l.startsWith('FILE_NAME'));

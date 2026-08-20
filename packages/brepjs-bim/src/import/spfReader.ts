@@ -7,9 +7,23 @@ import type { Result } from 'brepjs';
 import { ok, err } from 'brepjs';
 
 /** Schema strings web-ifc reports and this reader supports. */
-export type ImportedSchema = 'IFC2X3' | 'IFC4' | 'IFC4X3';
+export type ImportedSchema = 'IFC2X3' | 'IFC4' | 'IFC4X3' | 'IFC4X3_ADD2';
 
-const SUPPORTED_SCHEMAS: readonly string[] = ['IFC2X3', 'IFC4', 'IFC4X3'];
+const SUPPORTED_SCHEMAS: readonly string[] = ['IFC2X3', 'IFC4', 'IFC4X3', 'IFC4X3_ADD2'];
+const FILE_SCHEMA_RE = /FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'/i;
+const VIEW_DEFINITION_RE = /ViewDefinition \[([^\]]*)\]/i;
+
+function readHeaderProvenance(bytes: Uint8Array): {
+  readonly schema: string | null;
+  readonly viewDefinition: string | null;
+} {
+  const headerEnd = Math.min(bytes.byteLength, 16_384);
+  const header = new TextDecoder().decode(bytes.subarray(0, headerEnd));
+  return {
+    schema: FILE_SCHEMA_RE.exec(header)?.[1]?.toUpperCase() ?? null,
+    viewDefinition: VIEW_DEFINITION_RE.exec(header)?.[1] ?? null,
+  };
+}
 
 export interface SpfReaderSettings {
   /**
@@ -37,6 +51,7 @@ function deleteVector(vec: unknown): void {
 
 export class SpfReader {
   readonly schema: ImportedSchema;
+  readonly viewDefinition: string | null;
   readonly modelId: number;
   readonly #api: IfcAPI;
   #closed = false;
@@ -44,10 +59,16 @@ export class SpfReader {
   // during import, so this is safe and removes the per-element WASM round-trip.
   readonly #linesByType = new Map<number, number[]>();
 
-  private constructor(api: IfcAPI, modelId: number, schema: ImportedSchema) {
+  private constructor(
+    api: IfcAPI,
+    modelId: number,
+    schema: ImportedSchema,
+    viewDefinition: string | null
+  ) {
     this.#api = api;
     this.modelId = modelId;
     this.schema = schema;
+    this.viewDefinition = viewDefinition;
   }
 
   static async create(
@@ -78,13 +99,15 @@ export class SpfReader {
       );
     }
 
-    const schemaRaw = api.GetModelSchema(modelId);
+    const runtimeSchema = api.GetModelSchema(modelId);
+    const header = readHeaderProvenance(bytes);
+    const schemaRaw = header.schema ?? runtimeSchema;
     if (!SUPPORTED_SCHEMAS.includes(schemaRaw)) {
       api.CloseModel(modelId);
       return err(importError('SCHEMA_UNSUPPORTED', `Unsupported IFC schema "${schemaRaw}"`));
     }
 
-    return ok(new SpfReader(api, modelId, schemaRaw as ImportedSchema));
+    return ok(new SpfReader(api, modelId, schemaRaw as ImportedSchema, header.viewDefinition));
   }
 
   /** Always issues CloseModel; safe to call more than once. */

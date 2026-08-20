@@ -151,7 +151,12 @@ export async function toIfc(
     ] as const
   ).find(([present, entity]) => present && !schemaSupports(schema, entity));
   if (unsupportedEntity !== undefined) {
-    return err(ifcError('IFC4X3_REQUIRED', `${unsupportedEntity[1]} requires ifcSchema: IFC4X3`));
+    return err(
+      ifcError(
+        'IFC4X3_REQUIRED',
+        `${unsupportedEntity[1]} requires ifcSchema: IFC4X3 or IFC4X3_ADD2`
+      )
+    );
   }
 
   const authorName = [meta.author?.givenName, meta.author?.familyName]

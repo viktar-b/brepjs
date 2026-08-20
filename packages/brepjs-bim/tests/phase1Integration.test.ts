@@ -6,6 +6,11 @@ import { BimModel } from '../src/model/bimModel.js';
 import { toIfc, toIfcValidated } from '../src/serialize/toIfc.js';
 import { hasErrors } from '../src/validation/severity.js';
 import { DEFAULT_MVD_VIEW_DEFINITION } from '../src/ifc-writer/ifcWriter.js';
+import { fromIfc } from '../src/import/fromIfc.js';
+import {
+  IFC4X3_ADD2_REFERENCE_VIEW,
+  isIfc4x3Add2ReferenceView,
+} from '../src/ifc-writer/schemaVersion.js';
 
 beforeAll(async () => {
   await initOCCT();
@@ -96,6 +101,37 @@ describe('Phase 1 integration', () => {
     if (!result.ok) throw new Error(result.error.message);
     const text = new TextDecoder().decode(result.value.subarray(0, 1024));
     expect(text).toContain('ViewDefinition [DesignTransferView_V1.0]');
+  });
+
+  it('round-trips exact IFC4X3_ADD2 Reference View provenance', async () => {
+    const result = await toIfcValidated(buildModel(), {
+      ...META,
+      ifcSchema: 'IFC4X3_ADD2',
+      mvdViewDefinition: IFC4X3_ADD2_REFERENCE_VIEW,
+    });
+    if (!result.ok) throw new Error(result.error.message);
+    expect(hasErrors(result.value.report)).toBe(false);
+
+    const imported = await fromIfc(result.value.bytes, { skipGeometry: true });
+    if (!imported.ok) throw new Error(imported.error.message);
+    expect(imported.value.schema).toBe('IFC4X3_ADD2');
+    expect(imported.value.viewDefinition).toBe(IFC4X3_ADD2_REFERENCE_VIEW);
+    expect(isIfc4x3Add2ReferenceView(imported.value)).toBe(true);
+  });
+
+  it('does not accept a generic IFC4X3 file as exact Bridge provenance', async () => {
+    const result = await toIfc(buildModel(), {
+      ...META,
+      ifcSchema: 'IFC4X3',
+      mvdViewDefinition: IFC4X3_ADD2_REFERENCE_VIEW,
+    });
+    if (!result.ok) throw new Error(result.error.message);
+
+    const imported = await fromIfc(result.value, { skipGeometry: true });
+    if (!imported.ok) throw new Error(imported.error.message);
+    expect(imported.value.schema).toBe('IFC4X3');
+    expect(imported.value.viewDefinition).toBe(IFC4X3_ADD2_REFERENCE_VIEW);
+    expect(isIfc4x3Add2ReferenceView(imported.value)).toBe(false);
   });
 
   it('emits IfcType objects and IfcRelDefinesByType for occurrences', async () => {

@@ -121,6 +121,8 @@ export function disposeImportedModel(model: ImportedModel): void {
  */
 export interface ImportedModel {
   readonly schema: ImportedSchema;
+  /** MVD ViewDefinition declared in the STEP FILE_DESCRIPTION header. */
+  readonly viewDefinition: string | null;
   readonly spatialTree: ImportedSpatialNode | null;
   readonly elements: readonly ImportedElement[];
   /** Express id → ImportedElement for fast lookup. */

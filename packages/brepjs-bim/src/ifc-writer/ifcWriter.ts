@@ -4,7 +4,11 @@ import { ifcError } from '../errors/bimError.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { deriveIfcGuidSync, makeLineKey } from '../identity/guidDerivation.js';
 import type { IfcSchema } from './schemaVersion.js';
-import { DEFAULT_IFC_SCHEMA, fileSchemaString } from './schemaVersion.js';
+import {
+  DEFAULT_IFC_SCHEMA,
+  IFC4X3_ADD2_REFERENCE_VIEW,
+  webIfcSchemaString,
+} from './schemaVersion.js';
 import { initIfcApi } from '../ifcRuntime.js';
 import type { Result } from 'brepjs';
 import { ok, err } from 'brepjs';
@@ -15,7 +19,7 @@ import {
 } from './serializationContext.js';
 
 /** Default MVD ViewDefinition declared in the STEP FILE_DESCRIPTION header. */
-export const DEFAULT_MVD_VIEW_DEFINITION = 'ReferenceView_v1.2';
+export const DEFAULT_MVD_VIEW_DEFINITION = IFC4X3_ADD2_REFERENCE_VIEW;
 
 // web-ifc emits a default ViewDefinition (e.g. "[CoordinationView]") in the STEP
 // FILE_DESCRIPTION; we rewrite whatever is between the brackets with our MVD.
@@ -95,7 +99,7 @@ export class IfcWriter {
     try {
       const api = new IfcAPI();
       await initIfcApi(api);
-      const modelId = api.CreateModel({ schema: fileSchemaString(ifcSchema) });
+      const modelId = api.CreateModel({ schema: webIfcSchemaString(ifcSchema) });
       return ok(
         new IfcWriter(
           api,

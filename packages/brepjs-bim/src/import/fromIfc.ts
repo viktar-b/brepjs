@@ -142,6 +142,7 @@ export async function fromIfc(
 
     const model: ImportedModel = {
       schema: reader.schema,
+      viewDefinition: reader.viewDefinition,
       spatialTree: spatialRoot === null ? null : mapSpatialNode(spatialRoot),
       elements,
       byExpressId,
