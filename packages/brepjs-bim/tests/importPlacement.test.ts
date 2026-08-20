@@ -179,18 +179,20 @@ describe('placement round-trip', () => {
   it('serializes a nested Site placement relative to its authored parent Site', async () => {
     using model = new BimModel();
     const project = unwrap(model.init({ name: 'Nested Site Project' }));
-    const environment = unwrap(
-      model.addSite({
-        name: 'Environment Site',
-        origin: [1_000, 2_000, 3_000],
-        axisX: [1, 0, 0],
-        axisZ: [0, 0, 1],
-      })
-    );
+    // Author the child first: serialization must follow aggregation ownership,
+    // not element insertion order, when resolving parent-relative frames.
     const bridgeSite = unwrap(
       model.addSite({
         name: 'Bridge Site',
         origin: [100, 200, 300],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+      })
+    );
+    const environment = unwrap(
+      model.addSite({
+        name: 'Environment Site',
+        origin: [1_000, 2_000, 3_000],
         axisX: [1, 0, 0],
         axisZ: [0, 0, 1],
       })

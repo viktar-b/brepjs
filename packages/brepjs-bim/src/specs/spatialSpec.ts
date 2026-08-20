@@ -42,7 +42,11 @@ export type IfcElementCompositionType = (typeof IFC_ELEMENT_COMPOSITION_TYPES)[n
 export interface SiteSpec {
   readonly name: string;
   readonly description?: string;
-  /** Optional rigid world placement. Existing building callers default to identity. */
+  /**
+   * Optional parent-relative Local Frame, authored in millimetres. A root Site
+   * is relative to the project frame; a nested Site is relative to its parent
+   * Site. Existing building callers default to the identity frame.
+   */
   readonly origin?: [number, number, number] | undefined;
   readonly axisX?: [number, number, number] | undefined;
   readonly axisZ?: [number, number, number] | undefined;

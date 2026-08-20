@@ -222,9 +222,27 @@ export async function toIfc(
   );
   idMap.set(project.localId, projectExpressId);
 
-  for (const el of elements) {
-    if (el.category !== 'SITE') continue;
+  const sites = model.getSites();
+  const sitesById = new Map(sites.map((site) => [site.localId, site]));
+  const sitesBeingWritten = new Set<LocalId>();
+  const writeSiteWithParent = (el: BimElement<'SITE'>): Result<void, BimError> => {
+    if (idMap.has(el.localId)) return ok(undefined);
+    if (sitesBeingWritten.has(el.localId)) {
+      return err(
+        ifcError(
+          'SPATIAL_PLACEMENT_CYCLE',
+          `Cannot serialize Site ${el.localId}: its aggregation ancestry contains a cycle`
+        )
+      );
+    }
+
+    sitesBeingWritten.add(el.localId);
     const parentId = findParentOf(el.localId, relationships);
+    const parentSite = parentId === null ? undefined : sitesById.get(parentId);
+    if (parentSite !== undefined) {
+      const parentResult = writeSiteWithParent(parentSite);
+      if (!parentResult.ok) return parentResult;
+    }
     const parentPlacementId = parentId === null ? null : (placementMap.get(parentId) ?? null);
     const { entityId, placementId } = writeSite(
       w,
@@ -236,6 +254,13 @@ export async function toIfc(
     );
     idMap.set(el.localId, entityId);
     placementMap.set(el.localId, placementId);
+    sitesBeingWritten.delete(el.localId);
+    return ok(undefined);
+  };
+
+  for (const site of sites) {
+    const siteResult = writeSiteWithParent(site);
+    if (!siteResult.ok) return siteResult;
   }
 
   for (const el of elements) {
