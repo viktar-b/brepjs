@@ -16,7 +16,8 @@ Use this matrix at final review. The linked playbook is authoritative; this page
 | CRS, shell, styles, types, schema, and units matter      | [Intake](intakeAndEvidence.md)                                | Source/output document-profile rows                                   |
 | Scoped and whole-file coverage differ                    | [Verification](verificationAndHandoff.md)                     | Two explicit denominators                                             |
 | Better names/quantities do not offset semantic loss      | [Intake](intakeAndEvidence.md)                                | Row-by-row comparison with no cross-credit                            |
-| Text/font mismatch is a visual exception                 | [Verification](verificationAndHandoff.md)                     | Visual exception and placement metric reported separately             |
+| Inscription string is read from a local crop             | [Leaf](leafFamily.md)                                         | Transcribed string or unidentified-inscription note on the target     |
+| Font mismatch after the correct string is a visual exception | [Verification](verificationAndHandoff.md)                  | Visual exception and placement metric reported separately             |
 | File size is not fidelity                                | [Intake](intakeAndEvidence.md)                                | No file-size gate or equivalence claim                                |
 | Nested civil aggregation is independent                  | [Model](modelAndProjection.md)                                | Typed nested aggregation validation/reimport gate                     |
 | Failed gates repair the smallest responsible layer       | [Leaf](leafFamily.md) and [Projection](modelAndProjection.md) | Failure diagnosis and focused rerun                                   |

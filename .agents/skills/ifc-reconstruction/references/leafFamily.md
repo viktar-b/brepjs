@@ -6,7 +6,9 @@ Use this playbook for the tracer and for every leaf reconstruction or repair. Wo
 
 Select the occurrence through the checksummed manifest and Reference Harness public Interface. Record component-local bounds/surface, strongest analytic or dimensional evidence, closedness/volume, material/name/semantic role, repetition, and the separate scene Frame in reference-owned artifacts.
 
-Completion: one source-neutral target plus one separate scene Frame accounts for all evidence used by the authoring loop.
+If the local surface is an inscription (sign, marker, raised or cut lettering), also record **readable text** as evidence. Render a component-local orthographic crop of that surface — not a whole-bridge screenshot — and read the string, line breaks, and glyph style from the image. Do not copy glyph vertices into product source. If the crop is unreadable, write `unidentified inscription`; do not invent a project slogan.
+
+Completion: one source-neutral target plus one separate scene Frame accounts for all evidence used by the authoring loop. For a text-bearing leaf, that target includes the transcribed string or an explicit unidentified-inscription note.
 
 ## 2. Author the specification
 
@@ -15,7 +17,8 @@ Translate evidence into engineering intent:
 - validated typed props and named physical dimensions;
 - a documented Datum and the coordinate convention from [ADR-0004](../../../../docs/adr/0004-author-bridge-families-in-engineering-coordinates.md);
 - definition-owned, target-independent Engineering Semantics derived from typed props;
-- material, invariants, assumptions, and applicable gates.
+- material, invariants, assumptions, and applicable gates;
+- for inscriptions: the transcribed string as a typed named prop, plus an owned font or a recorded unknown-font assumption. Font approximation is allowed. Authoring a different word than the crop is a spec failure.
 
 Use `brainstorm`, then brepjs `design`, to select a readable operation sequence. Prefer reliable primitives/profiles/extrusions before advanced sweeps, lofts, or booleans. Experiments may inform the design but are not accepted product source.
 

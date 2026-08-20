@@ -13,7 +13,7 @@ Never compress acceptance into one similarity score. For every scoped occurrence
 - coverage: scoped products and all placed non-spatial source objects as separate denominators;
 - visual fidelity: matched-camera source/output renders plus useful overlay or difference views, approved separately by a human.
 
-Decorative text or font mismatch is a visual-fidelity exception unless evidence also shows a placement failure. Do not relabel it. Rerun measured gates after every repair; do not reuse stale values.
+A wrong transcribed string is an evidence/spec failure, not a visual exception. Decorative **font** mismatch after the correct string is a visual-fidelity exception unless evidence also shows a placement failure. Do not relabel either case. Rerun measured gates after every repair; do not reuse stale values.
 
 ## Reconcile IFC document fidelity
 
