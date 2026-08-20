@@ -47,7 +47,10 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'LENGTHUNIT' },
-    Prefix: null,
+    Prefix:
+      w.serializationContext.siPrefix === null
+        ? null
+        : { type: 3, value: w.serializationContext.siPrefix },
     Name: { type: 3, value: 'METRE' },
   });
 
@@ -57,7 +60,10 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'AREAUNIT' },
-    Prefix: null,
+    Prefix:
+      w.serializationContext.siPrefix === null
+        ? null
+        : { type: 3, value: w.serializationContext.siPrefix },
     Name: { type: 3, value: 'SQUARE_METRE' },
   });
 
@@ -67,7 +73,10 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'VOLUMEUNIT' },
-    Prefix: null,
+    Prefix:
+      w.serializationContext.siPrefix === null
+        ? null
+        : { type: 3, value: w.serializationContext.siPrefix },
     Name: { type: 3, value: 'CUBIC_METRE' },
   });
 

@@ -8,6 +8,10 @@ import { DEFAULT_IFC_SCHEMA, fileSchemaString } from './schemaVersion.js';
 import { initIfcApi } from '../ifcRuntime.js';
 import type { Result } from 'brepjs';
 import { ok, err } from 'brepjs';
+import {
+  DEFAULT_IFC_SERIALIZATION_CONTEXT,
+  type IfcSerializationContext,
+} from './serializationContext.js';
 
 /** Default MVD ViewDefinition declared in the STEP FILE_DESCRIPTION header. */
 export const DEFAULT_MVD_VIEW_DEFINITION = 'ReferenceView_v1.2';
@@ -59,6 +63,7 @@ export class IfcWriter {
   readonly #mvdViewDefinition: string;
   readonly #author: string;
   readonly #organization: string;
+  readonly serializationContext: IfcSerializationContext;
   #nextExpressId = 1;
   #closed = false;
   // Per-model scope mixed into writer-minted GUIDs (psets/quantities/rels) so
@@ -69,25 +74,28 @@ export class IfcWriter {
     api: IfcAPI,
     modelId: number,
     mvdViewDefinition: string,
-    header: IfcHeaderMeta
+    header: IfcHeaderMeta,
+    serializationContext: IfcSerializationContext
   ) {
     this.#api = api;
     this.#modelId = modelId;
     this.#mvdViewDefinition = mvdViewDefinition;
     this.#author = header.author ?? '';
     this.#organization = header.organization ?? '';
+    this.serializationContext = serializationContext;
   }
 
   static async create(
     mvdViewDefinition: string = DEFAULT_MVD_VIEW_DEFINITION,
     ifcSchema: IfcSchema = DEFAULT_IFC_SCHEMA,
-    header: IfcHeaderMeta = {}
+    header: IfcHeaderMeta = {},
+    serializationContext: IfcSerializationContext = DEFAULT_IFC_SERIALIZATION_CONTEXT
   ): Promise<Result<IfcWriter, BimError>> {
     try {
       const api = new IfcAPI();
       await initIfcApi(api);
       const modelId = api.CreateModel({ schema: fileSchemaString(ifcSchema) });
-      return ok(new IfcWriter(api, modelId, mvdViewDefinition, header));
+      return ok(new IfcWriter(api, modelId, mvdViewDefinition, header, serializationContext));
     } catch (e) {
       return err(ifcError('IFC_INIT_FAILED', 'Failed to initialize web-ifc', e));
     }

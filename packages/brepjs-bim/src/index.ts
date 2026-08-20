@@ -89,6 +89,11 @@ export {
   templateFor,
 } from './psets/psetTemplates.js';
 export { DEFAULT_UNITS, toLengthMm, toIfcLengthM } from './units/units.js';
+export {
+  createIfcSerializationContext,
+  DEFAULT_IFC_SERIALIZATION_CONTEXT,
+} from './ifc-writer/serializationContext.js';
+export type { IfcLengthUnit, IfcSerializationContext } from './ifc-writer/serializationContext.js';
 export { specError, ifcError, geometryError, fromBrepError } from './errors/bimError.js';
 
 export type { WallSpec } from './specs/wallSpec.js';
