@@ -3,7 +3,7 @@ import type { IfcWriter } from './ifcWriter.js';
 import { writeAxis2Placement3D } from './headerWriter.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { toIfcLengthM } from '../units/units.js';
-import type { SpatialCompositionType } from '../specs/spatialSpec.js';
+import type { IfcElementCompositionType } from '../specs/spatialSpec.js';
 
 export function writeProject(
   w: IfcWriter,
@@ -39,7 +39,7 @@ export function writeSite(
     readonly origin?: [number, number, number] | undefined;
     readonly axisX?: [number, number, number] | undefined;
     readonly axisZ?: [number, number, number] | undefined;
-    readonly compositionType?: SpatialCompositionType | undefined;
+    readonly compositionType?: IfcElementCompositionType | undefined;
   }
 ): { entityId: number; placementId: number } {
   const placement3DId = writeAxis2Placement3D(

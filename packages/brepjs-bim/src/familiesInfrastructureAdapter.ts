@@ -1,5 +1,10 @@
 import { err, ok, type Result } from 'brepjs';
-import type { EngineeringSemantics, Frame, ResolvedElement } from 'brepjs-families';
+import type {
+  EngineeringSemantics,
+  Frame,
+  ResolvedElement,
+  SpatialComposition,
+} from 'brepjs-families';
 import type { BimError } from './errors/bimError.js';
 import { specError } from './errors/bimError.js';
 import {
@@ -29,6 +34,7 @@ import { parseSlabSpec, type SlabPredefinedType } from './specs/slabSpec.js';
 import { parseWallSpec } from './specs/wallSpec.js';
 import { parseFootingSpec, type FootingPredefinedType } from './specs/foundationSpec.js';
 import { parseRailingSpec, type RailingPredefinedType } from './specs/railingSpec.js';
+import type { IfcElementCompositionType } from './specs/spatialSpec.js';
 
 type SpatialKind = 'project' | 'site' | 'bridge' | 'bridge-part';
 
@@ -105,7 +111,7 @@ const SPATIAL_COMPOSITION = {
   collection: 'COMPLEX',
   element: 'ELEMENT',
   partial: 'PARTIAL',
-} as const;
+} as const satisfies Readonly<Record<SpatialComposition, IfcElementCompositionType>>;
 
 const BEAM_ROLE: Readonly<Record<string, BeamPredefinedType>> = {
   beam: 'BEAM',
@@ -373,7 +379,7 @@ function expectedParent(kind: Exclude<CivilKind, 'project'>): string {
 
 function projectedComposition(semantics: EngineeringSemantics) {
   const composition = 'composition' in semantics ? semantics.composition : undefined;
-  return composition === 'collection' || composition === 'element' || composition === 'partial'
+  return typeof composition === 'string' && Object.hasOwn(SPATIAL_COMPOSITION, composition)
     ? SPATIAL_COMPOSITION[composition]
     : 'ELEMENT';
 }

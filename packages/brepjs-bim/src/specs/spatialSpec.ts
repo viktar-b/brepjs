@@ -36,7 +36,8 @@ export interface ProjectCrs {
   readonly scale?: number | undefined;
 }
 
-export type SpatialCompositionType = 'COMPLEX' | 'ELEMENT' | 'PARTIAL';
+export const IFC_ELEMENT_COMPOSITION_TYPES = ['COMPLEX', 'ELEMENT', 'PARTIAL'] as const;
+export type IfcElementCompositionType = (typeof IFC_ELEMENT_COMPOSITION_TYPES)[number];
 
 export interface SiteSpec {
   readonly name: string;
@@ -46,7 +47,7 @@ export interface SiteSpec {
   readonly axisX?: [number, number, number] | undefined;
   readonly axisZ?: [number, number, number] | undefined;
   /** IFC Projection value mapped from authored Spatial Composition. */
-  readonly compositionType?: SpatialCompositionType | undefined;
+  readonly compositionType?: IfcElementCompositionType | undefined;
 }
 
 export interface BuildingSpec {
