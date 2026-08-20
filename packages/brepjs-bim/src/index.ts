@@ -54,6 +54,14 @@ export { makeLocalIdCounter } from './identity/localId.js';
 export { checkReferentialIntegrity } from './validation/referentialIntegrity.js';
 export { checkSchema } from './validation/schemaCheck.js';
 export { checkRoundTrip, compareIfcObservations } from './validation/roundTrip.js';
+export {
+  BRIDGE_VALIDATION_REPORT_SCHEMA_VERSION,
+  BRIDGE_SCAFFOLD_CONTRACT,
+  BRIDGE_VALIDATION_GATES,
+  buildBridgeValidationReport,
+  classifyBridgeValidationExit,
+  serializeBridgeValidationReport,
+} from './validation/bridgeValidationContract.js';
 export { checkGeometryValidity } from './validation/geometryValidity.js';
 export { checkGherkinRules } from './validation/gherkinChecks.js';
 export { issue, emptyReport, hasErrors, countBySeverity } from './validation/severity.js';
@@ -253,6 +261,20 @@ export type {
 } from './validation/severity.js';
 export type { ModelGraph, IntegrityInput } from './validation/referentialIntegrity.js';
 export type { RoundTripReport, RoundTripPass, EntityCounts } from './validation/roundTrip.js';
+export type {
+  ValidationEvidenceLayer,
+  ValidationGateStatus,
+  ValidatorUnavailableReason,
+  BridgeValidationExitClassification,
+  BridgeValidationGateDefinition,
+  ValidatorProvenance,
+  ValidationEvidenceReference,
+  BridgeGateResultInput,
+  BridgeValidationInput,
+  BridgeValidationGateResult,
+  BridgeValidationSummary,
+  BridgeValidationReport,
+} from './validation/bridgeValidationContract.js';
 export type { IfcTypeName, TypeWriteResult } from './ifc-writer/typeWriter.js';
 export type { IfcSchema, IfcSchemaProvenance } from './ifc-writer/schemaVersion.js';
 export type { OwnerHistoryAuthor, OwnerHistoryMeta } from './ifc-writer/ownerHistoryWriter.js';
