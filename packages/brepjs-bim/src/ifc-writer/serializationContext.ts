@@ -1,25 +1,39 @@
 export type IfcLengthUnit = 'METRE' | 'MILLIMETRE';
 
-export interface IfcSerializationContext {
+export class IfcSerializationContext {
+  readonly #lengthScale: number;
   readonly lengthUnit: IfcLengthUnit;
   readonly siPrefix: 'MILLI' | null;
-  readonly lengthFromMm: (valueMm: number) => number;
-  readonly areaFromMm2: (valueMm2: number) => number;
-  readonly volumeFromMm3: (valueMm3: number) => number;
+
+  private constructor(lengthUnit: IfcLengthUnit) {
+    this.lengthUnit = lengthUnit;
+    this.siPrefix = lengthUnit === 'METRE' ? null : 'MILLI';
+    this.#lengthScale = lengthUnit === 'METRE' ? 1 / 1_000 : 1;
+    Object.freeze(this);
+  }
+
+  static create(lengthUnit: IfcLengthUnit): IfcSerializationContext {
+    return new IfcSerializationContext(lengthUnit);
+  }
+
+  lengthFromMm(valueMm: number): number {
+    return valueMm * this.#lengthScale;
+  }
+
+  areaFromMm2(valueMm2: number): number {
+    return valueMm2 * this.#lengthScale ** 2;
+  }
+
+  volumeFromMm3(valueMm3: number): number {
+    return valueMm3 * this.#lengthScale ** 3;
+  }
 }
 
 /** Create one immutable, model-owned policy for converting authored millimetres to IFC values. */
 export function createIfcSerializationContext(
   lengthUnit: IfcLengthUnit = 'METRE'
 ): IfcSerializationContext {
-  const lengthScale = lengthUnit === 'METRE' ? 1 / 1_000 : 1;
-  return Object.freeze({
-    lengthUnit,
-    siPrefix: lengthUnit === 'METRE' ? null : 'MILLI',
-    lengthFromMm: (valueMm: number) => valueMm * lengthScale,
-    areaFromMm2: (valueMm2: number) => valueMm2 * lengthScale ** 2,
-    volumeFromMm3: (valueMm3: number) => valueMm3 * lengthScale ** 3,
-  });
+  return IfcSerializationContext.create(lengthUnit);
 }
 
 export const DEFAULT_IFC_SERIALIZATION_CONTEXT = createIfcSerializationContext();

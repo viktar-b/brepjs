@@ -4,6 +4,7 @@ import type { ProjectCrs } from '../specs/spatialSpec.js';
 import { writeOwnerHistory } from './ownerHistoryWriter.js';
 import type { OwnerHistoryAuthor } from './ownerHistoryWriter.js';
 import type { IfcSchema } from './schemaVersion.js';
+import type { IfcLengthUnit } from './serializationContext.js';
 
 export interface HeaderIds {
   ownerHistoryId: number;
@@ -30,6 +31,8 @@ export interface BimModelMeta {
   creationTimestamp?: number | undefined;
   /** Target IFC schema (FILE_SCHEMA + CreateModel). Defaults to IFC4. */
   ifcSchema?: IfcSchema | undefined;
+  /** Explicit active output lane. MILLIMETRE is enabled after all numeric writers migrate. */
+  ifcLengthUnit?: Extract<IfcLengthUnit, 'METRE'> | undefined;
 }
 
 export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
@@ -47,10 +50,7 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'LENGTHUNIT' },
-    Prefix:
-      w.serializationContext.siPrefix === null
-        ? null
-        : { type: 3, value: w.serializationContext.siPrefix },
+    Prefix: null,
     Name: { type: 3, value: 'METRE' },
   });
 
@@ -60,10 +60,7 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'AREAUNIT' },
-    Prefix:
-      w.serializationContext.siPrefix === null
-        ? null
-        : { type: 3, value: w.serializationContext.siPrefix },
+    Prefix: null,
     Name: { type: 3, value: 'SQUARE_METRE' },
   });
 
@@ -73,10 +70,7 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'VOLUMEUNIT' },
-    Prefix:
-      w.serializationContext.siPrefix === null
-        ? null
-        : { type: 3, value: w.serializationContext.siPrefix },
+    Prefix: null,
     Name: { type: 3, value: 'CUBIC_METRE' },
   });
 

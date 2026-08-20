@@ -158,10 +158,15 @@ export async function toIfc(
   const authorName = [meta.author?.givenName, meta.author?.familyName]
     .filter((p): p is string => Boolean(p))
     .join(' ');
-  const writerResult = await IfcWriter.create(meta.mvdViewDefinition, meta.ifcSchema, {
-    author: authorName,
-    organization: meta.organizationName,
-  });
+  const writerResult = await IfcWriter.create(
+    meta.mvdViewDefinition,
+    meta.ifcSchema,
+    {
+      author: authorName,
+      organization: meta.organizationName,
+    },
+    meta.ifcLengthUnit
+  );
   if (!writerResult.ok) return writerResult;
   const w = writerResult.value;
   // Scope writer-minted GUIDs (psets/quantities/rels) to this model.

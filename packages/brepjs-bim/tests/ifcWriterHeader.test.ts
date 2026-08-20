@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import { createHash } from 'node:crypto';
 import { initOCCT } from '../../../tests/setup.js';
 import { IfcWriter } from '../src/ifc-writer/ifcWriter.js';
 import { writeHeader } from '../src/ifc-writer/headerWriter.js';
 import {
   createIfcSerializationContext,
-  type IfcSerializationContext,
+  type IfcLengthUnit,
 } from '../src/ifc-writer/serializationContext.js';
 import { unwrap } from 'brepjs';
 import { BimModel } from '../src/model/bimModel.js';
@@ -23,16 +24,41 @@ async function headerText(header: { author?: string; organization?: string }): P
   return new TextDecoder().decode(saved.value.subarray(0, 1024));
 }
 
-async function serializedUnitFixture(context?: IfcSerializationContext): Promise<Uint8Array> {
-  const created = await IfcWriter.create('ReferenceView_v1.2', 'IFC4', {}, context);
+async function serializedUnitFixture(lengthUnit?: IfcLengthUnit): Promise<{
+  readonly bytes: Uint8Array;
+  readonly writerLengthUnit: IfcLengthUnit;
+}> {
+  const created = await IfcWriter.create('ReferenceView_v1.2', 'IFC4', {}, lengthUnit);
   if (!created.ok) throw new Error(created.error.message);
+  const writerLengthUnit = created.value.serializationContext.lengthUnit;
   writeHeader(created.value, {
     applicationName: 'unit-context-fixture',
     applicationVersion: '1',
   });
   const saved = created.value.save();
   if (!saved.ok) throw new Error(saved.error.message);
-  return saved.value;
+  return { bytes: saved.value, writerLengthUnit };
+}
+
+function buildUnitParityModel(): BimModel {
+  const model = new BimModel();
+  const project = unwrap(
+    model.init({ name: 'Unit parity project', projectId: 'unit-parity-project' })
+  );
+  const site = unwrap(model.addSite({ name: 'Unit parity site' }));
+  const building = unwrap(model.addBuilding({ name: 'Unit parity building' }));
+  const storey = unwrap(model.addStorey({ name: 'Ground', elevation: 0 }));
+  model.aggregate(project, site);
+  model.aggregate(site, building);
+  model.aggregate(building, storey);
+  return model;
+}
+
+function stableIfcBytes(bytes: Uint8Array): Uint8Array {
+  const text = new TextDecoder().decode(bytes);
+  return new TextEncoder().encode(
+    text.replace(/FILE_NAME\('[^']*','[^']*'/, "FILE_NAME('FIXTURE','TIMESTAMP'")
+  );
 }
 
 describe('IfcWriter STEP header', () => {
@@ -91,15 +117,33 @@ describe('IFC serialization unit context', () => {
     expect(metres.areaFromMm2(1_000_000)).toBe(1);
     expect(metres.volumeFromMm3(1_000_000_000)).toBe(1);
 
-    const text = new TextDecoder().decode(await serializedUnitFixture(millimetres));
-    expect(text).toContain('.LENGTHUNIT.,.MILLI.,.METRE.');
-    expect(text).toContain('.AREAUNIT.,.MILLI.,.SQUARE_METRE.');
-    expect(text).toContain('.VOLUMEUNIT.,.MILLI.,.CUBIC_METRE.');
+    const millimetreWriter = await serializedUnitFixture('MILLIMETRE');
+    const metreWriter = await serializedUnitFixture('METRE');
+    expect(millimetreWriter.writerLengthUnit).toBe('MILLIMETRE');
+    expect(metreWriter.writerLengthUnit).toBe('METRE');
+
+    // Ticket 16 expands the context only. Unit declarations remain on the
+    // coherent legacy lane until every numeric writer migrates and ticket 19 activates it.
+    const text = new TextDecoder().decode(millimetreWriter.bytes);
+    expect(text).toContain('.LENGTHUNIT.,$,.METRE.');
+    expect(text).not.toContain('.MILLI.');
   });
 
-  it('keeps the implicit and explicit metre lanes byte-equivalent', async () => {
-    const implicit = await serializedUnitFixture();
-    const explicit = await serializedUnitFixture(createIfcSerializationContext('METRE'));
-    expect(explicit).toEqual(implicit);
+  it('keeps a representative default model byte-equivalent to the pre-context metre lane', async () => {
+    using model = buildUnitParityModel();
+    const meta = {
+      applicationName: 'unit-parity-fixture',
+      applicationVersion: '1',
+      creationTimestamp: 0,
+    } as const;
+    const implicit = unwrap(await toIfc(model, meta));
+    const explicit = unwrap(await toIfc(model, { ...meta, ifcLengthUnit: 'METRE' }));
+    const stableImplicit = stableIfcBytes(implicit);
+    const stableExplicit = stableIfcBytes(explicit);
+
+    expect(stableExplicit).toEqual(stableImplicit);
+    expect(createHash('sha256').update(stableImplicit).digest('hex')).toBe(
+      'da0e3cdffec98cf8c0c9f482c199ee203f620a33437afe046a0bef05922a67ef'
+    );
   });
 });

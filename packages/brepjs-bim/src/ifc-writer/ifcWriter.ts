@@ -9,7 +9,8 @@ import { initIfcApi } from '../ifcRuntime.js';
 import type { Result } from 'brepjs';
 import { ok, err } from 'brepjs';
 import {
-  DEFAULT_IFC_SERIALIZATION_CONTEXT,
+  createIfcSerializationContext,
+  type IfcLengthUnit,
   type IfcSerializationContext,
 } from './serializationContext.js';
 
@@ -89,13 +90,21 @@ export class IfcWriter {
     mvdViewDefinition: string = DEFAULT_MVD_VIEW_DEFINITION,
     ifcSchema: IfcSchema = DEFAULT_IFC_SCHEMA,
     header: IfcHeaderMeta = {},
-    serializationContext: IfcSerializationContext = DEFAULT_IFC_SERIALIZATION_CONTEXT
+    lengthUnit: IfcLengthUnit = 'METRE'
   ): Promise<Result<IfcWriter, BimError>> {
     try {
       const api = new IfcAPI();
       await initIfcApi(api);
       const modelId = api.CreateModel({ schema: fileSchemaString(ifcSchema) });
-      return ok(new IfcWriter(api, modelId, mvdViewDefinition, header, serializationContext));
+      return ok(
+        new IfcWriter(
+          api,
+          modelId,
+          mvdViewDefinition,
+          header,
+          createIfcSerializationContext(lengthUnit)
+        )
+      );
     } catch (e) {
       return err(ifcError('IFC_INIT_FAILED', 'Failed to initialize web-ifc', e));
     }
