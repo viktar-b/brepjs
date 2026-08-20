@@ -15,7 +15,7 @@ export interface ProjectSpec {
    * establishes proper georeferencing (buildingSMART rule GRF003 asks for a
    * CRS whenever facilities such as buildings are modelled).
    */
-  readonly crs?: ProjectCrs;
+  readonly crs?: ProjectCrs | ProjectCrsMm;
 }
 
 export interface ProjectCrs {
@@ -34,6 +34,38 @@ export interface ProjectCrs {
   readonly xAxisAbscissa?: number | undefined;
   readonly xAxisOrdinate?: number | undefined;
   readonly scale?: number | undefined;
+  readonly eastingMm?: never;
+  readonly northingMm?: never;
+  readonly elevationMm?: never;
+  readonly xAxisBearingDeg?: never;
+}
+
+/**
+ * Millimetre-first projected CRS configuration for civil authoring. The map
+ * origin positions the project engineering frame in the named projected CRS;
+ * it is not added to any Site, Facility, Spatial Part, or product Local Frame.
+ * `xAxisBearingDeg` is the project +X bearing clockwise from projected grid
+ * north. Projection derives IFC axis ratios and fixes map-conversion scale at 1.
+ */
+export interface ProjectCrsMm {
+  /** CRS name, conventionally an EPSG code (e.g. "EPSG:25832"). */
+  readonly name: string;
+  readonly description?: string | undefined;
+  readonly geodeticDatum?: string | undefined;
+  /** Explicit height datum used by the three-dimensional projected context. */
+  readonly verticalDatum: string;
+  readonly mapProjection?: string | undefined;
+  readonly mapZone?: string | undefined;
+  readonly eastingMm: number;
+  readonly northingMm: number;
+  readonly elevationMm: number;
+  readonly xAxisBearingDeg: number;
+  readonly eastings?: never;
+  readonly northings?: never;
+  readonly orthogonalHeight?: never;
+  readonly xAxisAbscissa?: never;
+  readonly xAxisOrdinate?: never;
+  readonly scale?: never;
 }
 
 export const IFC_ELEMENT_COMPOSITION_TYPES = ['COMPLEX', 'ELEMENT', 'PARTIAL'] as const;

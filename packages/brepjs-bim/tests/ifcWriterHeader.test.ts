@@ -122,11 +122,12 @@ describe('IFC serialization unit context', () => {
     expect(millimetreWriter.writerLengthUnit).toBe('MILLIMETRE');
     expect(metreWriter.writerLengthUnit).toBe('METRE');
 
-    // Ticket 16 expands the context only. Unit declarations remain on the
-    // coherent legacy lane until every numeric writer migrates and ticket 19 activates it.
+    // After both writer migration batches, the selected unit owns every SI
+    // declaration; square/cubic measures use the same MILLI prefix.
     const text = new TextDecoder().decode(millimetreWriter.bytes);
-    expect(text).toContain('.LENGTHUNIT.,$,.METRE.');
-    expect(text).not.toContain('.MILLI.');
+    expect(text).toContain('.LENGTHUNIT.,.MILLI.,.METRE.');
+    expect(text).toContain('.AREAUNIT.,.MILLI.,.SQUARE_METRE.');
+    expect(text).toContain('.VOLUMEUNIT.,.MILLI.,.CUBIC_METRE.');
   });
 
   it('keeps a representative default model byte-equivalent to the pre-context metre lane', async () => {

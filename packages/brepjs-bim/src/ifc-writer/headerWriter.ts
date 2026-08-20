@@ -1,6 +1,6 @@
 import * as WebIFC from 'web-ifc';
 import type { IfcWriter } from './ifcWriter.js';
-import type { ProjectCrs } from '../specs/spatialSpec.js';
+import type { ProjectCrs, ProjectCrsMm } from '../specs/spatialSpec.js';
 import { writeOwnerHistory } from './ownerHistoryWriter.js';
 import type { OwnerHistoryAuthor } from './ownerHistoryWriter.js';
 import type { IfcSchema } from './schemaVersion.js';
@@ -31,8 +31,12 @@ export interface BimModelMeta {
   creationTimestamp?: number | undefined;
   /** Target IFC schema (FILE_SCHEMA + CreateModel). Defaults to IFC4. */
   ifcSchema?: IfcSchema | undefined;
-  /** Explicit active output lane. MILLIMETRE is enabled after all numeric writers migrate. */
-  ifcLengthUnit?: Extract<IfcLengthUnit, 'METRE'> | undefined;
+  /** Explicit per-model IFC output unit. Author-facing dimensions remain millimetres. */
+  ifcLengthUnit?: IfcLengthUnit | undefined;
+}
+
+function isProjectCrsMm(crs: ProjectCrs | ProjectCrsMm): crs is ProjectCrsMm {
+  return typeof crs.eastingMm === 'number';
 }
 
 export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
@@ -50,7 +54,7 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'LENGTHUNIT' },
-    Prefix: null,
+    Prefix: w.serializationContext.siPrefix === null ? null : { type: 3, value: 'MILLI' },
     Name: { type: 3, value: 'METRE' },
   });
 
@@ -60,7 +64,7 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'AREAUNIT' },
-    Prefix: null,
+    Prefix: w.serializationContext.siPrefix === null ? null : { type: 3, value: 'MILLI' },
     Name: { type: 3, value: 'SQUARE_METRE' },
   });
 
@@ -70,7 +74,7 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
     type: WebIFC.IFCSIUNIT,
     Dimensions: null,
     UnitType: { type: 3, value: 'VOLUMEUNIT' },
-    Prefix: null,
+    Prefix: w.serializationContext.siPrefix === null ? null : { type: 3, value: 'MILLI' },
     Name: { type: 3, value: 'CUBIC_METRE' },
   });
 
@@ -114,14 +118,38 @@ export function writeHeader(w: IfcWriter, meta: BimModelMeta): HeaderIds {
 
 /**
  * Writes IfcProjectedCRS + IfcMapConversion georeferencing the model context
- * (GRF003). Coordinates are metres; rotation defaults to identity.
+ * (GRF003). Legacy coordinates remain metre-based; ProjectCrsMm carries named
+ * millimetres and a bearing clockwise from grid north.
  */
 export function writeMapConversion(
   w: IfcWriter,
-  crs: ProjectCrs,
+  crs: ProjectCrs | ProjectCrsMm,
   geomContextId: number,
   lengthUnitId: number
 ): number {
+  let eastings: number;
+  let northings: number;
+  let orthogonalHeight: number;
+  let xAxisAbscissa: number | undefined;
+  let xAxisOrdinate: number | undefined;
+  let scale: number | undefined;
+  if (isProjectCrsMm(crs)) {
+    const bearingRad = (crs.xAxisBearingDeg * Math.PI) / 180;
+    eastings = w.serializationContext.lengthFromMm(crs.eastingMm);
+    northings = w.serializationContext.lengthFromMm(crs.northingMm);
+    orthogonalHeight = w.serializationContext.lengthFromMm(crs.elevationMm);
+    xAxisAbscissa = Math.sin(bearingRad);
+    xAxisOrdinate = Math.cos(bearingRad);
+    scale = 1;
+  } else {
+    eastings = w.serializationContext.lengthFromM(crs.eastings ?? 0);
+    northings = w.serializationContext.lengthFromM(crs.northings ?? 0);
+    orthogonalHeight = w.serializationContext.lengthFromM(crs.orthogonalHeight ?? 0);
+    xAxisAbscissa = crs.xAxisAbscissa;
+    xAxisOrdinate = crs.xAxisOrdinate;
+    scale = crs.scale;
+  }
+
   const crsId = w.nextId();
   w.writeLine({
     expressID: crsId,
@@ -143,23 +171,12 @@ export function writeMapConversion(
     type: WebIFC.IFCMAPCONVERSION,
     SourceCRS: w.ref(geomContextId),
     TargetCRS: w.ref(crsId),
-    Eastings: w.mkType(
-      WebIFC.IFCLENGTHMEASURE,
-      w.serializationContext.lengthFromM(crs.eastings ?? 0)
-    ),
-    Northings: w.mkType(
-      WebIFC.IFCLENGTHMEASURE,
-      w.serializationContext.lengthFromM(crs.northings ?? 0)
-    ),
-    OrthogonalHeight: w.mkType(
-      WebIFC.IFCLENGTHMEASURE,
-      w.serializationContext.lengthFromM(crs.orthogonalHeight ?? 0)
-    ),
-    XAxisAbscissa:
-      crs.xAxisAbscissa !== undefined ? w.mkType(WebIFC.IFCREAL, crs.xAxisAbscissa) : null,
-    XAxisOrdinate:
-      crs.xAxisOrdinate !== undefined ? w.mkType(WebIFC.IFCREAL, crs.xAxisOrdinate) : null,
-    Scale: crs.scale !== undefined ? w.mkType(WebIFC.IFCREAL, crs.scale) : null,
+    Eastings: w.mkType(WebIFC.IFCLENGTHMEASURE, eastings),
+    Northings: w.mkType(WebIFC.IFCLENGTHMEASURE, northings),
+    OrthogonalHeight: w.mkType(WebIFC.IFCLENGTHMEASURE, orthogonalHeight),
+    XAxisAbscissa: xAxisAbscissa !== undefined ? w.mkType(WebIFC.IFCREAL, xAxisAbscissa) : null,
+    XAxisOrdinate: xAxisOrdinate !== undefined ? w.mkType(WebIFC.IFCREAL, xAxisOrdinate) : null,
+    Scale: scale !== undefined ? w.mkType(WebIFC.IFCREAL, scale) : null,
   });
   return crsId;
 }

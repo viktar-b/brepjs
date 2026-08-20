@@ -163,6 +163,15 @@ function entityIdByName(reader: SpfReader, type: number, name: string): number {
   return id;
 }
 
+function scalarValue(value: unknown): number | string | undefined {
+  if (typeof value === 'number' || typeof value === 'string') return value;
+  if (value !== null && typeof value === 'object' && 'value' in value) {
+    const inner = (value as { value?: unknown }).value;
+    return typeof inner === 'number' || typeof inner === 'string' ? inner : undefined;
+  }
+  return undefined;
+}
+
 describe('readLengthScale', () => {
   it('returns 1.0 (metres) for the writer-emitted SI METRE unit assignment', async () => {
     const { model } = buildPlacedModel();
@@ -262,6 +271,117 @@ describe('placement round-trip', () => {
       } finally {
         reader.close();
       }
+    }
+  });
+
+  it('projects a synthetic Bridge with genuine millimetre units and exactly-once map conversion', async () => {
+    using model = new BimModel();
+    const project = unwrap(
+      model.init({
+        name: 'Millimetre Bridge Project',
+        projectId: 'millimetre-bridge-project',
+        crs: {
+          name: 'EPSG:9999',
+          verticalDatum: 'TEST-VERTICAL-DATUM',
+          eastingMm: 17_320_508,
+          northingMm: 30_000_000,
+          elevationMm: 242_321,
+          xAxisBearingDeg: 120,
+        },
+      })
+    );
+    const site = unwrap(
+      model.addSite({
+        name: 'Bridge Site',
+        origin: [1_000, 0, 0],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+      })
+    );
+    const bridge = unwrap(
+      model.addBridge({
+        name: 'Synthetic Bridge',
+        origin: [2_000, 0, 0],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+      })
+    );
+    const part = unwrap(
+      model.addBridgePart({
+        name: 'Synthetic Superstructure',
+        origin: [3_000, 0, 0],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+        usageType: 'LONGITUDINAL',
+      })
+    );
+    const member = unwrap(
+      model.addMember({
+        name: 'Synthetic Girder',
+        length: 1_000,
+        profile: { kind: 'RECTANGULAR', width: 100, height: 200 },
+        origin: [4_000, 0, 0],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+        materialName: 'Steel',
+      })
+    );
+    model.aggregate(project, site);
+    model.aggregate(site, bridge);
+    model.aggregate(bridge, part);
+    model.placeIn(member, part);
+
+    const result = await toIfc(model, {
+      applicationName: 'millimetre-bridge-fixture',
+      applicationVersion: '1',
+      ifcSchema: 'IFC4X3',
+      mvdViewDefinition: 'ReferenceView_v1.2',
+      ifcLengthUnit: 'MILLIMETRE',
+    });
+    if (!result.ok) throw new Error(result.error.message);
+
+    const reader = await openReader(result.value);
+    try {
+      expect(readLengthScale(reader)).toBe(0.001);
+      const siUnits = reader
+        .getLinesOfType(WebIFC.IFCSIUNIT)
+        .map((id) => reader.getLine<Record<string, unknown>>(id));
+      for (const unitType of ['LENGTHUNIT', 'AREAUNIT', 'VOLUMEUNIT']) {
+        const unit = siUnits.find((candidate) => scalarValue(candidate?.['UnitType']) === unitType);
+        expect(scalarValue(unit?.['Prefix'])).toBe('MILLI');
+      }
+      expect(reader.getLinesOfType(WebIFC.IFCMAPCONVERSION)).toHaveLength(1);
+      const georef = readGeoref(reader, readLengthScale(reader));
+      expect(georef).toMatchObject({
+        eastings: 17_320_508,
+        northings: 30_000_000,
+        orthogonalHeight: 242_321,
+        crsName: 'EPSG:9999',
+        verticalDatum: 'TEST-VERTICAL-DATUM',
+        scale: 1,
+        mapUnitScale: 0.001,
+      });
+      expect(georef?.xAxisAbscissa).toBeCloseTo(Math.sin((120 * Math.PI) / 180), 12);
+      expect(georef?.xAxisOrdinate).toBeCloseTo(Math.cos((120 * Math.PI) / 180), 12);
+
+      const memberId = entityIdByName(reader, WebIFC.IFCMEMBER, 'Synthetic Girder');
+      const world = composeWorldPlacement(
+        reader,
+        objectPlacementId(reader, memberId),
+        readLengthScale(reader)
+      );
+      expect(world?.origin).toEqual([10_000, 0, 0]);
+
+      const profileId = reader.getLinesOfType(WebIFC.IFCRECTANGLEPROFILEDEF)[0];
+      const extrusionId = reader.getLinesOfType(WebIFC.IFCEXTRUDEDAREASOLID)[0];
+      if (profileId === undefined || extrusionId === undefined) throw new Error('geometry missing');
+      const profile = reader.getLine<Record<string, unknown>>(profileId);
+      const extrusion = reader.getLine<Record<string, unknown>>(extrusionId);
+      expect(scalarValue(profile?.['XDim'])).toBe(100);
+      expect(scalarValue(profile?.['YDim'])).toBe(200);
+      expect(scalarValue(extrusion?.['Depth'])).toBe(1_000);
+    } finally {
+      reader.close();
     }
   });
 

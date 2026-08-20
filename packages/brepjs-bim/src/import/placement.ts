@@ -44,6 +44,13 @@ export interface Georef {
   readonly eastings: number;
   readonly northings: number;
   readonly orthogonalHeight: number;
+  readonly crsName: string | null;
+  readonly verticalDatum: string | null;
+  readonly xAxisAbscissa: number | null;
+  readonly xAxisOrdinate: number | null;
+  readonly scale: number;
+  /** Metres represented by one projected-CRS map unit, when declared. */
+  readonly mapUnitScale: number | null;
   /** Rotation of true north relative to model +X, in radians. */
   readonly rotation: number;
 }
@@ -334,9 +341,26 @@ export function readGeoref(reader: SpfReader, scale: number): Georef | null {
   const orthogonalHeight = (numericValue(conv['OrthogonalHeight']) ?? 0) * scale * 1000;
   const abscissa = numericValue(conv['XAxisAbscissa']);
   const ordinate = numericValue(conv['XAxisOrdinate']);
+  const conversionScale = numericValue(conv['Scale']) ?? 1;
   const rotation = abscissa !== null && ordinate !== null ? Math.atan2(ordinate, abscissa) : 0;
+  const targetCrsId = refValue(conv['TargetCRS']);
+  const targetCrs =
+    targetCrsId === null ? null : reader.getLine<Record<string, unknown>>(targetCrsId);
+  const mapUnitId = refValue(targetCrs?.['MapUnit']);
+  const mapUnitScale = mapUnitId === null ? null : lengthScaleFromUnit(reader, mapUnitId);
 
-  return { eastings, northings, orthogonalHeight, rotation };
+  return {
+    eastings,
+    northings,
+    orthogonalHeight,
+    crsName: enumValue(targetCrs?.['Name']),
+    verticalDatum: enumValue(targetCrs?.['VerticalDatum']),
+    xAxisAbscissa: abscissa,
+    xAxisOrdinate: ordinate,
+    scale: conversionScale,
+    mapUnitScale,
+    rotation,
+  };
 }
 
 // --- matrix / vector helpers ------------------------------------------------
