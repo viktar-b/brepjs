@@ -251,7 +251,14 @@ export function familiesToBim(
   root: ResolvedElement,
   options: FamiliesToBimOptions
 ): Result<FamiliesBimResult, BimError> {
-  if (root.semantics?.kind === 'project') return projectInfrastructure(root, options);
+  const rootSemantics = root.semantics;
+  const civilRoot =
+    rootSemantics?.kind === 'project' ||
+    rootSemantics?.kind === 'facility' ||
+    rootSemantics?.kind === 'spatial-part' ||
+    rootSemantics?.kind === 'product' ||
+    (rootSemantics?.kind === 'site' && 'category' in rootSemantics);
+  if (civilRoot) return projectInfrastructure(root, options);
 
   const model = new BimModel();
   const initResult = model.init(options.project);

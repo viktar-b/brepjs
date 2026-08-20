@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { csg, getBounds, measureVolume, unwrap } from 'brepjs';
 import {
   assembly,
+  civilSemantics,
   el,
   family,
   frame,
@@ -10,6 +11,7 @@ import {
   resolve,
   evaluateModel,
   type ElementChild,
+  type ResolvedElement,
 } from 'brepjs-families';
 import {
   BimModel,
@@ -609,7 +611,8 @@ describe('families infrastructure projection', () => {
       if (value === undefined) throw new Error(`missing projected id for ${path}`);
       return value;
     };
-    expect(bim.getAllRelationships()).toEqual(
+    const relationships = bim.getAllRelationships();
+    expect(relationships).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: 'AGGREGATES',
@@ -689,6 +692,360 @@ describe('families infrastructure projection', () => {
     } finally {
       disposeImportedModel(imported);
     }
+  });
+
+  it('preserves recursive Spatial Assemblies and nearest product containment', () => {
+    const TypedBeam = family<MemberProps>(
+      'TypedBeam',
+      ({ length, width, height }) =>
+        el('Geometry', {
+          node: csg.translate(csg.box(length, width, height), [0, -width / 2, -height / 2]),
+        }),
+      {
+        semantics: ({ name, length, width, height, material }) =>
+          civilSemantics({
+            kind: 'product',
+            category: 'beam',
+            role: 'main-girder',
+            material,
+            dimensionsMm: { length, width, height },
+            properties: {
+              name,
+              geometryForm: 'rectangular-prism',
+              geometryDatum: 'profile-centered-yz',
+            },
+          }),
+      }
+    );
+    const NestedPart = assembly<ChildrenProps>(
+      'NestedPart',
+      (props) => el('Group', {}, normalizeChildren(props.children)),
+      {
+        semantics: civilSemantics({
+          kind: 'spatial-part',
+          category: 'bridge-part',
+          role: 'deck',
+          composition: 'element',
+          subdivision: 'lateral',
+        }),
+      }
+    );
+    const ParentPart = assembly<ChildrenProps>(
+      'ParentPart',
+      (props) => el('Group', {}, normalizeChildren(props.children)),
+      {
+        semantics: civilSemantics({
+          kind: 'spatial-part',
+          category: 'bridge-part',
+          role: 'superstructure',
+          composition: 'collection',
+          subdivision: 'lateral',
+        }),
+      }
+    );
+    const TypedBridge = assembly<ChildrenProps>(
+      'TypedBridge',
+      (props) => el('Group', {}, normalizeChildren(props.children)),
+      {
+        semantics: civilSemantics({
+          kind: 'facility',
+          category: 'bridge',
+          role: 'girder',
+          composition: 'element',
+        }),
+      }
+    );
+    const NestedSite = assembly<ChildrenProps>(
+      'NestedSite',
+      (props) => el('Group', {}, normalizeChildren(props.children)),
+      {
+        semantics: civilSemantics({
+          kind: 'site',
+          category: 'bridge-site',
+          role: 'bridge-context',
+          composition: 'partial',
+        }),
+      }
+    );
+    const EnvironmentSite = assembly<ChildrenProps>(
+      'EnvironmentSite',
+      (props) => el('Group', {}, normalizeChildren(props.children)),
+      {
+        semantics: civilSemantics({
+          kind: 'site',
+          category: 'environment',
+          role: 'civil-context',
+          composition: 'collection',
+        }),
+      }
+    );
+    const resolved = resolve(
+      el(
+        RootComposition,
+        { key: 'recursive-model' },
+        el(
+          EnvironmentSite,
+          {
+            key: 'environment-site',
+            frame: frame({ origin: [100, 200, 0], xAxis: [1, 0, 0], zAxis: [0, 0, 1] }),
+          },
+          el(
+            NestedSite,
+            {
+              key: 'bridge-site',
+              frame: frame({ origin: [10, 20, 0], xAxis: [0, 1, 0], zAxis: [0, 0, 1] }),
+            },
+            el(
+              TypedBridge,
+              {
+                key: 'bridge',
+                frame: frame({ origin: [5, 0, 0], xAxis: [1, 0, 0], zAxis: [0, 0, 1] }),
+              },
+              el(
+                ParentPart,
+                {
+                  key: 'superstructure',
+                  frame: frame({
+                    origin: [0, 3, 0],
+                    xAxis: [1, 0, 0],
+                    zAxis: [0, 0, 1],
+                  }),
+                },
+                el(
+                  NestedPart,
+                  {
+                    key: 'deck',
+                    frame: frame({
+                      origin: [0, 0, 2],
+                      xAxis: [1, 0, 0],
+                      zAxis: [0, 0, 1],
+                    }),
+                  },
+                  el(TypedBeam, {
+                    key: 'main-girder',
+                    frame: frame({
+                      origin: [1, 1, 1],
+                      xAxis: [1, 0, 0],
+                      zAxis: [0, 0, 1],
+                    }),
+                    name: 'Main girder',
+                    length: 1_000,
+                    width: 100,
+                    height: 200,
+                    material: 'Timber',
+                  })
+                )
+              )
+            )
+          )
+        )
+      )
+    );
+
+    const projected = unwrap(
+      familiesToBim(resolved, {
+        project: { name: 'Recursive civil hierarchy', projectId: 'recursive-civil-hierarchy' },
+      })
+    );
+    using bim = projected.model;
+    const [environment, bridgeSite] = bim.getSites();
+    const [bridge] = bim.getBridges();
+    const [superstructure, deck] = bim.getBridgeParts();
+    const [girder] = bim.getBeams();
+
+    expect(environment?.spec.origin).toEqual([100, 200, 0]);
+    expect(bridgeSite?.spec.origin).toEqual([10, 20, 0]);
+    expect(bridge?.spec.origin).toEqual([5, 0, 0]);
+    expect(superstructure?.spec.origin).toEqual([0, 3, 0]);
+    expect(deck?.spec.origin).toEqual([0, 0, 2]);
+    expect(girder?.spec.origin).toEqual([1, 1, 1]);
+
+    const id = (path: string) => {
+      const value = projected.idByKeyPath.get(path);
+      if (value === undefined) throw new Error(`missing projected id for ${path}`);
+      return value;
+    };
+    const paths = {
+      project: 'recursive-model',
+      environment: 'recursive-model/environment-site',
+      site: 'recursive-model/environment-site/bridge-site',
+      bridge: 'recursive-model/environment-site/bridge-site/bridge',
+      superstructure: 'recursive-model/environment-site/bridge-site/bridge/superstructure',
+      deck: 'recursive-model/environment-site/bridge-site/bridge/superstructure/deck',
+      girder:
+        'recursive-model/environment-site/bridge-site/bridge/superstructure/deck/main-girder',
+    } as const;
+    const recursiveRelationships = bim.getAllRelationships();
+    expect(recursiveRelationships).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'AGGREGATES',
+          relatingObject: id(paths.project),
+          relatedObjects: [id(paths.environment)],
+        }),
+        expect.objectContaining({
+          kind: 'AGGREGATES',
+          relatingObject: id(paths.environment),
+          relatedObjects: [id(paths.site)],
+        }),
+        expect.objectContaining({
+          kind: 'AGGREGATES',
+          relatingObject: id(paths.superstructure),
+          relatedObjects: [id(paths.deck)],
+        }),
+        expect.objectContaining({
+          kind: 'CONTAINED_IN',
+          relatingStructure: id(paths.deck),
+          relatedElements: [id(paths.girder)],
+        }),
+      ])
+    );
+    expect(
+      recursiveRelationships.filter(
+        (relationship) =>
+          relationship.kind === 'CONTAINED_IN' &&
+          relationship.relatedElements.includes(id(paths.girder))
+      )
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'CONTAINED_IN',
+        relatingStructure: id(paths.deck),
+        relatedElements: [id(paths.girder)],
+      }),
+    ]);
+  });
+
+  it('rejects a recursive civil ownership cycle with the offending key path', () => {
+    const source = resolve(buildSyntheticInfrastructure());
+    const sourceSite = source.children[0];
+    expect(sourceSite).toBeDefined();
+    if (sourceSite === undefined) return;
+
+    const cyclingSite = { ...sourceSite, children: [] as ResolvedElement[] };
+    cyclingSite.children.push(cyclingSite);
+    const cyclicRoot = { ...source, children: [cyclingSite] };
+
+    const result = familiesToBim(cyclicRoot, {
+      project: { name: 'Cyclic civil hierarchy', projectId: 'cyclic-civil-hierarchy' },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'FAMILIES_CIVIL_HIERARCHY_CYCLE',
+      },
+    });
+    if (!result.ok) {
+      expect(result.error.message).toContain(cyclingSite.keyPath);
+    }
+  });
+
+  it('rejects one resolved civil element owned by two Spatial Assemblies', () => {
+    const source = resolve(buildSyntheticInfrastructure());
+    const sourceSite = source.children[0];
+    const sourceBridge = sourceSite?.children[0];
+    expect(sourceSite).toBeDefined();
+    expect(sourceBridge).toBeDefined();
+    if (sourceSite === undefined || sourceBridge === undefined) return;
+
+    const alternateSite = {
+      ...sourceSite,
+      keyPath: `${source.keyPath}/alternate-site`,
+      children: [sourceBridge],
+    };
+    const result = familiesToBim(
+      { ...source, children: [sourceSite, alternateSite] },
+      { project: { name: 'Duplicate civil owner', projectId: 'duplicate-civil-owner' } }
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'FAMILIES_DUPLICATE_CIVIL_PARENT' },
+    });
+    if (!result.ok) {
+      expect(result.error.message).toContain(sourceBridge.keyPath);
+      expect(result.error.message).toContain(sourceSite.keyPath);
+      expect(result.error.message).toContain(alternateSite.keyPath);
+    }
+  });
+
+  it('rejects physical products as civil ownership parents', () => {
+    const source = resolve(buildSyntheticInfrastructure());
+    const sourceSite = source.children[0];
+    const sourceBridge = sourceSite?.children[0];
+    const sourcePart = sourceBridge?.children[0];
+    const sourceProduct = sourcePart?.children[0];
+    expect(sourceProduct).toBeDefined();
+    if (
+      sourceSite === undefined ||
+      sourceBridge === undefined ||
+      sourcePart === undefined ||
+      sourceProduct === undefined
+    ) {
+      return;
+    }
+
+    const childProduct = {
+      ...sourceProduct,
+      keyPath: `${sourceProduct.keyPath}/child-product`,
+    };
+    const productParent = { ...sourceProduct, children: [childProduct] };
+    const result = familiesToBim(
+      {
+        ...source,
+        children: [
+          {
+            ...sourceSite,
+            children: [
+              {
+                ...sourceBridge,
+                children: [{ ...sourcePart, children: [productParent] }],
+              },
+            ],
+          },
+        ],
+      },
+      { project: { name: 'Product parent', projectId: 'product-parent' } }
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: 'FAMILIES_PRODUCT_PARENT' } });
+    if (!result.ok) {
+      expect(result.error.message).toContain(sourceProduct.keyPath);
+      expect(result.error.message).toContain(childProduct.keyPath);
+    }
+  });
+
+  it('rejects invalid civil roots and invalid parent kinds with key-path-aware errors', () => {
+    const source = resolve(buildSyntheticInfrastructure());
+    const sourceSite = source.children[0];
+    const sourceBridge = sourceSite?.children[0];
+    expect(sourceBridge).toBeDefined();
+    if (sourceBridge === undefined) return;
+
+    const invalidRoot = familiesToBim(
+      {
+        ...source,
+        semantics: civilSemantics({
+          kind: 'site',
+          category: 'bridge-site',
+          role: 'bridge-context',
+          composition: 'partial',
+        }),
+      },
+      { project: { name: 'Invalid root', projectId: 'invalid-root' } }
+    );
+    expect(invalidRoot).toMatchObject({
+      ok: false,
+      error: { code: 'FAMILIES_CIVIL_ROOT_KIND' },
+    });
+    if (!invalidRoot.ok) expect(invalidRoot.error.message).toContain(source.keyPath);
+
+    const invalidParent = familiesToBim(
+      { ...source, children: [sourceBridge] },
+      { project: { name: 'Invalid parent', projectId: 'invalid-parent' } }
+    );
+    expect(invalidParent).toMatchObject({
+      ok: false,
+      error: { code: 'FAMILIES_INVALID_CIVIL_HIERARCHY' },
+    });
+    if (!invalidParent.ok) expect(invalidParent.error.message).toContain(sourceBridge.keyPath);
   });
 
   it('returns a structured BimError when the civil model targets IFC4', async () => {

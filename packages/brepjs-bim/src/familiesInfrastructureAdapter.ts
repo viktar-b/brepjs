@@ -286,6 +286,7 @@ type CivilKind = SpatialKind | ProductKind;
 interface CivilParent {
   readonly kind: CivilKind;
   readonly localId: LocalId;
+  readonly keyPath: string;
 }
 
 function isProductKind(kind: string): kind is ProductKind {
@@ -294,6 +295,42 @@ function isProductKind(kind: string): kind is ProductKind {
 
 function isCivilKind(kind: string): kind is Exclude<CivilKind, 'project'> {
   return kind === 'site' || kind === 'bridge' || kind === 'bridge-part' || isProductKind(kind);
+}
+
+function projectionKind(
+  semantics: EngineeringSemantics
+): Result<Exclude<CivilKind, 'project'>, BimError> {
+  if (isCivilKind(semantics.kind)) return ok(semantics.kind);
+  const category = 'category' in semantics ? semantics.category : undefined;
+  if (semantics.kind === 'facility' && category === 'bridge') return ok('bridge');
+  if (semantics.kind === 'spatial-part' && category === 'bridge-part') {
+    return ok('bridge-part');
+  }
+  if (semantics.kind === 'product' && category !== undefined && isProductKind(category)) {
+    return ok(category);
+  }
+  return err(
+    specError(
+      'FAMILIES_UNSUPPORTED_SEMANTIC_KIND',
+      `familiesToBim: unsupported civil semantic kind '${semantics.kind}' with category '${'category' in semantics ? semantics.category : ''}'`
+    )
+  );
+}
+
+function productProjectionSemantics(
+  semantics: EngineeringSemantics,
+  kind: ProductKind
+): EngineeringSemantics {
+  if (semantics.kind !== 'product' || !('dimensionsMm' in semantics)) return semantics;
+  return {
+    kind,
+    role: semantics.role,
+    material: semantics.material,
+    properties: {
+      ...semantics.dimensionsMm,
+      ...semantics.properties,
+    },
+  };
 }
 
 function semanticName(el: ResolvedElement): string {
@@ -313,11 +350,18 @@ function placement(frame: Frame): {
   };
 }
 
-function expectedParent(kind: Exclude<CivilKind, 'project'>): CivilKind {
-  if (kind === 'site') return 'project';
-  if (kind === 'bridge') return 'site';
-  if (kind === 'bridge-part') return 'bridge';
-  return 'bridge-part';
+function acceptsParent(kind: Exclude<CivilKind, 'project'>, parentKind: CivilKind): boolean {
+  if (kind === 'site') return parentKind === 'project' || parentKind === 'site';
+  if (kind === 'bridge') return parentKind === 'site';
+  if (kind === 'bridge-part') return parentKind === 'bridge' || parentKind === 'bridge-part';
+  return parentKind === 'bridge-part';
+}
+
+function expectedParent(kind: Exclude<CivilKind, 'project'>): string {
+  if (kind === 'site') return "'project' or 'site'";
+  if (kind === 'bridge') return "'site'";
+  if (kind === 'bridge-part') return "'bridge' or 'bridge-part'";
+  return "'bridge-part'";
 }
 
 /** IFC4X3 civil Projection routed only from definition-owned semantics. */
@@ -345,7 +389,7 @@ export function projectInfrastructure(
   if (!initResult.ok) return initResult;
 
   const idByKeyPath = new Map<string, LocalId>([[root.keyPath, initResult.value]]);
-  const walk = (el: ResolvedElement, parent: CivilParent): Result<void, BimError> => {
+  const walkElement = (el: ResolvedElement, parent: CivilParent): Result<void, BimError> => {
     const semantics = el.semantics;
     if (semantics === undefined) {
       if (el.geometry.kind !== 'Empty') {
@@ -363,30 +407,41 @@ export function projectInfrastructure(
       return ok(undefined);
     }
 
-    const kind = semantics.kind;
-    if (!isCivilKind(kind)) {
+    const routedKind = projectionKind(semantics);
+    if (!routedKind.ok) {
       return err(
         specError(
-          'FAMILIES_UNSUPPORTED_SEMANTIC_KIND',
-          `familiesToBim: unsupported civil semantic kind '${kind}' at '${el.keyPath}'`
+          routedKind.error.code,
+          `${routedKind.error.message} at '${el.keyPath}'`
         )
       );
     }
-    if (parent.kind !== expectedParent(kind)) {
+    const kind = routedKind.value;
+    if (!acceptsParent(kind, parent.kind)) {
       return err(
         specError(
           'FAMILIES_INVALID_CIVIL_HIERARCHY',
-          `familiesToBim: semantic kind '${kind}' at '${el.keyPath}' requires parent '${expectedParent(kind)}', found '${parent.kind}'`
+          `familiesToBim: semantic kind '${semantics.kind}' at '${el.keyPath}' requires parent ${expectedParent(kind)}, found '${parent.kind}'`
         )
       );
     }
     const keyed = requireKeyed(el);
     if (!keyed.ok) return keyed;
+    if (isProductKind(kind) && el.children.length > 0) {
+      return err(
+        specError(
+          'FAMILIES_PRODUCT_PARENT',
+          `familiesToBim: physical product '${el.keyPath}' cannot own civil child '${el.children[0]?.keyPath ?? '<unknown>'}'`
+        )
+      );
+    }
 
     let added: Result<LocalId, BimError>;
     if (kind === 'site') {
+      const siteFrame =
+        semantics.kind === 'site' && 'category' in semantics ? el.localFrame : el.worldFrame;
       added = model.addSite(
-        { name: semanticName(el), ...placement(el.worldFrame) },
+        { name: semanticName(el), ...placement(siteFrame) },
         { stableKey: el.keyPath }
       );
     } else if (kind === 'bridge') {
@@ -409,7 +464,13 @@ export function projectInfrastructure(
       if (!spec.ok) return spec;
       added = model.addBridgePart(spec.value, { stableKey: el.keyPath });
     } else {
-      if (typeof semantics.material !== 'string' || semantics.material.trim().length === 0) {
+      const projectedSemantics = productProjectionSemantics(semantics, kind);
+      const material =
+        'material' in projectedSemantics ? projectedSemantics.material : undefined;
+      if (
+        typeof material !== 'string' ||
+        material.trim().length === 0
+      ) {
         return err(
           specError(
             'FAMILIES_MISSING_SEMANTIC_MATERIAL',
@@ -417,12 +478,12 @@ export function projectInfrastructure(
           )
         );
       }
-      const selectedBody = selectProductBody(el, semantics, options);
+      const selectedBody = selectProductBody(el, projectedSemantics, options);
       if (!selectedBody.ok) return selectedBody;
       added = PRODUCT_ROUTES[kind].add(model, {
         element: el,
-        semantics,
-        material: semantics.material,
+        semantics: projectedSemantics,
+        material,
         selected: selectedBody.value,
       });
     }
@@ -433,7 +494,7 @@ export function projectInfrastructure(
       model.placeIn(added.value, parent.localId);
     } else model.aggregate(parent.localId, added.value);
 
-    const nextParent: CivilParent = { kind, localId: added.value };
+    const nextParent: CivilParent = { kind, localId: added.value, keyPath: el.keyPath };
     for (const child of el.children) {
       const result = walk(child, nextParent);
       if (!result.ok) return result;
@@ -441,7 +502,38 @@ export function projectInfrastructure(
     return ok(undefined);
   };
 
-  const projectParent: CivilParent = { kind: 'project', localId: initResult.value };
+  const activeElements = new Set<ResolvedElement>([root]);
+  const owningParent = new Map<ResolvedElement, string>([[root, '<root>']]);
+  const walk = (el: ResolvedElement, parent: CivilParent): Result<void, BimError> => {
+    if (activeElements.has(el)) {
+      return err(
+        specError(
+          'FAMILIES_CIVIL_HIERARCHY_CYCLE',
+          `familiesToBim: civil ownership cycle from '${parent.keyPath}' to '${el.keyPath}'`
+        )
+      );
+    }
+    const existingParent = owningParent.get(el);
+    if (existingParent !== undefined) {
+      return err(
+        specError(
+          'FAMILIES_DUPLICATE_CIVIL_PARENT',
+          `familiesToBim: civil element '${el.keyPath}' is owned by both '${existingParent}' and '${parent.keyPath}'`
+        )
+      );
+    }
+    owningParent.set(el, parent.keyPath);
+    activeElements.add(el);
+    const result = walkElement(el, parent);
+    activeElements.delete(el);
+    return result;
+  };
+
+  const projectParent: CivilParent = {
+    kind: 'project',
+    localId: initResult.value,
+    keyPath: root.keyPath,
+  };
   for (const child of root.children) {
     const result = walk(child, projectParent);
     if (!result.ok) {
