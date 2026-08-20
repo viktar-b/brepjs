@@ -506,6 +506,60 @@ describe('placement round-trip', () => {
 });
 
 describe('readGeoref', () => {
+  it('scales map offsets by the projected CRS MapUnit when it differs from project units', async () => {
+    const writer = unwrap(await IfcWriter.create('ReferenceView_v1.2', 'IFC4X3', {}, 'MILLIMETRE'));
+    const header = writeHeader(writer, {
+      applicationName: 'mixed-map-unit-fixture',
+      applicationVersion: '1',
+    });
+    const metreMapUnitId = writer.nextId();
+    writer.writeLine({
+      expressID: metreMapUnitId,
+      type: WebIFC.IFCSIUNIT,
+      Dimensions: null,
+      UnitType: { type: 3, value: 'LENGTHUNIT' },
+      Prefix: null,
+      Name: { type: 3, value: 'METRE' },
+    });
+    const crsId = writer.nextId();
+    writer.writeLine({
+      expressID: crsId,
+      type: WebIFC.IFCPROJECTEDCRS,
+      Name: writer.mkType(WebIFC.IFCLABEL, 'EPSG:MIXED'),
+      Description: null,
+      GeodeticDatum: null,
+      VerticalDatum: writer.mkType(WebIFC.IFCIDENTIFIER, 'MIXED-VERTICAL'),
+      MapProjection: null,
+      MapZone: null,
+      MapUnit: writer.ref(metreMapUnitId),
+    });
+    writer.writeLine({
+      expressID: writer.nextId(),
+      type: WebIFC.IFCMAPCONVERSION,
+      SourceCRS: writer.ref(header.geomContextId),
+      TargetCRS: writer.ref(crsId),
+      Eastings: writer.mkType(WebIFC.IFCLENGTHMEASURE, 17.25),
+      Northings: writer.mkType(WebIFC.IFCLENGTHMEASURE, 30.5),
+      OrthogonalHeight: writer.mkType(WebIFC.IFCLENGTHMEASURE, 2.25),
+      XAxisAbscissa: writer.mkType(WebIFC.IFCREAL, 1),
+      XAxisOrdinate: writer.mkType(WebIFC.IFCREAL, 0),
+      Scale: writer.mkType(WebIFC.IFCREAL, 1),
+    });
+
+    const reader = await openReader(unwrap(writer.save()));
+    try {
+      expect(readLengthScale(reader)).toBe(0.001);
+      expect(readGeoref(reader, readLengthScale(reader))).toMatchObject({
+        eastings: 17_250,
+        northings: 30_500,
+        orthogonalHeight: 2_250,
+        mapUnitScale: 1,
+      });
+    } finally {
+      reader.close();
+    }
+  });
+
   it('returns null when no IfcMapConversion/IfcProjectedCRS is present', async () => {
     const { model } = buildPlacedModel();
     const reader = await openReader(await bytesFor(model));

@@ -336,9 +336,6 @@ export function readGeoref(reader: SpfReader, scale: number): Georef | null {
   const conv = reader.getLine<Record<string, unknown>>(conversionId);
   if (conv === null) return null;
 
-  const eastings = (numericValue(conv['Eastings']) ?? 0) * scale * 1000;
-  const northings = (numericValue(conv['Northings']) ?? 0) * scale * 1000;
-  const orthogonalHeight = (numericValue(conv['OrthogonalHeight']) ?? 0) * scale * 1000;
   const abscissa = numericValue(conv['XAxisAbscissa']);
   const ordinate = numericValue(conv['XAxisOrdinate']);
   const conversionScale = numericValue(conv['Scale']) ?? 1;
@@ -348,6 +345,10 @@ export function readGeoref(reader: SpfReader, scale: number): Georef | null {
     targetCrsId === null ? null : reader.getLine<Record<string, unknown>>(targetCrsId);
   const mapUnitId = refValue(targetCrs?.['MapUnit']);
   const mapUnitScale = mapUnitId === null ? null : lengthScaleFromUnit(reader, mapUnitId);
+  const offsetScale = mapUnitScale ?? scale;
+  const eastings = (numericValue(conv['Eastings']) ?? 0) * offsetScale * 1000;
+  const northings = (numericValue(conv['Northings']) ?? 0) * offsetScale * 1000;
+  const orthogonalHeight = (numericValue(conv['OrthogonalHeight']) ?? 0) * offsetScale * 1000;
 
   return {
     eastings,
