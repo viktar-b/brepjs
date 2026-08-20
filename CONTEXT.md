@@ -44,6 +44,10 @@ _Avoid_: IfcFacilityPart instance, arbitrary group, folder
 The authored decomposition meaning of a Spatial Assembly Occurrence: a collection of subordinate spatial Occurrences, an independently usable element, or a partial subdivision of another spatial Occurrence.
 _Avoid_: IFC composition enum, nesting depth, folder structure
 
+**Spatial Subdivision**:
+The authored engineering convention describing how a Spatial Part divides its Facility or parent Spatial Part, such as lateral, longitudinal, vertical, or regional subdivision. Projection maps this meaning to a target-specific usage classification.
+_Avoid_: Spatial Composition, IFC usage enum, placement axis
+
 **Model**:
 The root authored composition of assemblies and occurrences that represents the intended physical work.
 _Avoid_: source IFC, inventory
@@ -107,6 +111,10 @@ _Avoid_: model inventory, source identity map
 **Fidelity Gate**:
 An independently reported acceptance check for authored structure, geometry, placement, semantics, relationships, materials, identity stability, or visual similarity.
 _Avoid_: composite score, overall percentage
+
+**Validation Contract**:
+A versioned set of named required and optional evidence gates attached to a BIM Capability Profile, with explicit pass, fail, unavailable, or not-applicable outcomes and identified validator provenance.
+_Avoid_: IFC compliance, best-effort validation, silent skip
 
 **Representation Decoder**:
 A Reference Harness adapter that interprets a complete source representation item and preserves the strongest available evidence, including topology, placements, units, and optional analytic geometry.
