@@ -143,9 +143,18 @@ export function writeMapConversion(
     type: WebIFC.IFCMAPCONVERSION,
     SourceCRS: w.ref(geomContextId),
     TargetCRS: w.ref(crsId),
-    Eastings: w.mkType(WebIFC.IFCLENGTHMEASURE, crs.eastings ?? 0),
-    Northings: w.mkType(WebIFC.IFCLENGTHMEASURE, crs.northings ?? 0),
-    OrthogonalHeight: w.mkType(WebIFC.IFCLENGTHMEASURE, crs.orthogonalHeight ?? 0),
+    Eastings: w.mkType(
+      WebIFC.IFCLENGTHMEASURE,
+      w.serializationContext.lengthFromM(crs.eastings ?? 0)
+    ),
+    Northings: w.mkType(
+      WebIFC.IFCLENGTHMEASURE,
+      w.serializationContext.lengthFromM(crs.northings ?? 0)
+    ),
+    OrthogonalHeight: w.mkType(
+      WebIFC.IFCLENGTHMEASURE,
+      w.serializationContext.lengthFromM(crs.orthogonalHeight ?? 0)
+    ),
     XAxisAbscissa:
       crs.xAxisAbscissa !== undefined ? w.mkType(WebIFC.IFCREAL, crs.xAxisAbscissa) : null,
     XAxisOrdinate:

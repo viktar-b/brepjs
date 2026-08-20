@@ -20,6 +20,11 @@ export class IfcSerializationContext {
     return valueMm * this.#lengthScale;
   }
 
+  /** Convert legacy public CRS coordinates, whose contract is explicitly metres. */
+  lengthFromM(valueM: number): number {
+    return this.lengthFromMm(valueM * 1_000);
+  }
+
   areaFromMm2(valueMm2: number): number {
     return valueMm2 * this.#lengthScale ** 2;
   }

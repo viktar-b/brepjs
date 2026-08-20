@@ -224,7 +224,16 @@ export async function toIfc(
 
   for (const el of elements) {
     if (el.category !== 'SITE') continue;
-    const { entityId, placementId } = writeSite(w, el.guid, el.spec.name, ownerHistoryId, el.spec);
+    const parentId = findParentOf(el.localId, relationships);
+    const parentPlacementId = parentId === null ? null : (placementMap.get(parentId) ?? null);
+    const { entityId, placementId } = writeSite(
+      w,
+      el.guid,
+      el.spec.name,
+      ownerHistoryId,
+      el.spec,
+      parentPlacementId
+    );
     idMap.set(el.localId, entityId);
     placementMap.set(el.localId, placementId);
   }

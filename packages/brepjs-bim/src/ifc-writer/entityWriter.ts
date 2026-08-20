@@ -2,7 +2,6 @@ import * as WebIFC from 'web-ifc';
 import type { IfcWriter } from './ifcWriter.js';
 import { writeAxis2Placement3D } from './headerWriter.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
-import { toIfcLengthM } from '../units/units.js';
 import type { IfcElementCompositionType } from '../specs/spatialSpec.js';
 
 export function writeProject(
@@ -40,11 +39,16 @@ export function writeSite(
     readonly axisX?: [number, number, number] | undefined;
     readonly axisZ?: [number, number, number] | undefined;
     readonly compositionType?: IfcElementCompositionType | undefined;
-  }
+  },
+  parentPlacementId: number | null = null
 ): { entityId: number; placementId: number } {
   const placement3DId = writeAxis2Placement3D(
     w,
-    (placement?.origin ?? [0, 0, 0]).map(toIfcLengthM) as [number, number, number],
+    (placement?.origin ?? [0, 0, 0]).map((value) => w.serializationContext.lengthFromMm(value)) as [
+      number,
+      number,
+      number,
+    ],
     placement?.axisZ,
     placement?.axisX
   );
@@ -52,7 +56,7 @@ export function writeSite(
   w.writeLine({
     expressID: localPlacementId,
     type: WebIFC.IFCLOCALPLACEMENT,
-    PlacementRelTo: null,
+    PlacementRelTo: parentPlacementId === null ? null : w.ref(parentPlacementId),
     RelativePlacement: w.ref(placement3DId),
   });
   const entityId = w.nextId();
@@ -120,8 +124,8 @@ export function writeStorey(
   ownerHistoryId: number,
   parentPlacementId: number | null
 ): { entityId: number; placementId: number } {
-  const elevM = toIfcLengthM(elevationMm);
-  const placement3DId = writeAxis2Placement3D(w, [0, 0, elevM]);
+  const elevation = w.serializationContext.lengthFromMm(elevationMm);
+  const placement3DId = writeAxis2Placement3D(w, [0, 0, elevation]);
   const localPlacementId = w.nextId();
   w.writeLine({
     expressID: localPlacementId,
@@ -142,7 +146,7 @@ export function writeStorey(
     Representation: null,
     LongName: null,
     CompositionType: { type: 3, value: 'ELEMENT' },
-    Elevation: w.mkType(WebIFC.IFCLENGTHMEASURE, elevM),
+    Elevation: w.mkType(WebIFC.IFCLENGTHMEASURE, elevation),
   });
   return { entityId, placementId: localPlacementId };
 }

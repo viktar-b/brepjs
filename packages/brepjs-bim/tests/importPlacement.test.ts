@@ -4,6 +4,12 @@ import * as WebIFC from 'web-ifc';
 import { initOCCT } from '../../../tests/setup.js';
 import { BimModel } from '../src/model/bimModel.js';
 import { toIfc } from '../src/serialize/toIfc.js';
+import { deriveIfcGuidSync } from '../src/identity/guidDerivation.js';
+import { IfcWriter } from '../src/ifc-writer/ifcWriter.js';
+import { writeHeader, writeMapConversion } from '../src/ifc-writer/headerWriter.js';
+import { writeSite } from '../src/ifc-writer/entityWriter.js';
+import { writeBridge, writeBridgePart } from '../src/ifc-writer/infrastructureWriter.js';
+import type { IfcLengthUnit } from '../src/ifc-writer/serializationContext.js';
 import { SpfReader } from '../src/import/spfReader.js';
 import {
   readLengthScale,
@@ -76,12 +82,85 @@ async function openReader(bytes: Uint8Array): Promise<SpfReader> {
   return result.value;
 }
 
+async function spatialContextBytes(lengthUnit: IfcLengthUnit): Promise<Uint8Array> {
+  const writer = unwrap(await IfcWriter.create('ReferenceView_v1.2', 'IFC4X3', {}, lengthUnit));
+  const header = writeHeader(writer, {
+    applicationName: 'spatial-context-fixture',
+    applicationVersion: '1',
+  });
+  writeMapConversion(
+    writer,
+    {
+      name: 'EPSG:TEST',
+      verticalDatum: 'TEST-VERTICAL',
+      eastings: 17.25,
+      northings: 30.5,
+      orthogonalHeight: 2.25,
+      xAxisAbscissa: 0.5,
+      xAxisOrdinate: -0.8660254037844386,
+      scale: 1,
+    },
+    header.geomContextId,
+    header.lengthUnitId
+  );
+  const environmentSite = writeSite(
+    writer,
+    deriveIfcGuidSync('spatial-context:environment-site'),
+    'Environment site',
+    header.ownerHistoryId,
+    { origin: [1_000, 2_000, 3_000], axisX: [1, 0, 0], axisZ: [0, 0, 1] }
+  );
+  const bridgeSite = writeSite(
+    writer,
+    deriveIfcGuidSync('spatial-context:bridge-site'),
+    'Bridge site',
+    header.ownerHistoryId,
+    { origin: [100, 200, 300], axisX: [1, 0, 0], axisZ: [0, 0, 1] },
+    environmentSite.placementId
+  );
+  const bridge = writeBridge(
+    writer,
+    deriveIfcGuidSync('spatial-context:bridge'),
+    {
+      name: 'Context bridge',
+      origin: [4_000, 5_000, 6_000],
+      axisX: [1, 0, 0],
+      axisZ: [0, 0, 1],
+    },
+    header.ownerHistoryId,
+    bridgeSite.placementId
+  );
+  writeBridgePart(
+    writer,
+    deriveIfcGuidSync('spatial-context:part'),
+    {
+      name: 'Context part',
+      origin: [7_000, 8_000, 9_000],
+      axisX: [1, 0, 0],
+      axisZ: [0, 0, 1],
+      usageType: 'LATERAL',
+    },
+    header.ownerHistoryId,
+    bridge.placementId
+  );
+  return unwrap(writer.save());
+}
+
 function objectPlacementId(reader: SpfReader, elementExpressId: number): number {
   const line = reader.getLine<Record<string, unknown>>(elementExpressId);
   if (line === null) throw new Error('element line missing');
   const op = line['ObjectPlacement'] as { value?: number } | undefined;
   if (op?.value === undefined) throw new Error('ObjectPlacement missing');
   return op.value;
+}
+
+function entityIdByName(reader: SpfReader, type: number, name: string): number {
+  const id = reader.getLinesOfType(type).find((candidate) => {
+    const line = reader.getLine<Record<string, unknown>>(candidate);
+    return (line?.['Name'] as { value?: string } | undefined)?.value === name;
+  });
+  if (id === undefined) throw new Error(`${name} entity missing`);
+  return id;
 }
 
 describe('readLengthScale', () => {
@@ -97,6 +176,93 @@ describe('readLengthScale', () => {
 });
 
 describe('placement round-trip', () => {
+  it('serializes a nested Site placement relative to its authored parent Site', async () => {
+    using model = new BimModel();
+    const project = unwrap(model.init({ name: 'Nested Site Project' }));
+    const environment = unwrap(
+      model.addSite({
+        name: 'Environment Site',
+        origin: [1_000, 2_000, 3_000],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+      })
+    );
+    const bridgeSite = unwrap(
+      model.addSite({
+        name: 'Bridge Site',
+        origin: [100, 200, 300],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+      })
+    );
+    model.aggregate(project, environment);
+    model.aggregate(environment, bridgeSite);
+
+    const reader = await openReader(await bytesFor(model));
+    try {
+      const bridgeSiteId = entityIdByName(reader, WebIFC.IFCSITE, 'Bridge Site');
+      const placement = composeWorldPlacement(
+        reader,
+        objectPlacementId(reader, bridgeSiteId),
+        readLengthScale(reader)
+      );
+      expect(placement?.origin).toEqual([1_100, 2_200, 3_300]);
+    } finally {
+      reader.close();
+    }
+  });
+
+  it('scales nested civil placements and metre-based map coordinates through the model context', async () => {
+    const fixtures = [
+      { lengthUnit: 'METRE', fileUnitMetres: 1 },
+      { lengthUnit: 'MILLIMETRE', fileUnitMetres: 0.001 },
+    ] as const;
+
+    for (const fixture of fixtures) {
+      const reader = await openReader(await spatialContextBytes(fixture.lengthUnit));
+      try {
+        const environmentSiteId = entityIdByName(reader, WebIFC.IFCSITE, 'Environment site');
+        const bridgeSiteId = entityIdByName(reader, WebIFC.IFCSITE, 'Bridge site');
+        const bridgeId = entityIdByName(reader, WebIFC.IFCBRIDGE, 'Context bridge');
+        const partId = entityIdByName(reader, WebIFC.IFCBRIDGEPART, 'Context part');
+        const environmentSite = composeWorldPlacement(
+          reader,
+          objectPlacementId(reader, environmentSiteId),
+          fixture.fileUnitMetres
+        );
+        const bridgeSite = composeWorldPlacement(
+          reader,
+          objectPlacementId(reader, bridgeSiteId),
+          fixture.fileUnitMetres
+        );
+        const bridge = composeWorldPlacement(
+          reader,
+          objectPlacementId(reader, bridgeId),
+          fixture.fileUnitMetres
+        );
+        const part = composeWorldPlacement(
+          reader,
+          objectPlacementId(reader, partId),
+          fixture.fileUnitMetres
+        );
+        expect(environmentSite?.origin).toEqual([1_000, 2_000, 3_000]);
+        expect(bridgeSite?.origin).toEqual([1_100, 2_200, 3_300]);
+        expect(bridge?.origin).toEqual([5_100, 7_200, 9_300]);
+        expect(part?.origin).toEqual([12_100, 15_200, 18_300]);
+
+        const georef = readGeoref(reader, fixture.fileUnitMetres);
+        expect(georef).toMatchObject({
+          eastings: 17_250,
+          northings: 30_500,
+          orthogonalHeight: 2_250,
+        });
+        expect(georef?.rotation).toBeCloseTo(-Math.PI / 3, 10);
+      } finally {
+        reader.close();
+      }
+    }
+  });
+
   it('recovers the wall world origin (storey elevation + relative origin) in mm', async () => {
     const placed = buildPlacedModel();
     const reader = await openReader(await bytesFor(placed.model));

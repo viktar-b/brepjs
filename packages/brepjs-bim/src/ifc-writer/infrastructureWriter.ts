@@ -9,7 +9,6 @@ import type {
   SignSpec,
 } from '../specs/infrastructureSpec.js';
 import { memberBodySpec } from '../elementFns/memberFns.js';
-import { toIfcLengthM } from '../units/units.js';
 import { writeAxis2Placement3D } from './headerWriter.js';
 import type { IfcWriter } from './ifcWriter.js';
 import { writeBeamGeometry } from './geometryWriter.js';
@@ -27,7 +26,11 @@ function writeSpatialPlacement(
 ): number {
   const axisPlacementId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((value) => w.serializationContext.lengthFromMm(value)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
