@@ -25,6 +25,8 @@ Monorepo packages:
 - `packages/brepjs-viewer`: Shared React/R3F renderer (consumed by the playground and brepjs-cad; published, manual publish — unmanaged by release-please)
 - `packages/brepjs-cad`: Agent skill + verify/preview CLI + WASM viewer (published; skill also ships via the repo Claude-plugin marketplace)
 
+For full IFC remodeling, source comparison, or reconstruction refinement, use `.agents/skills/ifc-reconstruction/SKILL.md`; the infrastructure leaf skill is a compatibility entry.
+
 ## Commands
 
 - `npm run build`: Vite library build (ES + CJS)

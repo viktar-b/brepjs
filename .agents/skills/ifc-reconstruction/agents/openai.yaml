@@ -1,0 +1,4 @@
+interface:
+  display_name: 'IFC Reconstruction'
+  short_description: 'Reconstruct and verify IFC models declaratively'
+  default_prompt: 'Use $ifc-reconstruction to reconstruct this IFC as a clean declarative model and verify document fidelity.'

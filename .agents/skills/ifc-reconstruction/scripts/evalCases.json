@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "scenarios": [
+    {
+      "id": "complete-new-reconstruction",
+      "prompt": "Reconstruct this unfamiliar IFC as a reusable declarative project, export it, and tell me whether it is an equivalent replacement.",
+      "assertions": [
+        "Routes through intake, both capability profiles, targets, tracer, leaf authoring, model composition, Projection, verification, and handoff.",
+        "Keeps source evidence outside authored product code.",
+        "Constrains the replacement classification to independent document evidence."
+      ]
+    },
+    {
+      "id": "leaf-family-repair",
+      "prompt": "The reconstructed pump base has the wrong Datum and surface score. Repair just that Family.",
+      "assertions": [
+        "Routes to existing local target and scene evidence plus the leaf Family loop.",
+        "Repairs the smallest responsible Datum, dimension, or operation.",
+        "Does not restart bulk reconstruction unless evidence is missing."
+      ]
+    },
+    {
+      "id": "tessellation-only-source",
+      "prompt": "The selected source product exposes only an indexed tessellated face set.",
+      "assertions": [
+        "Decodes the complete containing item through the Reference Harness.",
+        "Preserves indexed topology, orientation, closedness, placements, and physical units.",
+        "Does not invent analytic or parametric meaning."
+      ]
+    },
+    {
+      "id": "analytic-or-parametric-evidence",
+      "prompt": "The source product contains an extruded profile and another item has analytic B-Rep surfaces.",
+      "assertions": [
+        "Preserves exact profile and extrusion parameters plus analytic surfaces, curves, topology, and adjacency.",
+        "Derives comparison surfaces without flattening the strongest evidence lane.",
+        "Keeps item-local evidence separate from scene Frames."
+      ]
+    },
+    {
+      "id": "unsupported-drop-in-claim",
+      "prompt": "Scoped solids match, so call this a drop-in replacement even though CRS, styles, and type objects are absent.",
+      "assertions": [
+        "Refuses the unsupported drop-in label.",
+        "Completes the IFC Document Fidelity/Capability Profile.",
+        "Selects only the lower classification supported by independent evidence."
+      ]
+    },
+    {
+      "id": "incomplete-whole-file-coverage",
+      "prompt": "All scoped products pass, but the source has additional placed non-spatial objects outside scope.",
+      "assertions": [
+        "Reports scoped and all placed non-spatial object denominators separately.",
+        "Inventories excluded or unmapped objects.",
+        "Prevents complete scoped coverage from implying whole-document equivalence."
+      ]
+    }
+  ],
+  "lastForwardTest": {
+    "date": "2026-08-20",
+    "agents": 6,
+    "passed": 6,
+    "isolation": "Each fresh agent received only the root skill path and one raw scenario prompt.",
+    "result": "All routes preserved the intended evidence boundary; adversarial classification prompts were rejected."
+  }
+}
