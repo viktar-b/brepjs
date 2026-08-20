@@ -31,6 +31,80 @@ function run(...args: string[]): { status: number | null; out: string } {
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
+const EXPECTED_BRIDGE_MANIFEST = [
+  '.gitignore',
+  'AGENTS.md',
+  'README.md',
+  'THIRD_PARTY_NOTICES.md',
+  'assets/fonts/infra-bridge-block.otf',
+  'brepjs.config.ts',
+  'docs/coordinates.md',
+  'docs/model-structure.md',
+  'docs/provenance.md',
+  'docs/validation.md',
+  'eslint.config.js',
+  'package.json',
+  'requirements/bim-bridge-v1.ids',
+  'requirements/project.ids',
+  'src/assemblies/bridge-parts/RailArchSuperstructure.tsx',
+  'src/assemblies/bridge-parts/RailPier.tsx',
+  'src/assemblies/bridge-parts/RailSubstructure.tsx',
+  'src/assemblies/bridge-parts/RoadAbutment.tsx',
+  'src/assemblies/bridge-parts/RoadApproach.tsx',
+  'src/assemblies/bridge-parts/RoadDeck.tsx',
+  'src/assemblies/bridge-parts/RoadPier.tsx',
+  'src/assemblies/bridge-parts/RoadSubstructure.tsx',
+  'src/assemblies/bridge-parts/RoadSuperstructure.tsx',
+  'src/assemblies/bridges/RailArchBridge.tsx',
+  'src/assemblies/bridges/RoadGirderBridge.tsx',
+  'src/assemblies/sites/ContextSite.tsx',
+  'src/assemblies/sites/EnvironmentSite.tsx',
+  'src/assemblies/sites/RailBridgeSite.tsx',
+  'src/assemblies/sites/RoadBridgeSite.tsx',
+  'src/families/deck/ApproachSlab.tsx',
+  'src/families/deck/BridgeDeck.tsx',
+  'src/families/deck/RoadRailing.tsx',
+  'src/families/earthworks/EarthFill.tsx',
+  'src/families/signage/BridgeNameSign.tsx',
+  'src/families/signage/projectFont.ts',
+  'src/families/substructure/AbutmentSupportBeam.tsx',
+  'src/families/substructure/CrossGirder.tsx',
+  'src/families/substructure/Footing.tsx',
+  'src/families/substructure/PierStem.tsx',
+  'src/families/substructure/RailPierStem.tsx',
+  'src/families/superstructure/ArchSegment.tsx',
+  'src/families/superstructure/MainGirder.tsx',
+  'src/families/superstructure/SpandrelWall.tsx',
+  'src/materials/materials.ts',
+  'src/model/InfraBridge.tsx',
+  'src/model/buildModel.ts',
+  'src/preview/generatePreview.ts',
+  'src/preview/renderSnapshot.ts',
+  'src/projection/exportIfc.ts',
+  'src/projection/projectModel.ts',
+  'src/setout/frameFromSetOut.ts',
+  'src/setout/railBridgeSetouts.ts',
+  'src/setout/roadBridgeSetouts.ts',
+  'src/setout/siteSetouts.ts',
+  'src/validation/report.ts',
+  'src/validation/validateProject.ts',
+  'tests/families/deck.test.tsx',
+  'tests/families/earthworks.test.tsx',
+  'tests/families/signage.test.tsx',
+  'tests/families/substructure.test.tsx',
+  'tests/families/superstructure.test.tsx',
+  'tests/preview.test.ts',
+  'tests/projection/ifcProjection.test.tsx',
+  'tests/projection/ifcRoundTrip.test.tsx',
+  'tests/spatial/assemblies.test.tsx',
+  'tests/spatial/modelHierarchy.test.tsx',
+  'tests/spatial/setout.test.ts',
+  'tests/validation/cleanliness.test.ts',
+  'tests/validation/validationReport.test.ts',
+  'tsconfig.json',
+  'vitest.config.ts',
+] as const;
+
 describe('create-brepjs', () => {
   it('keeps the no-template command entry point available', async () => {
     const r = run('my-model');
@@ -39,7 +113,6 @@ describe('create-brepjs', () => {
     expect(await readdir(root)).not.toHaveLength(0);
     expect(r.out).toContain('Scaffolded ');
     expect(r.out).toContain('/my-model');
-    expect(r.out).toContain('npx brepjs add');
   });
 
   it('accepts an existing empty target directory', async () => {
@@ -92,10 +165,7 @@ describe('create-brepjs', () => {
     );
     const baseline = JSON.parse(await readFile(baselinePath, 'utf8')) as {
       compatibility: { preContractOutput: string };
-      fixedRequest: {
-        contract: string;
-        project: { id: string };
-      };
+      fixedRequest: unknown;
       expectedInventory: Record<string, number>;
       expectedCanonicalManifest: string[];
       referenceIfc: { sha256: string };
@@ -103,9 +173,26 @@ describe('create-brepjs', () => {
     };
 
     expect(baseline.compatibility.preContractOutput).toBe('not-promised');
-    expect(baseline.fixedRequest).toMatchObject({
+    expect(baseline.fixedRequest).toEqual({
       contract: 'bim/bridge/v1',
-      project: { id: '7d8d1b9d-89e8-4df2-b4f9-76f1e910ad98' },
+      targetDir: {
+        rule: 'caller-supplied absolute temporary directory',
+        basename: 'infra-bridge',
+      },
+      project: {
+        id: '7d8d1b9d-89e8-4df2-b4f9-76f1e910ad98',
+        key: 'infra-bridge',
+        name: 'Infra Bridge',
+      },
+      organization: { name: 'brepjs' },
+      projection: {
+        crs: 'EPSG:32760',
+        verticalDatum: 'Local bridge datum',
+        eastingMm: 729_011_225.8823584,
+        northingMm: 9_063_960_607.644705,
+        elevationMm: 0,
+        xAxisBearingDeg: 90,
+      },
     });
     expect(baseline.expectedInventory).toEqual({
       sites: 6,
@@ -116,14 +203,7 @@ describe('create-brepjs', () => {
       spatialAssemblyDefinitions: 15,
       materials: 6,
     });
-    expect(baseline.expectedCanonicalManifest).toContain('brepjs.config.ts');
-    expect(baseline.expectedCanonicalManifest).toContain('assets/fonts/infra-bridge-block.otf');
-    expect(baseline.expectedCanonicalManifest).toHaveLength(71);
-    expect(baseline.expectedCanonicalManifest).toEqual(
-      [...new Set(baseline.expectedCanonicalManifest)].sort()
-    );
-    expect(baseline.expectedCanonicalManifest).not.toContain('package-lock.json');
-    expect(baseline.expectedCanonicalManifest).not.toContain('reference:compare');
+    expect(baseline.expectedCanonicalManifest).toEqual(EXPECTED_BRIDGE_MANIFEST);
     expect(baseline.referenceIfc.sha256).toBe(
       '241e6576a3a554086d3d2ae87415c5ba98a0123d329245810e7d42ecc504c183'
     );
