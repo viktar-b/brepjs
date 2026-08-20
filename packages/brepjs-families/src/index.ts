@@ -21,11 +21,22 @@ export {
   type ModelComponent,
   type DefinitionInvocation,
   type SemanticKey,
-  type EngineeringProperty,
-  type EngineeringSemantics,
   type DefinitionOptions,
   type FamilyOptions,
 } from './element.js';
+export {
+  civilSemantics,
+  type EngineeringProperty,
+  type EngineeringSemantics,
+  type CustomEngineeringSemantics,
+  type CivilEngineeringSemantics,
+  type SiteEngineeringSemantics,
+  type FacilityEngineeringSemantics,
+  type SpatialPartEngineeringSemantics,
+  type ProductEngineeringSemantics,
+  type SpatialComposition,
+  type SpatialSubdivision,
+} from './engineeringSemantics.js';
 export { frame, type Frame, type FrameVector } from './frame.js';
 export { jsx, jsxs, Fragment } from './jsxRuntime.js';
 export {

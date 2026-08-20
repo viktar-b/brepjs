@@ -6,11 +6,13 @@ import { z } from 'zod';
 import { initOCCT } from '../../../tests/setup.js';
 import {
   assembly,
+  civilSemantics,
   el,
   family,
   frame,
   model,
   resolve,
+  type CivilEngineeringSemantics,
   type Element,
   type EngineeringSemantics,
 } from '../src/index.js';
@@ -259,6 +261,241 @@ describe('authored occurrence contract', () => {
     expect(resolved.semantics?.kind).toBe('engineering-model');
     expect(resolved.children[0]?.semantics?.kind).toBe('member-assembly');
     expect(resolved.children[0]?.children[0]?.semantics?.kind).toBe('solid-member');
+  });
+
+  it('preserves typed civil meaning from Site through physical product', () => {
+    const Girder = family<{ readonly sizeMm: number }>(
+      'Girder',
+      ({ sizeMm }) => el('Box', { size: [sizeMm, sizeMm, sizeMm] }),
+      {
+        semantics: civilSemantics({
+          kind: 'product',
+          category: 'beam',
+          role: 'main-girder',
+          material: 'timber',
+          dimensionsMm: { length: 9_891, width: 250, height: 300 },
+        }),
+      }
+    );
+    const Superstructure = assembly<ChildrenProps>(
+      'Superstructure',
+      ({ children }) => el('Group', {}, children),
+      {
+        semantics: civilSemantics({
+          kind: 'spatial-part',
+          category: 'bridge-part',
+          role: 'superstructure',
+          composition: 'element',
+          subdivision: 'lateral',
+        }),
+      }
+    );
+    const Bridge = assembly<ChildrenProps>(
+      'Bridge',
+      ({ children }) => el('Group', {}, children),
+      {
+        semantics: civilSemantics({
+          kind: 'facility',
+          category: 'bridge',
+          role: 'girder-bridge',
+          composition: 'element',
+        }),
+      }
+    );
+    const BridgeSite = assembly<ChildrenProps>(
+      'BridgeSite',
+      ({ children }) => el('Group', {}, children),
+      {
+        semantics: civilSemantics({
+          kind: 'site',
+          category: 'bridge-site',
+          role: 'civil-context',
+          composition: 'partial',
+        }),
+      }
+    );
+
+    const resolved = resolve(
+      <Scene key="model">
+        <BridgeSite key="site">
+          <Bridge key="bridge">
+            <Superstructure key="superstructure">
+              <Girder key="main-girder" sizeMm={10} />
+            </Superstructure>
+          </Bridge>
+        </BridgeSite>
+      </Scene>
+    );
+
+    expect(resolved.children[0]?.semantics).toEqual({
+      kind: 'site',
+      category: 'bridge-site',
+      role: 'civil-context',
+      composition: 'partial',
+    });
+    expect(resolved.children[0]?.children[0]?.semantics).toMatchObject({
+      kind: 'facility',
+      category: 'bridge',
+      composition: 'element',
+    });
+    expect(resolved.children[0]?.children[0]?.children[0]?.semantics).toMatchObject({
+      kind: 'spatial-part',
+      subdivision: 'lateral',
+    });
+    expect(
+      resolved.children[0]?.children[0]?.children[0]?.children[0]?.semantics
+    ).toMatchObject({
+      kind: 'product',
+      category: 'beam',
+      material: 'timber',
+      dimensionsMm: { length: 9_891, width: 250, height: 300 },
+    });
+  });
+
+  it.each([
+    {
+      field: 'category',
+      semantics: {
+        kind: 'site',
+        category: '',
+        role: 'civil-context',
+        composition: 'partial',
+      },
+    },
+    {
+      field: 'role',
+      semantics: {
+        kind: 'facility',
+        category: 'bridge',
+        role: ' ',
+        composition: 'element',
+      },
+    },
+    {
+      field: 'composition',
+      semantics: {
+        kind: 'site',
+        category: 'bridge-site',
+        role: 'civil-context',
+        composition: 'aggregate',
+      },
+    },
+    {
+      field: 'subdivision',
+      semantics: {
+        kind: 'spatial-part',
+        category: 'bridge-part',
+        role: 'superstructure',
+        composition: 'element',
+        subdivision: 'across',
+      },
+    },
+    {
+      field: 'material',
+      semantics: {
+        kind: 'product',
+        category: 'beam',
+        role: 'main-girder',
+        material: '',
+        dimensionsMm: { length: 9_891 },
+      },
+    },
+    {
+      field: 'dimensionsMm.length',
+      semantics: {
+        kind: 'product',
+        category: 'beam',
+        role: 'main-girder',
+        material: 'timber',
+        dimensionsMm: { length: Number.NaN },
+      },
+    },
+    {
+      field: 'subdivision',
+      semantics: {
+        kind: 'site',
+        category: 'bridge-site',
+        role: 'civil-context',
+        composition: 'partial',
+        subdivision: 'lateral',
+      },
+    },
+    {
+      field: 'composition',
+      semantics: {
+        kind: 'product',
+        category: 'beam',
+        role: 'main-girder',
+        material: 'timber',
+        dimensionsMm: { length: 9_891 },
+        composition: 'element',
+      },
+    },
+  ])('rejects invalid civil semantics at $field', ({ field, semantics }) => {
+    expect(() =>
+      civilSemantics(semantics as unknown as CivilEngineeringSemantics)
+    ).toThrow(new RegExp(`'${field.replace('.', '\\.')}'`));
+  });
+
+  it('validates civil semantics declared without the TypeScript helper', () => {
+    const InvalidSpatialPart = assembly<ChildrenProps>(
+      'InvalidSpatialPart',
+      ({ children }) => el('Group', {}, children),
+      {
+        semantics: {
+          kind: 'spatial-part',
+          category: 'bridge-part',
+          role: 'superstructure',
+          composition: 'element',
+        } as EngineeringSemantics,
+      }
+    );
+
+    expect(() => resolve(<InvalidSpatialPart key="invalid-part" />)).toThrow(
+      /assembly 'InvalidSpatialPart'\.subdivision/
+    );
+  });
+
+  it('rejects civil semantics on the wrong definition responsibility', () => {
+    const ProductAssembly = assembly<ChildrenProps>(
+      'ProductAssembly',
+      ({ children }) => el('Group', {}, children),
+      {
+        semantics: civilSemantics({
+          kind: 'product',
+          category: 'beam',
+          role: 'main-girder',
+          material: 'timber',
+          dimensionsMm: { length: 9_891 },
+        }),
+      }
+    );
+
+    expect(() => resolve(<ProductAssembly key="invalid-product" />)).toThrow(
+      /assembly 'ProductAssembly'\.kind.*Family/
+    );
+  });
+
+  it('preserves legacy and project-defined semantic kinds', () => {
+    const LegacySite = assembly<ChildrenProps>(
+      'LegacySite',
+      ({ children }) => el('Group', {}, children),
+      { semantics: { kind: 'site', properties: { name: 'Legacy site' } } }
+    );
+    const CustomSystem = assembly<ChildrenProps>(
+      'CustomSystem',
+      ({ children }) => el('Group', {}, children),
+      { semantics: { kind: 'project-defined-system', role: 'temporary-works' } }
+    );
+
+    expect(resolve(<LegacySite key="legacy-site" />).semantics).toEqual({
+      kind: 'site',
+      properties: { name: 'Legacy site' },
+    });
+    expect(resolve(<CustomSystem key="custom-system" />).semantics).toEqual({
+      kind: 'project-defined-system',
+      role: 'temporary-works',
+    });
   });
 
   it.each([{ role: 'missing-kind' }, { kind: 42, role: 'non-string-kind' }])(

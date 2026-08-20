@@ -5,17 +5,14 @@
  */
 
 import type { ZodType } from 'zod';
+import {
+  validateDefinitionEngineeringSemantics,
+  type EngineeringSemantics,
+} from './engineeringSemantics.js';
 import { frame as validateFrame, type Frame } from './frame.js';
 
 export type SemanticKey = string;
-export type EngineeringProperty = string | number | boolean;
-
-export interface EngineeringSemantics {
-  readonly kind: string;
-  readonly role?: string | undefined;
-  readonly material?: string | undefined;
-  readonly properties?: Readonly<Record<string, EngineeringProperty>> | undefined;
-}
+export type { EngineeringProperty, EngineeringSemantics } from './engineeringSemantics.js';
 
 export interface Element {
   readonly type: string | DefinitionComponent<never>;
@@ -116,25 +113,6 @@ function validateSemanticKey(key: string | undefined): void {
   }
 }
 
-function validateEngineeringSemantics(
-  semantics: EngineeringSemantics | undefined,
-  definitionKind: DefinitionKind,
-  name: string
-): EngineeringSemantics | undefined {
-  if (semantics === undefined) return undefined;
-  const untyped: unknown = semantics;
-  const kind =
-    typeof untyped === 'object' && untyped !== null
-      ? (untyped as Readonly<Record<string, unknown>>)['kind']
-      : undefined;
-  if (typeof kind !== 'string' || kind.trim().length === 0) {
-    throw new Error(
-      `brepjs-families: engineering semantics for ${definitionKind.toLowerCase()} '${name}' requires a non-empty string kind`
-    );
-  }
-  return semantics;
-}
-
 function definition<P extends object, I extends object = P>(
   definitionKind: DefinitionKind,
   name: string,
@@ -186,7 +164,7 @@ function definition<P extends object, I extends object = P>(
     resolveSemanticsErased: (props: object, children: readonly Element[]) => {
       const value =
         typeof semantics === 'function' ? semantics({ ...props, children } as P) : semantics;
-      return validateEngineeringSemantics(value, definitionKind, name);
+      return validateDefinitionEngineeringSemantics(value, definitionKind, name);
     },
   });
   return component;

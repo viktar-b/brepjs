@@ -2,6 +2,7 @@
 
 import {
   assembly,
+  civilSemantics,
   el,
   family,
   model,
@@ -55,6 +56,32 @@ void invalidIntrinsicPatch;
 
 const validSemantics: EngineeringSemantics = { kind: 'structural-member' };
 void validSemantics;
+
+const validCivilSemantics = civilSemantics({
+  kind: 'spatial-part',
+  category: 'bridge-part',
+  role: 'superstructure',
+  composition: 'element',
+  subdivision: 'lateral',
+});
+void validCivilSemantics;
+
+civilSemantics({
+  kind: 'site',
+  category: 'bridge-site',
+  role: 'civil-context',
+  composition: 'partial',
+  // @ts-expect-error Site semantics cannot declare Spatial Subdivision.
+  subdivision: 'lateral',
+});
+
+// @ts-expect-error Product semantics require an authored material.
+civilSemantics({
+  kind: 'product',
+  category: 'beam',
+  role: 'main-girder',
+  dimensionsMm: { length: 9_891 },
+});
 
 // @ts-expect-error Engineering Semantics require a target-independent kind.
 const missingKind: EngineeringSemantics = { role: 'primary' };
