@@ -1,0 +1,678 @@
+// @vitest-environment jsdom
+
+import { act, createElement, type ReactNode } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ComparisonDiagnostic,
+  WorkbenchCatalog,
+  WorkbenchResult,
+} from '../shared/protocol.js';
+import { App } from '../src/App.js';
+
+vi.mock('brepjs-viewer', () => ({
+  ViewerCanvas: ({
+    children,
+    data,
+    view,
+    projection,
+    fitSignal,
+  }: {
+    readonly children?: ReactNode;
+    readonly data: { readonly position: Float32Array };
+    readonly view?: string;
+    readonly projection?: string;
+    readonly fitSignal?: number;
+  }) =>
+    createElement(
+      'div',
+      {
+        'data-testid': 'shared-r3f-canvas',
+        'data-framing-maximum': Math.max(...data.position).toString(),
+        'data-view': view,
+        'data-projection': projection,
+        'data-fit-signal': fitSignal?.toString(),
+      },
+      children
+    ),
+  Renderer: ({
+    data,
+    viewMode,
+    clippingPlanes,
+  }: {
+    readonly data: { readonly color?: string };
+    readonly viewMode?: string;
+    readonly clippingPlanes?: readonly unknown[];
+  }) =>
+    createElement('span', {
+      'data-layer-color': data.color,
+      'data-view-mode': viewMode,
+      'data-clipping': JSON.stringify(clippingPlanes?.[0] ?? null),
+    }),
+  EdgeRenderer: ({ clippingPlanes }: { readonly clippingPlanes?: readonly unknown[] }) =>
+    createElement('span', {
+      'data-testid': 'mesh-edges',
+      'data-clipping': JSON.stringify(clippingPlanes?.[0] ?? null),
+    }),
+  meshBounds: () => ({ min: [0, 0, 0], max: [10, 20, 30] }),
+  sectionPlane: (axis: string, position: number, flip: boolean) => ({ axis, position, flip }),
+}));
+
+vi.mock('@react-three/drei', () => ({
+  Grid: () => createElement('span', { 'data-testid': 'scale-aware-grid' }),
+}));
+
+const FIRST = 'infra-bridge/rail-site-01/rail-bridge-01/superstructure/arch-segment-01';
+const SECOND = 'infra-bridge/road-site/road-river-bridge/deck/bridge-deck';
+
+describe('Survey Bench application', () => {
+  let host: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    host.remove();
+    vi.unstubAllGlobals();
+  });
+
+  it('presents every diagnostic control and all Fidelity evidence around one shared canvas', async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = requestUrl(input);
+        requests.push(url);
+        return Promise.resolve(
+          jsonResponse(url.includes('/comparison') ? success(diagnostic()) : success(catalog()))
+        );
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.querySelector('[data-testid="shared-r3f-canvas"]') !== null);
+
+    expect(requests[0]).toBe('/api/workbench');
+    expect(requests[1]).toContain(`semanticKey=${encodeURIComponent(FIRST)}`);
+    expect(host.querySelectorAll('[data-testid="shared-r3f-canvas"]')).toHaveLength(1);
+    expect(labelledControl('Search Semantic Keys')).not.toBeNull();
+    expect(button('Reference')?.hasAttribute('aria-pressed')).toBe(true);
+    expect(button('Candidate')?.hasAttribute('aria-pressed')).toBe(true);
+    expect(button('Overlay')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Reference visible')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Candidate visible')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Reference x-ray')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Candidate edges')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Section plane')?.getAttribute('aria-pressed')).toBe('false');
+    expect(button('Iso')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Front')).not.toBeNull();
+    expect(button('Top')).not.toBeNull();
+    expect(button('Right')).not.toBeNull();
+    expect(button('Orthographic')?.getAttribute('aria-pressed')).toBe('false');
+    expect(button('Fit')?.hasAttribute('aria-pressed')).toBe(false);
+    expect(button('Grid')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Recompute')).not.toBeNull();
+
+    for (const evidence of [
+      'Control point',
+      'X-axis angle',
+      'Z-axis angle',
+      'Envelope maximum',
+      'Surface maximum',
+      'Surface mean',
+      'Surface P95',
+      'Normal mean',
+      'Normal minimum',
+      'Volume error',
+      'Closed-solid IoU',
+    ]) {
+      expect(host.textContent).toContain(evidence);
+    }
+    expect(host.textContent).toContain('Canonical component-local');
+    expect(host.textContent).toContain('Revision 7');
+    expect(host.querySelector('.reference-status')?.textContent).toContain('checksum verified');
+    const canvas = host.querySelector('[data-testid="shared-r3f-canvas"]');
+    expect(canvas?.getAttribute('data-view')).toBe('iso');
+    expect(canvas?.getAttribute('data-projection')).toBe('perspective');
+    expect(host.querySelectorAll('[data-testid="mesh-edges"]')).toHaveLength(1);
+    expect(host.querySelector('[data-layer-color="#61d7f4"]')?.getAttribute('data-view-mode')).toBe(
+      'xray'
+    );
+
+    act(() => button('Reference x-ray')?.click());
+    expect(host.querySelector('[data-layer-color="#61d7f4"]')?.getAttribute('data-view-mode')).toBe(
+      'solid'
+    );
+    act(() => button('Reference x-ray')?.click());
+    act(() => button('Reference edges')?.click());
+    expect(host.querySelectorAll('[data-testid="mesh-edges"]')).toHaveLength(2);
+    act(() => button('Reference edges')?.click());
+    act(() => button('Top')?.click());
+    expect(canvas?.getAttribute('data-view')).toBe('top');
+    const fitBefore = Number(canvas?.getAttribute('data-fit-signal'));
+    act(() => button('Fit')?.click());
+    expect(Number(canvas?.getAttribute('data-fit-signal'))).toBeGreaterThan(fitBefore);
+    act(() => button('Orthographic')?.click());
+    expect(canvas?.getAttribute('data-projection')).toBe('orthographic');
+
+    const stage = host.querySelector('.viewport-stage');
+    const controls = host.querySelector<HTMLDetailsElement>('.viewport-controls');
+    const evidence = host.querySelector<HTMLDetailsElement>('.evidence-pane');
+    if (stage === null || controls === null || evidence === null) {
+      throw new Error('responsive workbench regions are missing');
+    }
+    expect(stage.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    controls.open = false;
+    evidence.open = false;
+    expect(host.querySelector('[data-testid="shared-r3f-canvas"]')).not.toBeNull();
+    controls.open = true;
+    evidence.open = true;
+
+    act(() => button('Reference')?.click());
+    expect(host.querySelector('[data-layer-color="#61d7f4"]')).not.toBeNull();
+    expect(host.querySelector('[data-layer-color="#f0ad55"]')).toBeNull();
+    act(() => button('Candidate')?.click());
+    expect(host.querySelector('[data-layer-color="#61d7f4"]')).toBeNull();
+    expect(host.querySelector('[data-layer-color="#f0ad55"]')).not.toBeNull();
+    act(() => button('Grid')?.click());
+    expect(host.querySelector('[data-testid="scale-aware-grid"]')).toBeNull();
+    act(() => button('Section plane')?.click());
+    expect(labelledControl('CAD X')).not.toBeNull();
+    expect(labelledControl('CAD Y')).not.toBeNull();
+    expect(labelledControl('CAD Z')).not.toBeNull();
+    expect(labelledControl('Section position')).not.toBeNull();
+    act(() => button('CAD Y')?.click());
+    act(() => {
+      setRangeValue(labelledControl('Section position') as HTMLInputElement, 10);
+    });
+    expect(host.querySelector('[data-layer-color="#f0ad55"]')?.getAttribute('data-clipping')).toBe(
+      JSON.stringify({ axis: 'z', position: -10, flip: true })
+    );
+    act(() => button('Flip section')?.click());
+    expect(host.querySelector('[data-layer-color="#f0ad55"]')?.getAttribute('data-clipping')).toBe(
+      JSON.stringify({ axis: 'z', position: -10, flip: false })
+    );
+  });
+
+  it('labels configured, verified, and failed Reference states truthfully', async () => {
+    const pendingComparison = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) =>
+        requestUrl(input) === '/api/workbench'
+          ? Promise.resolve(jsonResponse(success(catalog())))
+          : pendingComparison.promise
+      )
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(
+      () =>
+        host.querySelector('.reference-status')?.textContent.includes('Infra-Bridge.ifc') === true
+    );
+
+    const status = host.querySelector('.reference-status');
+    expect(status?.classList.contains('reference-status--pending')).toBe(true);
+    expect(status?.textContent).toContain('verification pending');
+    expect(status?.textContent).not.toContain('checksum verified');
+
+    await act(async () => {
+      pendingComparison.resolve(jsonResponse(success(diagnostic())));
+      await Promise.resolve();
+    });
+    await waitFor(
+      () =>
+        host
+          .querySelector('.reference-status')
+          ?.classList.contains('reference-status--verified') === true
+    );
+    expect(host.querySelector('.reference-status')?.textContent).toContain('checksum verified');
+  });
+
+  it('filters grouped Semantic Keys and keeps the selected component during recompute', async () => {
+    let comparisonCalls = 0;
+    const pendingRefresh = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        comparisonCalls += 1;
+        if (init?.method === 'POST') return pendingRefresh.promise;
+        return Promise.resolve(jsonResponse(success(diagnostic())));
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.textContent.includes('Surface P95'));
+
+    const search = labelledControl('Search Semantic Keys') as HTMLInputElement;
+    act(() => {
+      setInputValue(search, 'deck');
+    });
+    expect(host.textContent).toContain('Bridge Deck');
+    expect(host.querySelector(`[data-semantic-key="${FIRST}"]`)).toBeNull();
+
+    act(() => {
+      setInputValue(search, '');
+    });
+    const selected = host.querySelector(`[data-semantic-key="${FIRST}"]`);
+    expect(selected?.getAttribute('aria-current')).toBe('true');
+
+    act(() => {
+      button('Recompute')?.click();
+    });
+    expect(host.textContent).toContain('Previous successful result');
+    expect(host.querySelector(`[data-semantic-key="${FIRST}"]`)?.getAttribute('aria-current')).toBe(
+      'true'
+    );
+
+    pendingRefresh.resolve(jsonResponse(success({ ...diagnostic(), revision: 8 })));
+    await waitFor(() => host.textContent.includes('Revision 8'));
+    expect(comparisonCalls).toBe(2);
+  });
+
+  it('turns structured failures into an actionable alert with retry', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) =>
+        Promise.resolve(
+          jsonResponse(
+            requestUrl(input) === '/api/workbench'
+              ? success(catalog())
+              : {
+                  ok: false,
+                  revision: 7,
+                  error: {
+                    stage: 'checksum',
+                    code: 'CHECKSUM_MISMATCH',
+                    message: 'Configured reference does not match its manifest.',
+                    context: { expected: 'abc', actual: 'def' },
+                    retryable: true,
+                    action: 'Choose the checksummed Infra-Bridge.ifc and retry.',
+                  },
+                }
+          )
+        )
+      )
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.querySelector('[role="alert"]') !== null);
+
+    const alert = host.querySelector('.diagnostic-error');
+    expect(alert?.textContent).toContain('Checksum');
+    expect(alert?.textContent).toContain('CHECKSUM_MISMATCH');
+    expect(alert?.textContent).toContain('Choose the checksummed Infra-Bridge.ifc and retry.');
+    expect(alert?.textContent).toContain('expected');
+    expect(button('Retry')).not.toBeNull();
+    expect(host.querySelector('.viewport-failure')?.textContent).toContain(
+      'Configured reference does not match its manifest.'
+    );
+    expect(host.querySelector('.viewport-loading')).toBeNull();
+    expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(host.querySelector('.viewport-failure')?.getAttribute('aria-live')).toBeNull();
+    expect(host.querySelector('.status-footer')?.getAttribute('aria-live')).toBe('off');
+    expect(
+      host.querySelector('.reference-status')?.classList.contains('reference-status--failed')
+    ).toBe(true);
+    expect(host.querySelector('.reference-status')?.textContent).toContain('verification failed');
+    expect(host.querySelector('.reference-status')?.textContent).not.toContain('checksummed');
+  });
+
+  it('keeps same-key framing stable until Fit and then frames only active visible layers', async () => {
+    let comparisonCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = requestUrl(input);
+        if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        comparisonCalls += 1;
+        return Promise.resolve(
+          jsonResponse(
+            success(
+              comparisonCalls === 1
+                ? diagnostic({ candidateX: 100, revision: 7 })
+                : diagnostic({ candidateX: 200, revision: 8 })
+            )
+          )
+        );
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => framingMaximum() === 110);
+
+    act(() => button('Recompute')?.click());
+    await waitFor(() => host.textContent.includes('Revision 8'));
+    expect(framingMaximum()).toBe(110);
+
+    act(() => button('Fit')?.click());
+    expect(framingMaximum()).toBe(210);
+
+    act(() => button('Candidate visible')?.click());
+    expect(framingMaximum()).toBe(10);
+    act(() => button('Candidate visible')?.click());
+    expect(framingMaximum()).toBe(210);
+
+    act(() => button('Reference')?.click());
+    expect(framingMaximum()).toBe(10);
+  });
+
+  it('keeps and labels the previous same-key result when recompute fails', async () => {
+    const comparisonMethods: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        comparisonMethods.push(init?.method ?? 'GET');
+        if (init?.method === 'POST') {
+          return Promise.resolve(
+            jsonResponse({
+              ok: false,
+              revision: 8,
+              error: {
+                stage: 'authored-evaluation',
+                code: 'FAMILY_EVALUATION_FAILED',
+                message: 'The edited Family could not be evaluated.',
+                context: { semanticKey: FIRST },
+                retryable: true,
+                action: 'Fix the TSX evaluation error and retry.',
+              },
+            })
+          );
+        }
+        return Promise.resolve(jsonResponse(success(diagnostic())));
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.textContent.includes('Surface P95'));
+    act(() => button('Recompute')?.click());
+    await waitFor(() => host.textContent.includes('FAMILY_EVALUATION_FAILED'));
+
+    expect(host.textContent).toContain('Previous successful result');
+    expect(host.querySelector('[data-testid="shared-r3f-canvas"]')).not.toBeNull();
+    expect(host.textContent).toContain('Fix the TSX evaluation error and retry.');
+    expect(host.querySelector('.status-footer')?.textContent).toContain('Revision 8');
+    expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(host.querySelector('.reference-status')?.textContent).toContain('checksum verified');
+
+    act(() => button('Retry')?.click());
+    await waitFor(() => comparisonMethods.length === 3);
+    expect(comparisonMethods).toEqual(['GET', 'POST', 'POST']);
+  });
+
+  it('leaves the busy state and reports the actual revision of a stale recompute response', async () => {
+    let comparisonCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = requestUrl(input);
+        if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        comparisonCalls += 1;
+        return Promise.resolve(
+          jsonResponse(success(diagnostic({ revision: comparisonCalls === 1 ? 8 : 7 })))
+        );
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.textContent.includes('Revision 8'));
+
+    act(() => button('Recompute')?.click());
+    await waitFor(() => host.textContent.includes('stale-revision-response'));
+
+    expect(host.querySelector('.viewport-loading')).toBeNull();
+    expect(host.querySelector('.diagnostic-error')?.textContent).toContain('older source revision');
+    expect(button('Recompute')?.disabled).toBe(false);
+    expect(host.querySelector('.status-footer')?.textContent).toContain('Revision 7');
+    expect(host.textContent).toContain('Previous successful result');
+  });
+
+  it('renders failed, not-applicable, and unavailable gates with units and thresholds', async () => {
+    const passing = diagnostic({ revision: 7 });
+    const failed: ComparisonDiagnostic = {
+      ...passing,
+      pass: false,
+      score: { ...passing.score, volume: undefined, closedSolidIoU: undefined },
+      gates: passing.gates.map((gate) =>
+        gate.id === 'surface-maximum'
+          ? { ...gate, status: 'fail' }
+          : gate.id === 'normal-mean'
+            ? { ...gate, status: 'not-applicable', value: null }
+            : gate.id === 'volume-relative-error'
+              ? { ...gate, status: 'unavailable', value: null }
+              : gate
+      ),
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) =>
+        Promise.resolve(
+          jsonResponse(
+            requestUrl(input) === '/api/workbench' ? success(catalog()) : success(failed)
+          )
+        )
+      )
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.querySelector('.outcome-badge--fail') !== null);
+
+    expect(host.querySelector('.metric-status--fail')?.textContent).toContain('Fail');
+    expect(host.querySelector('.metric-status--fail')?.textContent).toContain('≤ 75.00 mm');
+    expect(host.querySelector('.metric-status--not-applicable')?.textContent).toContain('N/A');
+    expect(host.querySelector('.metric-status--not-applicable')?.textContent).toContain(
+      '≥ 0.99000'
+    );
+    expect(host.querySelector('.metric-status--unavailable')?.textContent).toContain('Unavailable');
+    expect(host.textContent).toContain('0.030 mm');
+    expect(host.textContent).toContain('Not available');
+  });
+
+  function button(name: string): HTMLButtonElement | null {
+    return (
+      Array.from(host.querySelectorAll('button')).find(
+        (candidate) =>
+          candidate.getAttribute('aria-label') === name || candidate.textContent === name
+      ) ?? null
+    );
+  }
+
+  function labelledControl(label: string): HTMLElement | null {
+    return host.querySelector(`[aria-label="${label}"]`);
+  }
+
+  function framingMaximum(): number {
+    const value = host
+      .querySelector('[data-testid="shared-r3f-canvas"]')
+      ?.getAttribute('data-framing-maximum');
+    return value === null || value === undefined ? Number.NaN : Number(value);
+  }
+});
+
+function catalog(): WorkbenchCatalog {
+  return {
+    title: 'Infra-bridge Reconstruction Workbench',
+    products: [
+      {
+        semanticKey: FIRST,
+        group: 'Rail bridge 01',
+        label: 'Arch Segment 01',
+        detail: 'Superstructure / Arch Segment 01',
+      },
+      {
+        semanticKey: SECOND,
+        group: 'Road river bridge',
+        label: 'Bridge Deck',
+        detail: 'Deck / Bridge Deck',
+      },
+    ],
+    reference: {
+      path: '/private/reference/Infra-Bridge.ifc',
+      fileName: 'Infra-Bridge.ifc',
+      expectedChecksum: 'abcdef0123456789',
+      productCount: 2,
+    },
+    sourceRevision: 7,
+  };
+}
+
+function diagnostic(
+  options: { readonly candidateX?: number; readonly revision?: number } = {}
+): ComparisonDiagnostic {
+  const frame = {
+    origin: [10, 20, 30] as const,
+    xAxis: [1, 0, 0] as const,
+    zAxis: [0, 0, 1] as const,
+  };
+  const surface = {
+    unit: 'millimetre' as const,
+    vertices: [
+      [0, 0, 0],
+      [10, 0, 0],
+      [0, 20, 0],
+    ] as const,
+    triangles: [[0, 1, 2]] as const,
+    closed: true,
+  };
+  const candidateX = options.candidateX ?? 0;
+  const candidateSurface = {
+    ...surface,
+    vertices: surface.vertices.map(([x, y, z]) => [x + candidateX, y, z] as const),
+  };
+  return {
+    semanticKey: FIRST,
+    revision: options.revision ?? 7,
+    durationMs: 184,
+    computedAt: '2026-08-20T08:00:00.000Z',
+    coordinateSpace: 'canonical-component-local',
+    surfaces: { reference: surface, candidate: candidateSurface },
+    frames: {
+      referenceLocal: frame,
+      referenceWorld: frame,
+      canonicalWorld: frame,
+      candidateLocal: frame,
+      candidateWorld: frame,
+    },
+    frameDeltas: {
+      controlPointDeltaMm: 0.012,
+      xAxisDeltaDegrees: 0.001,
+      zAxisDeltaDegrees: 0.002,
+    },
+    score: {
+      surfaceDistance: { maximumMm: 0.12, meanMm: 0.03, p95Mm: 0.08, areaSampleCount: 96 },
+      normalAgreement: { meanCosine: 0.9999, minimumCosine: 0.998 },
+      envelope: {
+        deltasMm: { xMin: 0.01, xMax: -0.01, yMin: 0.02, yMax: 0, zMin: 0, zMax: 0 },
+        maximumAbsoluteDeltaMm: 0.02,
+      },
+      volume: { targetMm3: 1000, candidateMm3: 999, relativeError: 0.001 },
+      closedSolidIoU: { value: 0.997, method: 'voxel-32' },
+    },
+    gates: [
+      gate('frame-control-point', 0.012, 5, 'at-most', 'millimetre'),
+      gate('frame-x-axis', 0.001, 0.01, 'at-most', 'degree'),
+      gate('frame-z-axis', 0.002, 0.01, 'at-most', 'degree'),
+      gate('envelope-maximum', 0.02, 2, 'at-most', 'millimetre'),
+      gate('surface-p95', 0.08, 25, 'at-most', 'millimetre'),
+      gate('surface-maximum', 0.12, 75, 'at-most', 'millimetre'),
+      gate('normal-mean', 0.9999, 0.99, 'at-least', 'ratio'),
+      gate('volume-relative-error', 0.001, 0.02, 'at-most', 'ratio'),
+    ],
+    pass: true,
+  };
+}
+
+function gate(
+  id: ComparisonDiagnostic['gates'][number]['id'],
+  value: number,
+  threshold: number,
+  relation: ComparisonDiagnostic['gates'][number]['relation'],
+  unit: ComparisonDiagnostic['gates'][number]['unit']
+): ComparisonDiagnostic['gates'][number] {
+  return { id, value, threshold, relation, unit, status: 'pass' };
+}
+
+function success<T>(value: T): WorkbenchResult<T> {
+  const revision = 'revision' in (value as object) ? (value as { revision: number }).revision : 7;
+  return { ok: true, revision, value };
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function deferred<T>() {
+  let resolve: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return {
+    promise,
+    resolve(value: T) {
+      if (resolve === undefined) throw new Error('Deferred promise is not initialized');
+      resolve(value);
+    },
+  };
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (condition()) return;
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  throw new Error('condition was not reached');
+}
+
+function setInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.bind(
+    input
+  );
+  setter?.(value);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function setRangeValue(input: HTMLInputElement, value: number): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.bind(
+    input
+  );
+  setter?.(value.toString());
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') return input;
+  return input instanceof URL ? input.href : input.url;
+}

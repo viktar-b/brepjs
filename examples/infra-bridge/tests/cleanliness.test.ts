@@ -13,6 +13,7 @@ const forbidden = [
   /(?:vertices|triangles)\s*:\s*\[/,
   /(?:matrix|transformMatrix)\s*:\s*\[/i,
 ];
+const sourceOnlyForbidden = [/reference\/infra-bridge/];
 
 describe('authored-source cleanliness', () => {
   it('contains no donor identity, geometry, path, inventory, or harness dependency', async () => {
@@ -30,6 +31,13 @@ describe('authored-source cleanliness', () => {
       for (const pattern of forbidden) {
         if (pattern.test(source)) {
           violations.push(`${relative(projectRoot.pathname, file)}: ${pattern}`);
+        }
+      }
+      if (file.startsWith(sourceRoot.pathname)) {
+        for (const pattern of sourceOnlyForbidden) {
+          if (pattern.test(source)) {
+            violations.push(`${relative(projectRoot.pathname, file)}: ${pattern}`);
+          }
         }
       }
     }

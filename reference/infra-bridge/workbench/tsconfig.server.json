@@ -1,0 +1,23 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../../..",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "jsx": "react-jsx",
+    "jsxImportSource": "brepjs-families",
+    "types": ["node"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "ESNext.Disposable"]
+  },
+  "include": [
+    "shared/**/*.ts",
+    "server/**/*.ts",
+    "scripts/**/*.ts",
+    "vite.config.ts",
+    "../node/**/*.ts",
+    "../../../examples/infra-bridge/src/**/*.ts",
+    "../../../examples/infra-bridge/src/**/*.tsx"
+  ],
+  "exclude": ["dist", "node_modules", "tests"]
+}
