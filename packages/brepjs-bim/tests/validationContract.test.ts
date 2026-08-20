@@ -268,4 +268,33 @@ describe('bim/bridge/v1 Validation Contract report', () => {
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.gates[0]?.issues[0]?.context)).toBe(true);
   });
+
+  it('rejects invalid runtime discriminants and scalar evidence shapes', () => {
+    const gate = passingProjectResults()[0];
+    if (gate === undefined) throw new Error('required gate missing');
+    const malformedInputs = [
+      { ...input(), modelHash: { algorithm: 'md5', value: 'a'.repeat(64) } },
+      { ...input(), gateResults: [{ ...gate, status: 'bogus' }] },
+      {
+        ...input(),
+        gateResults: [
+          {
+            ...gate,
+            issues: [{ severity: 'fatal', code: 'BAD', message: 'Bad severity' }],
+          },
+        ],
+      },
+      {
+        ...input(),
+        gateResults: [{ ...gate, evidence: [{ kind: 42, value: 'model' }] }],
+      },
+    ] as unknown as BridgeValidationInput[];
+
+    for (const malformed of malformedInputs) {
+      expect(buildBridgeValidationReport(malformed)).toMatchObject({
+        ok: false,
+        error: { code: 'VALIDATION_CONTRACT_INPUT' },
+      });
+    }
+  });
 });

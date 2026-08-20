@@ -246,6 +246,18 @@ function summarizeGates(gates: readonly BridgeValidationGateResult[]): BridgeVal
 
 function validateInput(input: BridgeValidationInput): BimError | null {
   if (
+    typeof input.ifcSchema !== 'string' ||
+    typeof input.ifcView !== 'string' ||
+    input.modelHash === null ||
+    typeof input.modelHash !== 'object' ||
+    input.modelHash.algorithm !== 'sha256' ||
+    typeof input.modelHash.value !== 'string' ||
+    !Array.isArray(input.validators) ||
+    !Array.isArray(input.gateResults)
+  ) {
+    return contractError('Validation report metadata has an invalid runtime shape');
+  }
+  if (
     !isIfc4x3Add2ReferenceView({
       schema: input.ifcSchema,
       viewDefinition: input.ifcView,
@@ -257,11 +269,18 @@ function validateInput(input: BridgeValidationInput): BimError | null {
     return contractError('modelHash.value must be a 64-character SHA-256 hexadecimal digest');
   }
 
+  const validators: readonly ValidatorProvenance[] = input.validators;
+  const gateResults: readonly BridgeGateResultInput[] = input.gateResults;
   const validatorIds = new Set<string>();
-  for (const validator of input.validators) {
+  for (const validator of validators) {
     if (
+      validator === null ||
+      typeof validator !== 'object' ||
+      typeof validator.id !== 'string' ||
       validator.id.length === 0 ||
+      typeof validator.name !== 'string' ||
       validator.name.length === 0 ||
+      typeof validator.version !== 'string' ||
       validator.version.length === 0 ||
       validatorIds.has(validator.id)
     ) {
@@ -272,12 +291,28 @@ function validateInput(input: BridgeValidationInput): BimError | null {
 
   const knownGateIds = new Set(BRIDGE_VALIDATION_GATES.map((gate) => gate.id));
   const resultIds = new Set<string>();
-  for (const result of input.gateResults) {
-    if (!knownGateIds.has(result.gateId) || resultIds.has(result.gateId)) {
+  for (const result of gateResults) {
+    if (
+      result === null ||
+      typeof result !== 'object' ||
+      typeof result.gateId !== 'string' ||
+      !knownGateIds.has(result.gateId) ||
+      resultIds.has(result.gateId)
+    ) {
       return contractError(`Gate result is unknown or duplicated at "${result.gateId}"`);
     }
     resultIds.add(result.gateId);
-    if (result.validatorId !== undefined && !validatorIds.has(result.validatorId)) {
+    if (
+      !['pass', 'fail', 'unavailable', 'not-applicable'].includes(String(result.status)) ||
+      !Array.isArray(result.issues) ||
+      !Array.isArray(result.evidence)
+    ) {
+      return contractError(`Gate "${result.gateId}" has an invalid runtime shape`);
+    }
+    if (
+      result.validatorId !== undefined &&
+      (typeof result.validatorId !== 'string' || !validatorIds.has(result.validatorId))
+    ) {
       return contractError(
         `Gate "${result.gateId}" names unknown validator "${result.validatorId}"`
       );
@@ -299,16 +334,47 @@ function validateInput(input: BridgeValidationInput): BimError | null {
     ) {
       return contractError(`Gate "${result.gateId}" requires validator provenance`);
     }
-    if (result.status === 'pass' && result.issues.some((next) => next.severity === 'error')) {
+    if (
+      result.status === 'pass' &&
+      result.issues.some((next: ValidationIssue) => next.severity === 'error')
+    ) {
       return contractError(`Passing gate "${result.gateId}" cannot contain error issues`);
+    }
+    if (
+      result.issues.some(
+        (next: ValidationIssue) =>
+          next === null ||
+          typeof next !== 'object' ||
+          !['error', 'warning', 'info'].includes(String(next.severity)) ||
+          typeof next.code !== 'string' ||
+          next.code.length === 0 ||
+          typeof next.message !== 'string' ||
+          next.message.length === 0 ||
+          (next.entity !== undefined &&
+            typeof next.entity !== 'string' &&
+            typeof next.entity !== 'number') ||
+          (next.context !== undefined &&
+            (next.context === null ||
+              typeof next.context !== 'object' ||
+              Array.isArray(next.context)))
+      )
+    ) {
+      return contractError(`Gate "${result.gateId}" contains an invalid issue`);
     }
     if (result.status === 'pass' && result.evidence.length === 0) {
       return contractError(`Passing gate "${result.gateId}" requires evidence`);
     }
     if (
       result.evidence.some(
-        (reference) =>
-          reference.kind.length === 0 || reference.value.length === 0 || reference.checksum === ''
+        (reference: ValidationEvidenceReference) =>
+          reference === null ||
+          typeof reference !== 'object' ||
+          typeof reference.kind !== 'string' ||
+          reference.kind.length === 0 ||
+          typeof reference.value !== 'string' ||
+          reference.value.length === 0 ||
+          (reference.checksum !== undefined &&
+            (typeof reference.checksum !== 'string' || reference.checksum.length === 0))
       )
     ) {
       return contractError(`Gate "${result.gateId}" contains an incomplete evidence reference`);
