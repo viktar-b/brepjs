@@ -410,10 +410,7 @@ export function projectInfrastructure(
     const routedKind = projectionKind(semantics);
     if (!routedKind.ok) {
       return err(
-        specError(
-          routedKind.error.code,
-          `${routedKind.error.message} at '${el.keyPath}'`
-        )
+        specError(routedKind.error.code, `${routedKind.error.message} at '${el.keyPath}'`)
       );
     }
     const kind = routedKind.value;
@@ -465,12 +462,8 @@ export function projectInfrastructure(
       added = model.addBridgePart(spec.value, { stableKey: el.keyPath });
     } else {
       const projectedSemantics = productProjectionSemantics(semantics, kind);
-      const material =
-        'material' in projectedSemantics ? projectedSemantics.material : undefined;
-      if (
-        typeof material !== 'string' ||
-        material.trim().length === 0
-      ) {
+      const material = 'material' in projectedSemantics ? projectedSemantics.material : undefined;
+      if (typeof material !== 'string' || material.trim().length === 0) {
         return err(
           specError(
             'FAMILIES_MISSING_SEMANTIC_MATERIAL',

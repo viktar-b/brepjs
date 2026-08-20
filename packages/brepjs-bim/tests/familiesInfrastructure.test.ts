@@ -872,8 +872,7 @@ describe('families infrastructure projection', () => {
       bridge: 'recursive-model/environment-site/bridge-site/bridge',
       superstructure: 'recursive-model/environment-site/bridge-site/bridge/superstructure',
       deck: 'recursive-model/environment-site/bridge-site/bridge/superstructure/deck',
-      girder:
-        'recursive-model/environment-site/bridge-site/bridge/superstructure/deck/main-girder',
+      girder: 'recursive-model/environment-site/bridge-site/bridge/superstructure/deck/main-girder',
     } as const;
     const recursiveRelationships = bim.getAllRelationships();
     expect(recursiveRelationships).toEqual(
