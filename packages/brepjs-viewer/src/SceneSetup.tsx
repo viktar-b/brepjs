@@ -1,9 +1,11 @@
 import { OrbitControls } from '@react-three/drei';
-import type { RefObject } from 'react';
+import type { ComponentRef, RefObject } from 'react';
 import type { Vector3Tuple } from 'three';
 import GradientBackground from './GradientBackground.js';
 import InfiniteGrid from './InfiniteGrid.js';
 import SceneLighting from './SceneLighting.js';
+
+export type OrbitControlsHandle = ComponentRef<typeof OrbitControls>;
 
 export interface ControlsProps {
   enableDamping?: boolean;
@@ -31,8 +33,7 @@ interface SceneSetupProps {
   gridVisible?: boolean;
   gridProps?: GridProps;
   controlsProps?: ControlsProps;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- drei OrbitControls ref type
-  controlsRef?: RefObject<any>;
+  controlsRef?: RefObject<OrbitControlsHandle | null>;
   onControlsStart?: () => void;
 }
 

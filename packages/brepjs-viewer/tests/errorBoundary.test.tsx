@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, type ErrorInfo } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ViewerErrorBoundary } from '@/ErrorBoundary.js';
@@ -39,7 +39,7 @@ describe('ViewerErrorBoundary', () => {
   });
 
   it('catches a render error, invokes onError, and shows the default fallback', () => {
-    const onError = vi.fn();
+    const onError = vi.fn<(error: Error, info: ErrorInfo) => void>();
     act(() => {
       root.render(
         <ViewerErrorBoundary onError={onError}>
@@ -52,9 +52,12 @@ describe('ViewerErrorBoundary', () => {
     expect(alert).not.toBeNull();
     expect(alert?.textContent).toContain('error');
     expect(onError).toHaveBeenCalledTimes(1);
-    const [err, info] = onError.mock.calls[0] ?? [];
+    const firstCall = onError.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    if (firstCall === undefined) throw new Error('Expected the error callback to be invoked');
+    const [err, info] = firstCall;
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe('kaboom');
+    expect(err.message).toBe('kaboom');
     // Real component stack — the actionable signal the synthetic browser event drops.
     expect(info?.componentStack).toBeTruthy();
   });

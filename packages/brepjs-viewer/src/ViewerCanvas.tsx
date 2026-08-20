@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, type ErrorInfo, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, type ErrorInfo, type ReactNode, type RefObject } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrthographicCamera } from '@react-three/drei';
 import * as THREE from 'three';
-import SceneSetup from './SceneSetup.js'; // default export; renders its own OrbitControls
+import SceneSetup, { type OrbitControlsHandle } from './SceneSetup.js';
 import { ViewerErrorBoundary } from './ErrorBoundary.js';
 import { buildGeometry } from './geometry.js';
 import type { MeshData, Projection, ViewName } from './types.js';
@@ -42,12 +42,14 @@ function Framing({
   view,
   fitSignal,
   projection,
+  controlsRef,
   onFirstFrame,
 }: {
   data: MeshData;
   view: ViewName;
   fitSignal?: number | undefined;
   projection: Projection;
+  controlsRef: RefObject<OrbitControlsHandle | null>;
   onFirstFrame?: (() => void) | undefined;
 }) {
   const camera = useThree((s) => s.camera);
@@ -82,12 +84,17 @@ function Framing({
     }
     camera.lookAt(center);
     camera.updateProjectionMatrix();
+    const controls = controlsRef.current;
+    if (controls !== null) {
+      controls.target.copy(center);
+      controls.update();
+    }
     invalidate();
     if (!fired.current) {
       fired.current = true;
       onFirstFrameRef.current?.();
     }
-  }, [camera, invalidate, center, radius, view, fitSignal, projection]);
+  }, [camera, invalidate, center, radius, view, fitSignal, projection, controlsRef]);
   return null;
 }
 
@@ -102,7 +109,9 @@ function OrthoCamera() {
     camera.position.y,
     camera.position.z,
   ]);
-  return <OrthographicCamera makeDefault position={initial.current} zoom={20} near={0.1} far={2000} />;
+  return (
+    <OrthographicCamera makeDefault position={initial.current} zoom={20} near={0.1} far={2000} />
+  );
 }
 
 // Enables material-level (local) clipping planes. Set once; harmless when no material
@@ -130,6 +139,7 @@ export function ViewerCanvas({
   errorFallback,
   children,
 }: ViewerCanvasProps) {
+  const controlsRef = useRef<OrbitControlsHandle>(null);
   return (
     // The boundary wraps the Canvas (not its 3D children) because R3F surfaces
     // render errors from its 3D subtree to the nearest host-tree boundary, and a
@@ -140,12 +150,13 @@ export function ViewerCanvas({
       <Canvas frameloop={autoRotate ? 'always' : 'demand'} gl={{ preserveDrawingBuffer: true }}>
         <LocalClipping />
         {projection === 'orthographic' && <OrthoCamera />}
-        <SceneSetup autoRotate={autoRotate} gridVisible={gridVisible} />
+        <SceneSetup autoRotate={autoRotate} gridVisible={gridVisible} controlsRef={controlsRef} />
         <Framing
           data={data}
           view={view}
           fitSignal={fitSignal}
           projection={projection}
+          controlsRef={controlsRef}
           onFirstFrame={onFirstFrame}
         />
         {children}

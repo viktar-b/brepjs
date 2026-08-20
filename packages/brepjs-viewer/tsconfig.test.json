@@ -3,8 +3,11 @@
   "compilerOptions": {
     "rootDir": ".",
     "noEmit": true,
-    "types": ["vitest/globals"]
+    "types": ["vitest/globals"],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["tests/**/*.{ts,tsx}", "src/**/*.{ts,tsx}"],
+  "include": ["tests/**/*.ts", "tests/**/*.tsx", "src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist"]
 }

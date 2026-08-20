@@ -27,8 +27,9 @@ describe('render core', () => {
     expect(g.getIndex()?.count).toBe(3);
   });
   it('findFaceGroupAt maps a triangle index to its faceId via binary search', () => {
-    expect(findFaceGroupAt(data.faceGroups!, 0)?.faceId).toBe(7);
-    expect(findFaceGroupAt(data.faceGroups!, 5)).toBeNull();
+    const faceGroups = data.faceGroups ?? [];
+    expect(findFaceGroupAt(faceGroups, 0)?.faceId).toBe(7);
+    expect(findFaceGroupAt(faceGroups, 5)).toBeNull();
   });
 });
 
