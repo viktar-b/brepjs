@@ -61,7 +61,7 @@ export function writeBridge(
     ObjectPlacement: w.ref(placementId),
     Representation: null,
     LongName: null,
-    CompositionType: { type: 3, value: 'ELEMENT' },
+    CompositionType: { type: 3, value: spec.compositionType ?? 'ELEMENT' },
     PredefinedType: { type: 3, value: spec.predefinedType ?? 'NOTDEFINED' },
   });
   return { entityId, placementId };
@@ -87,7 +87,7 @@ export function writeBridgePart(
     ObjectPlacement: w.ref(placementId),
     Representation: null,
     LongName: null,
-    CompositionType: { type: 3, value: 'ELEMENT' },
+    CompositionType: { type: 3, value: spec.compositionType ?? 'ELEMENT' },
     UsageType: { type: 3, value: spec.usageType },
     PredefinedType: { type: 3, value: spec.predefinedType ?? 'NOTDEFINED' },
   });

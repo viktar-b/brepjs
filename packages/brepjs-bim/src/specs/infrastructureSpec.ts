@@ -4,6 +4,7 @@ import type { BimError } from '../errors/bimError.js';
 import { specError } from '../errors/bimError.js';
 import type { Profile } from './profile.js';
 import { parseProfile, ProfileSchema } from './profile.js';
+import type { SpatialCompositionType } from './spatialSpec.js';
 
 export type BridgePredefinedType =
   | 'ARCHED'
@@ -80,6 +81,7 @@ export interface BridgeSpec extends RigidPlacementSpec {
   readonly name: string;
   readonly description?: string | undefined;
   readonly predefinedType?: BridgePredefinedType | undefined;
+  readonly compositionType?: SpatialCompositionType | undefined;
 }
 
 export interface BridgePartSpec extends RigidPlacementSpec {
@@ -87,6 +89,7 @@ export interface BridgePartSpec extends RigidPlacementSpec {
   readonly description?: string | undefined;
   readonly usageType: FacilityUsageType;
   readonly predefinedType?: BridgePartPredefinedType | undefined;
+  readonly compositionType?: SpatialCompositionType | undefined;
 }
 
 /** Shared analytic prism contract: the centred profile is extruded along local +X. */
@@ -158,6 +161,7 @@ const BridgeSpecSchema = orthogonal(
         'NOTDEFINED',
       ])
       .optional(),
+    compositionType: z.enum(['COMPLEX', 'ELEMENT', 'PARTIAL']).optional(),
   }) as z.ZodType<BridgeSpec>
 );
 
@@ -190,6 +194,7 @@ const BridgePartSpecSchema = orthogonal(
         'NOTDEFINED',
       ])
       .optional(),
+    compositionType: z.enum(['COMPLEX', 'ELEMENT', 'PARTIAL']).optional(),
   }) as z.ZodType<BridgePartSpec>
 );
 

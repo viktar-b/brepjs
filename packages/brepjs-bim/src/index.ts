@@ -169,6 +169,7 @@ export type { ProxySpec } from './specs/proxySpec.js';
 export type {
   ProjectSpec,
   ProjectCrs,
+  SpatialCompositionType,
   SiteSpec,
   BuildingSpec,
   StoreySpec,

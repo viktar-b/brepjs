@@ -3,6 +3,7 @@ import type { IfcWriter } from './ifcWriter.js';
 import { writeAxis2Placement3D } from './headerWriter.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { toIfcLengthM } from '../units/units.js';
+import type { SpatialCompositionType } from '../specs/spatialSpec.js';
 
 export function writeProject(
   w: IfcWriter,
@@ -38,6 +39,7 @@ export function writeSite(
     readonly origin?: [number, number, number] | undefined;
     readonly axisX?: [number, number, number] | undefined;
     readonly axisZ?: [number, number, number] | undefined;
+    readonly compositionType?: SpatialCompositionType | undefined;
   }
 ): { entityId: number; placementId: number } {
   const placement3DId = writeAxis2Placement3D(
@@ -65,7 +67,7 @@ export function writeSite(
     ObjectPlacement: w.ref(localPlacementId),
     Representation: null,
     LongName: null,
-    CompositionType: { type: 3, value: 'ELEMENT' },
+    CompositionType: { type: 3, value: placement?.compositionType ?? 'ELEMENT' },
     RefLatitude: null,
     RefLongitude: null,
     RefElevation: null,

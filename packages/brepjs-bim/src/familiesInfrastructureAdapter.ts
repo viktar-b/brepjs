@@ -97,8 +97,15 @@ const FACILITY_USAGE: Readonly<Record<string, FacilityUsageType>> = {
   lateral: 'LATERAL',
   longitudinal: 'LONGITUDINAL',
   region: 'REGION',
+  regional: 'REGION',
   vertical: 'VERTICAL',
 };
+
+const SPATIAL_COMPOSITION = {
+  collection: 'COMPLEX',
+  element: 'ELEMENT',
+  partial: 'PARTIAL',
+} as const;
 
 const BEAM_ROLE: Readonly<Record<string, BeamPredefinedType>> = {
   beam: 'BEAM',
@@ -364,6 +371,13 @@ function expectedParent(kind: Exclude<CivilKind, 'project'>): string {
   return "'bridge-part'";
 }
 
+function projectedComposition(semantics: EngineeringSemantics) {
+  const composition = 'composition' in semantics ? semantics.composition : undefined;
+  return composition === 'collection' || composition === 'element' || composition === 'partial'
+    ? SPATIAL_COMPOSITION[composition]
+    : 'ELEMENT';
+}
+
 /** IFC4X3 civil Projection routed only from definition-owned semantics. */
 export function projectInfrastructure(
   root: ResolvedElement,
@@ -438,7 +452,11 @@ export function projectInfrastructure(
       const siteFrame =
         semantics.kind === 'site' && 'category' in semantics ? el.localFrame : el.worldFrame;
       added = model.addSite(
-        { name: semanticName(el), ...placement(siteFrame) },
+        {
+          name: semanticName(el),
+          ...placement(siteFrame),
+          compositionType: projectedComposition(semantics),
+        },
         { stableKey: el.keyPath }
       );
     } else if (kind === 'bridge') {
@@ -446,17 +464,25 @@ export function projectInfrastructure(
         name: semanticName(el),
         ...placement(el.localFrame),
         predefinedType: BRIDGE_ROLE[semantics.role ?? ''] ?? 'NOTDEFINED',
+        compositionType: projectedComposition(semantics),
       });
       if (!spec.ok) return spec;
       added = model.addBridge(spec.value, { stableKey: el.keyPath });
     } else if (kind === 'bridge-part') {
+      const subdivision = 'subdivision' in semantics ? semantics.subdivision : undefined;
       const usageProperty = semantics.properties?.['usage'];
-      const usage = typeof usageProperty === 'string' ? usageProperty : (semantics.role ?? '');
+      const usage =
+        typeof subdivision === 'string'
+          ? subdivision
+          : typeof usageProperty === 'string'
+            ? usageProperty
+            : (semantics.role ?? '');
       const spec = parseBridgePartSpec({
         name: semanticName(el),
         ...placement(el.localFrame),
         usageType: FACILITY_USAGE[usage] ?? 'NOTDEFINED',
         predefinedType: BRIDGE_PART_ROLE[semantics.role ?? ''] ?? 'NOTDEFINED',
+        compositionType: projectedComposition(semantics),
       });
       if (!spec.ok) return spec;
       added = model.addBridgePart(spec.value, { stableKey: el.keyPath });

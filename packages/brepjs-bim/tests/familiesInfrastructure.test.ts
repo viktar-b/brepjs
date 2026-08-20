@@ -694,7 +694,7 @@ describe('families infrastructure projection', () => {
     }
   });
 
-  it('preserves recursive Spatial Assemblies and nearest product containment', () => {
+  it('preserves recursive Spatial Assemblies and nearest product containment', async () => {
     const TypedBeam = family<MemberProps>(
       'TypedBeam',
       ({ length, width, height }) =>
@@ -737,8 +737,21 @@ describe('families infrastructure projection', () => {
         semantics: civilSemantics({
           kind: 'spatial-part',
           category: 'bridge-part',
-          role: 'superstructure',
+          role: 'approach',
           composition: 'collection',
+          subdivision: 'lateral',
+        }),
+      }
+    );
+    const PartialPart = assembly<ChildrenProps>(
+      'PartialPart',
+      (props) => el('Group', {}, normalizeChildren(props.children)),
+      {
+        semantics: civilSemantics({
+          kind: 'spatial-part',
+          category: 'bridge-part',
+          role: 'pier',
+          composition: 'partial',
           subdivision: 'lateral',
         }),
       }
@@ -821,19 +834,30 @@ describe('families infrastructure projection', () => {
                       zAxis: [0, 0, 1],
                     }),
                   },
-                  el(TypedBeam, {
-                    key: 'main-girder',
-                    frame: frame({
-                      origin: [1, 1, 1],
-                      xAxis: [0, 1, 0],
-                      zAxis: [0, 0, 1],
-                    }),
-                    name: 'Main girder',
-                    length: 1_000,
-                    width: 100,
-                    height: 200,
-                    material: 'Timber',
-                  })
+                  el(
+                    PartialPart,
+                    {
+                      key: 'pier',
+                      frame: frame({
+                        origin: [0, 0, 4],
+                        xAxis: [1, 0, 0],
+                        zAxis: [0, 0, 1],
+                      }),
+                    },
+                    el(TypedBeam, {
+                      key: 'main-girder',
+                      frame: frame({
+                        origin: [1, 1, 1],
+                        xAxis: [0, 1, 0],
+                        zAxis: [0, 0, 1],
+                      }),
+                      name: 'Main girder',
+                      length: 1_000,
+                      width: 100,
+                      height: 200,
+                      material: 'Timber',
+                    })
+                  )
                 )
               )
             )
@@ -850,7 +874,7 @@ describe('families infrastructure projection', () => {
     using bim = projected.model;
     const [environment, bridgeSite] = bim.getSites();
     const [bridge] = bim.getBridges();
-    const [superstructure, deck] = bim.getBridgeParts();
+    const [approach, deck, pier] = bim.getBridgeParts();
     const [girder] = bim.getBeams();
 
     expect(environment?.spec).toMatchObject({
@@ -868,13 +892,18 @@ describe('families infrastructure projection', () => {
       axisX: [1, 0, 0],
       axisZ: [0, 0, 1],
     });
-    expect(superstructure?.spec).toMatchObject({
+    expect(approach?.spec).toMatchObject({
       origin: [0, 3, 0],
       axisX: [0, -1, 0],
       axisZ: [0, 0, 1],
     });
     expect(deck?.spec).toMatchObject({
       origin: [0, 0, 2],
+      axisX: [1, 0, 0],
+      axisZ: [0, 0, 1],
+    });
+    expect(pier?.spec).toMatchObject({
+      origin: [0, 0, 4],
       axisX: [1, 0, 0],
       axisZ: [0, 0, 1],
     });
@@ -894,9 +923,11 @@ describe('families infrastructure projection', () => {
       environment: 'recursive-model/environment-site',
       site: 'recursive-model/environment-site/bridge-site',
       bridge: 'recursive-model/environment-site/bridge-site/bridge',
-      superstructure: 'recursive-model/environment-site/bridge-site/bridge/superstructure',
+      approach: 'recursive-model/environment-site/bridge-site/bridge/superstructure',
       deck: 'recursive-model/environment-site/bridge-site/bridge/superstructure/deck',
-      girder: 'recursive-model/environment-site/bridge-site/bridge/superstructure/deck/main-girder',
+      pier: 'recursive-model/environment-site/bridge-site/bridge/superstructure/deck/pier',
+      girder:
+        'recursive-model/environment-site/bridge-site/bridge/superstructure/deck/pier/main-girder',
     } as const;
     const recursiveRelationships = bim.getAllRelationships();
     expect(recursiveRelationships).toEqual(
@@ -913,12 +944,17 @@ describe('families infrastructure projection', () => {
         }),
         expect.objectContaining({
           kind: 'AGGREGATES',
-          relatingObject: id(paths.superstructure),
+          relatingObject: id(paths.approach),
           relatedObjects: [id(paths.deck)],
         }),
         expect.objectContaining({
+          kind: 'AGGREGATES',
+          relatingObject: id(paths.deck),
+          relatedObjects: [id(paths.pier)],
+        }),
+        expect.objectContaining({
           kind: 'CONTAINED_IN',
-          relatingStructure: id(paths.deck),
+          relatingStructure: id(paths.pier),
           relatedElements: [id(paths.girder)],
         }),
       ])
@@ -932,10 +968,39 @@ describe('families infrastructure projection', () => {
     ).toEqual([
       expect.objectContaining({
         kind: 'CONTAINED_IN',
-        relatingStructure: id(paths.deck),
+        relatingStructure: id(paths.pier),
         relatedElements: [id(paths.girder)],
       }),
     ]);
+
+    const ifc = unwrap(
+      await toIfc(bim, {
+        applicationName: 'brepjs recursive civil enums',
+        applicationVersion: '1',
+        ifcSchema: 'IFC4X3',
+      })
+    );
+    const stepLines = new TextDecoder()
+      .decode(ifc)
+      .split('\n')
+      .map((line) => line.toUpperCase());
+    const spatialLine = (entity: string, name: string): string => {
+      const line = stepLines.find(
+        (candidate) =>
+          candidate.includes(`${entity}(`) && candidate.includes(`'${name.toUpperCase()}'`)
+      );
+      if (line === undefined) throw new Error(`missing ${entity} line for ${name}`);
+      return line;
+    };
+
+    expect(spatialLine('IFCSITE', paths.environment)).toContain('.COMPLEX.');
+    expect(spatialLine('IFCSITE', paths.site)).toContain('.PARTIAL.');
+    expect(spatialLine('IFCBRIDGE', paths.bridge)).toContain('.ELEMENT.');
+    expect(spatialLine('IFCBRIDGEPART', paths.approach)).toContain(
+      '.COMPLEX.,.LATERAL.,.NOTDEFINED.'
+    );
+    expect(spatialLine('IFCBRIDGEPART', paths.deck)).toContain('.ELEMENT.,.LATERAL.,.DECK.');
+    expect(spatialLine('IFCBRIDGEPART', paths.pier)).toContain('.PARTIAL.,.LATERAL.,.PIER.');
   });
 
   it('rejects a recursive civil ownership cycle with the offending key path', () => {
