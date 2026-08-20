@@ -1,9 +1,16 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as WebIFC from 'web-ifc';
 import { box, scale, unwrap } from 'brepjs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { initOCCT } from '../../../tests/setup.js';
 import { BimModel } from '../src/model/bimModel.js';
 import { toIfc, toIfcValidated } from '../src/serialize/toIfc.js';
+import { IfcWriter } from '../src/ifc-writer/ifcWriter.js';
+import type { IfcLengthUnit } from '../src/ifc-writer/serializationContext.js';
+import { writeHeader } from '../src/ifc-writer/headerWriter.js';
+import { writeWallGeometry } from '../src/ifc-writer/geometryWriter.js';
 
 beforeAll(async () => {
   await initOCCT();
@@ -70,6 +77,12 @@ async function open(bytes: Uint8Array): Promise<{ api: WebIFC.IfcAPI; mid: numbe
   return { api, mid };
 }
 
+async function makeWriter(lengthUnit: IfcLengthUnit): Promise<IfcWriter> {
+  const result = await IfcWriter.create(undefined, undefined, undefined, lengthUnit);
+  if (!result.ok) throw new Error(result.error.message);
+  return result.value;
+}
+
 function asValue(v: unknown): number | undefined {
   if (typeof v === 'number') return v;
   if (v !== null && typeof v === 'object' && 'value' in v) {
@@ -79,6 +92,46 @@ function asValue(v: unknown): number | undefined {
 }
 
 describe('Phase 2 door/window geometry', () => {
+  it('derives analytic body and profile dimensions from the writer unit context', async () => {
+    for (const [lengthUnit, expectedScale] of [
+      ['METRE', 1 / 1_000],
+      ['MILLIMETRE', 1],
+    ] as const) {
+      const writer = await makeWriter(lengthUnit);
+      const { geomSubContextId } = writeHeader(writer, META);
+      writeWallGeometry(
+        writer,
+        {
+          length: 5_000,
+          height: 3_000,
+          thickness: 250,
+          origin: [100, 200, 300],
+          axisX: [1, 0, 0],
+          axisZ: [0, 0, 1],
+          materialName: 'Concrete',
+        },
+        geomSubContextId,
+        null
+      );
+      const saved = writer.save();
+      if (!saved.ok) throw new Error(saved.error.message);
+
+      const { api, mid } = await open(saved.value);
+      const profile = api.GetLine(
+        mid,
+        api.GetLineIDsWithType(mid, WebIFC.IFCRECTANGLEPROFILEDEF).get(0)
+      ) as Record<string, unknown>;
+      const extrusion = api.GetLine(
+        mid,
+        api.GetLineIDsWithType(mid, WebIFC.IFCEXTRUDEDAREASOLID).get(0)
+      ) as Record<string, unknown>;
+      expect(asValue(profile['XDim'])).toBeCloseTo(250 * expectedScale, 6);
+      expect(asValue(profile['YDim'])).toBeCloseTo(3_000 * expectedScale, 6);
+      expect(asValue(extrusion['Depth'])).toBeCloseTo(5_000 * expectedScale, 6);
+      api.CloseModel(mid);
+    }
+  });
+
   it('emits a non-null door Representation with OverallHeight and OverallWidth', async () => {
     const { model } = buildModelWithOpenings();
     const result = await toIfc(model, META);
@@ -177,5 +230,20 @@ describe('Phase 2 geometry-validity gate', () => {
         (i.code === 'ZERO_VOLUME' || i.code === 'INVALID_GEOMETRY' || i.code === 'VOLUME_FAILED')
     );
     expect(geomErrors).toHaveLength(0);
+  });
+});
+
+describe('IFC writer unit-context guard', () => {
+  it('keeps direct metre conversion out of numeric writer modules', () => {
+    const writerDirectory = fileURLToPath(new URL('../src/ifc-writer/', import.meta.url));
+    const writerFiles = readdirSync(writerDirectory)
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => new URL(`../src/ifc-writer/${name}`, import.meta.url));
+    const serializationFile = new URL('../src/serialize/toIfc.ts', import.meta.url);
+    const offenders = [...writerFiles, serializationFile]
+      .filter((file) => readFileSync(file, 'utf8').includes('toIfcLengthM'))
+      .map((file) => basename(fileURLToPath(file)));
+
+    expect(offenders).toEqual([]);
   });
 });

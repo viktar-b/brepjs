@@ -11,7 +11,6 @@ import type { RoofSpec } from '../specs/roofSpec.js';
 import type { Profile } from '../specs/profile.js';
 import { isExtendedProfile } from '../specs/profile.js';
 import { writeExtendedProfileDef } from './profileDefWriter.js';
-import { toIfcLengthM } from '../units/units.js';
 
 export interface WallRepresentationIds {
   localPlacementId: number;
@@ -36,7 +35,11 @@ export function writeWallGeometry(
 ): WallRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
@@ -49,9 +52,9 @@ export function writeWallGeometry(
     RelativePlacement: w.ref(placement3DId),
   });
 
-  const thicknessM = toIfcLengthM(spec.thickness);
-  const heightM = toIfcLengthM(spec.height);
-  const lengthM = toIfcLengthM(spec.length);
+  const thickness = w.serializationContext.lengthFromMm(spec.thickness);
+  const height = w.serializationContext.lengthFromMm(spec.height);
+  const length = w.serializationContext.lengthFromMm(spec.length);
 
   const profileId = w.nextId();
   w.writeLine({
@@ -59,9 +62,9 @@ export function writeWallGeometry(
     type: WebIFC.IFCRECTANGLEPROFILEDEF,
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
-    Position: w.ref(writeAxis2Placement2D(w, [thicknessM / 2, heightM / 2])),
-    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thicknessM),
-    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, heightM),
+    Position: w.ref(writeAxis2Placement2D(w, [thickness / 2, height / 2])),
+    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thickness),
+    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, height),
   });
 
   // Orient so local Z = wall length (X), local X = thickness (Y), local Y = height (Z).
@@ -75,7 +78,7 @@ export function writeWallGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, lengthM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, length),
   });
 
   const shapeRepId = w.nextId();
@@ -112,7 +115,11 @@ export function writeSlabGeometry(
 ): SlabRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
@@ -125,9 +132,9 @@ export function writeSlabGeometry(
     RelativePlacement: w.ref(placement3DId),
   });
 
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const thicknessM = toIfcLengthM(spec.thickness);
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.width);
+  const thickness = w.serializationContext.lengthFromMm(spec.thickness);
 
   // Profile centered at (length/2, width/2) so the local frame matches the
   // brepjs solid (corner at origin, extends to +X/+Y). IFC rectangle profiles
@@ -137,8 +144,8 @@ export function writeSlabGeometry(
     expressID: profileOriginId,
     type: WebIFC.IFCCARTESIANPOINT,
     Coordinates: [
-      w.mkType(WebIFC.IFCLENGTHMEASURE, lengthM / 2),
-      w.mkType(WebIFC.IFCLENGTHMEASURE, widthM / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, length / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, width / 2),
     ],
   });
   const profilePosId = w.nextId();
@@ -156,8 +163,8 @@ export function writeSlabGeometry(
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
     Position: w.ref(profilePosId),
-    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, lengthM),
-    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, widthM),
+    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, length),
+    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, width),
   });
 
   const extrusionPosId = writeAxis2Placement3D(w, [0, 0, 0]);
@@ -169,7 +176,7 @@ export function writeSlabGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thicknessM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thickness),
   });
 
   const shapeRepId = w.nextId();
@@ -209,7 +216,11 @@ export function writeRoofGeometry(
 ): SlabRepresentationIds & { usedFallback: boolean } {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
@@ -233,17 +244,17 @@ export function writeRoofGeometry(
     };
   }
 
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const thicknessM = toIfcLengthM(spec.thickness);
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.width);
+  const thickness = w.serializationContext.lengthFromMm(spec.thickness);
 
   const profileOriginId = w.nextId();
   w.writeLine({
     expressID: profileOriginId,
     type: WebIFC.IFCCARTESIANPOINT,
     Coordinates: [
-      w.mkType(WebIFC.IFCLENGTHMEASURE, lengthM / 2),
-      w.mkType(WebIFC.IFCLENGTHMEASURE, widthM / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, length / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, width / 2),
     ],
   });
   const profilePosId = w.nextId();
@@ -261,8 +272,8 @@ export function writeRoofGeometry(
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
     Position: w.ref(profilePosId),
-    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, lengthM),
-    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, widthM),
+    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, length),
+    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, width),
   });
 
   const extrusionPosId = writeAxis2Placement3D(w, [0, 0, 0]);
@@ -274,7 +285,7 @@ export function writeRoofGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thicknessM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thickness),
   });
 
   const shapeRepId = w.nextId();
@@ -321,7 +332,7 @@ function writeAxis2Placement2D(w: IfcWriter, origin: readonly [number, number] =
 
 // Emits the IFC profile definition for the given Profile. Returns the express
 // ID of the profile entity (IfcRectangleProfileDef / IfcCircleProfileDef /
-// IfcIShapeProfileDef). All dimensions are converted to metres for IFC export.
+// IfcIShapeProfileDef). All dimensions are converted through the writer's unit context.
 export function writeProfile(w: IfcWriter, profile: Profile): number {
   if (isExtendedProfile(profile)) {
     return writeExtendedProfileDef(w, profile);
@@ -336,8 +347,14 @@ export function writeProfile(w: IfcWriter, profile: Profile): number {
         ProfileType: { type: 3, value: 'AREA' },
         ProfileName: null,
         Position: w.ref(positionId),
-        XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(profile.width)),
-        YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(profile.height)),
+        XDim: w.mkType(
+          WebIFC.IFCPOSITIVELENGTHMEASURE,
+          w.serializationContext.lengthFromMm(profile.width)
+        ),
+        YDim: w.mkType(
+          WebIFC.IFCPOSITIVELENGTHMEASURE,
+          w.serializationContext.lengthFromMm(profile.height)
+        ),
       });
       return id;
     case 'CIRCULAR':
@@ -347,7 +364,10 @@ export function writeProfile(w: IfcWriter, profile: Profile): number {
         ProfileType: { type: 3, value: 'AREA' },
         ProfileName: null,
         Position: w.ref(positionId),
-        Radius: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(profile.radius)),
+        Radius: w.mkType(
+          WebIFC.IFCPOSITIVELENGTHMEASURE,
+          w.serializationContext.lengthFromMm(profile.radius)
+        ),
       });
       return id;
     case 'I_BEAM':
@@ -357,17 +377,29 @@ export function writeProfile(w: IfcWriter, profile: Profile): number {
         ProfileType: { type: 3, value: 'AREA' },
         ProfileName: null,
         Position: w.ref(positionId),
-        OverallWidth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(profile.overallWidth)),
-        OverallDepth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(profile.overallDepth)),
-        WebThickness: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(profile.webThickness)),
+        OverallWidth: w.mkType(
+          WebIFC.IFCPOSITIVELENGTHMEASURE,
+          w.serializationContext.lengthFromMm(profile.overallWidth)
+        ),
+        OverallDepth: w.mkType(
+          WebIFC.IFCPOSITIVELENGTHMEASURE,
+          w.serializationContext.lengthFromMm(profile.overallDepth)
+        ),
+        WebThickness: w.mkType(
+          WebIFC.IFCPOSITIVELENGTHMEASURE,
+          w.serializationContext.lengthFromMm(profile.webThickness)
+        ),
         FlangeThickness: w.mkType(
           WebIFC.IFCPOSITIVELENGTHMEASURE,
-          toIfcLengthM(profile.flangeThickness)
+          w.serializationContext.lengthFromMm(profile.flangeThickness)
         ),
         FilletRadius:
           profile.filletRadius === undefined
             ? null
-            : w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(profile.filletRadius)),
+            : w.mkType(
+                WebIFC.IFCPOSITIVELENGTHMEASURE,
+                w.serializationContext.lengthFromMm(profile.filletRadius)
+              ),
         FlangeEdgeRadius: null,
         FlangeSlope: null,
       });
@@ -386,7 +418,7 @@ function crossUnit(
 
 // Emits IfcLocalPlacement + IfcExtrudedAreaSolid + IfcProductDefinitionShape
 // for a linear element (beam or column). Profile is in local XY, extrusion
-// along local +Z by extrusionLengthM.
+// along local +Z by the context-scaled extrusion length.
 //
 // placementAxis is the IFC Axis (local Z, the extrusion direction in world).
 // placementRefDirection is the IFC RefDirection (local X). IFC derives the
@@ -398,13 +430,17 @@ function writeLinearExtrusion(
   origin: [number, number, number],
   placementAxis: [number, number, number],
   placementRefDirection: [number, number, number],
-  extrusionLengthM: number,
+  extrusionLength: number,
   geomSubContextId: number,
   parentPlacementId: number | null
 ): LinearElementRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
-    origin.map(toIfcLengthM) as [number, number, number],
+    origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     placementAxis,
     placementRefDirection
   );
@@ -427,7 +463,7 @@ function writeLinearExtrusion(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, extrusionLengthM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, extrusionLength),
   });
 
   const shapeRepId = w.nextId();
@@ -469,7 +505,7 @@ export function writeBeamGeometry(
     spec.origin,
     spec.axisX,
     refDirection,
-    toIfcLengthM(spec.length),
+    w.serializationContext.lengthFromMm(spec.length),
     geomSubContextId,
     parentPlacementId
   );
@@ -490,7 +526,7 @@ export function writeColumnGeometry(
     spec.origin,
     spec.axisZ,
     spec.axisX,
-    toIfcLengthM(spec.height),
+    w.serializationContext.lengthFromMm(spec.height),
     geomSubContextId,
     parentPlacementId
   );

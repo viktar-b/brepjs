@@ -2,7 +2,6 @@ import * as WebIFC from 'web-ifc';
 import { mesh } from 'brepjs';
 import type { ShapeMesh, ValidSolid } from 'brepjs';
 import type { IfcWriter } from './ifcWriter.js';
-import { toIfcLengthM } from '../units/units.js';
 
 export interface TessellationResult {
   readonly productDefinitionShapeId: number;
@@ -28,8 +27,8 @@ const IFC_MESH_ANGULAR_TOLERANCE_RAD = 0.3;
  * ValidSolid, wrapped in an IfcShapeRepresentation (Body/Tessellation) and an
  * IfcProductDefinitionShape. Returns the IfcProductDefinitionShape express ID.
  *
- * Vertices from mesh() are in mm (brepjs native units) and are converted to
- * metres for IFC. CoordIndex is emitted 1-based as IFC requires.
+ * Vertices from mesh() are in mm (brepjs native units) and are converted through
+ * the writer's model unit context. CoordIndex is emitted 1-based as IFC requires.
  *
  * On mesh() failure the function falls back to a degenerate single-vertex
  * IfcFacetedBrep, logs a console.warn, and returns usedFallback: true. The
@@ -75,14 +74,14 @@ export function writeMeshTessellation(
     return writeFacetedBrepFallback(w, geomSubContextId, reason);
   }
 
-  // Build the coordinate list (metres) as [x, y, z] triples. vertices is a
-  // flat Float32Array of interleaved positions in mm.
+  // Build the file-unit coordinate list as [x, y, z] triples. vertices is a
+  // flat Float32Array of interleaved positions in authored millimetres.
   const coordList: number[][] = [];
   for (let i = 0; i + 2 < vertices.length; i += 3) {
     coordList.push([
-      toIfcLengthM(vertices[i] ?? 0),
-      toIfcLengthM(vertices[i + 1] ?? 0),
-      toIfcLengthM(vertices[i + 2] ?? 0),
+      w.serializationContext.lengthFromMm(vertices[i] ?? 0),
+      w.serializationContext.lengthFromMm(vertices[i + 1] ?? 0),
+      w.serializationContext.lengthFromMm(vertices[i + 2] ?? 0),
     ]);
   }
 
@@ -140,20 +139,20 @@ export function writeMeshTessellation(
 
 /**
  * Builds a wall 'Axis' IfcShapeRepresentation: an IfcPolyline from (0,0) to
- * (lengthM, 0) in the wall's local XY plane, wrapped in an IfcShapeRepresentation
+ * the context-scaled length in the wall's local XY plane, wrapped in an IfcShapeRepresentation
  * with RepresentationIdentifier='Axis', RepresentationType='Curve2D'. Returns
  * the IfcShapeRepresentation express ID so callers can add it alongside the Body
  * representation in an IfcProductDefinitionShape.
  *
  * wallLengthMm is the wall length in mm (brepjs native units); it is converted
- * to metres for IFC.
+ * through the writer's model unit context.
  */
 export function writeWallAxisRepresentation(
   w: IfcWriter,
   wallLengthMm: number,
   geomSubContextId: number
 ): number {
-  const lengthM = toIfcLengthM(wallLengthMm);
+  const length = w.serializationContext.lengthFromMm(wallLengthMm);
 
   const startId = w.nextId();
   w.writeLine({
@@ -166,7 +165,7 @@ export function writeWallAxisRepresentation(
   w.writeLine({
     expressID: endId,
     type: WebIFC.IFCCARTESIANPOINT,
-    Coordinates: [w.mkType(WebIFC.IFCLENGTHMEASURE, lengthM), w.mkType(WebIFC.IFCLENGTHMEASURE, 0)],
+    Coordinates: [w.mkType(WebIFC.IFCLENGTHMEASURE, length), w.mkType(WebIFC.IFCLENGTHMEASURE, 0)],
   });
 
   const polylineId = w.nextId();

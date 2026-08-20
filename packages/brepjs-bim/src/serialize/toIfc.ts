@@ -108,7 +108,6 @@ import {
   writeEarthworksFillEntity,
 } from '../ifc-writer/infrastructureWriter.js';
 import type { IfcTypeName } from '../ifc-writer/typeWriter.js';
-import { toIfcLengthM } from '../units/units.js';
 import { checkGeometryValidity } from '../validation/geometryValidity.js';
 import type { BimError } from '../errors/bimError.js';
 import { ifcError } from '../errors/bimError.js';
@@ -968,8 +967,8 @@ export async function toIfc(
       ownerHistoryId,
       openingPlacementId,
       geomSubContextId,
-      toIfcLengthM(door.spec.width),
-      toIfcLengthM(door.spec.height)
+      w.serializationContext.lengthFromMm(door.spec.width),
+      w.serializationContext.lengthFromMm(door.spec.height)
     );
     idMap.set(door.localId, doorExpressId);
     writeRelFillsElement(w, fillsRel.guid, ownerHistoryId, openingEntityId, doorExpressId);
@@ -991,8 +990,8 @@ export async function toIfc(
       ownerHistoryId,
       openingPlacementId,
       geomSubContextId,
-      toIfcLengthM(win.spec.width),
-      toIfcLengthM(win.spec.height)
+      w.serializationContext.lengthFromMm(win.spec.width),
+      w.serializationContext.lengthFromMm(win.spec.height)
     );
     idMap.set(win.localId, windowExpressId);
     writeRelFillsElement(w, fillsRel.guid, ownerHistoryId, openingEntityId, windowExpressId);

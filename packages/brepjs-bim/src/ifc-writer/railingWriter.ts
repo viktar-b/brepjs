@@ -4,7 +4,6 @@ import type { IfcWriter } from './ifcWriter.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { writeAxis2Placement3D, writeDirection } from './headerWriter.js';
 import { writeTessellation } from './tessellationWriter.js';
-import { toIfcLengthM } from '../units/units.js';
 import type { RailingSpec, RailingPredefinedType } from '../specs/railingSpec.js';
 
 export interface RailingRepresentationIds {
@@ -33,7 +32,11 @@ export function writeRailingGeometry(
 ): RailingRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
@@ -58,17 +61,17 @@ export function writeRailingGeometry(
     };
   }
 
-  const thicknessM = toIfcLengthM(spec.thickness);
-  const heightM = toIfcLengthM(spec.height);
-  const lengthM = toIfcLengthM(spec.length);
+  const thickness = w.serializationContext.lengthFromMm(spec.thickness);
+  const height = w.serializationContext.lengthFromMm(spec.height);
+  const length = w.serializationContext.lengthFromMm(spec.length);
 
   const profileOriginId = w.nextId();
   w.writeLine({
     expressID: profileOriginId,
     type: WebIFC.IFCCARTESIANPOINT,
     Coordinates: [
-      w.mkType(WebIFC.IFCLENGTHMEASURE, thicknessM / 2),
-      w.mkType(WebIFC.IFCLENGTHMEASURE, heightM / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, thickness / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, height / 2),
     ],
   });
   const profilePosId = w.nextId();
@@ -86,8 +89,8 @@ export function writeRailingGeometry(
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
     Position: w.ref(profilePosId),
-    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thicknessM),
-    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, heightM),
+    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thickness),
+    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, height),
   });
 
   // Orient so local Z = run length (X), local X = thickness (Y), local Y = height (Z).
@@ -100,7 +103,7 @@ export function writeRailingGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, lengthM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, length),
   });
 
   const shapeRepId = w.nextId();

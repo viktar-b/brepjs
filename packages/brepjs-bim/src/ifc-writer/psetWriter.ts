@@ -14,7 +14,6 @@ import type { StairSpec } from '../specs/stairSpec.js';
 import type { RampSpec } from '../specs/rampSpec.js';
 import type { WallOpeningSpec, SlabOpeningSpec } from '../types/bimTypes.js';
 import { profileCrossSectionArea } from '../elementFns/profileFns.js';
-import { toIfcLengthM } from '../units/units.js';
 import type { PsetCategory, PsetTemplate } from '../psets/psetTemplates.js';
 import { measureTypeFor, webIfcConstantFor, templateFor } from '../psets/psetTemplates.js';
 import { densityFor, writeWeightQuantity } from '../psets/qtoWeights.js';
@@ -231,11 +230,11 @@ export function writeCustomPsets(
   }
 }
 
-// Openings whose floor offset is within this many metres of 0 are treated as
+// Openings whose authored floor offset is within this many millimetres of 0 are treated as
 // reaching the floor (i.e. they reduce the wall footprint), e.g. doors.
-const FLOOR_TOUCH_EPSILON_M = 1e-3;
+const FLOOR_TOUCH_EPSILON_MM = 1;
 
-function writeQtyLength(w: IfcWriter, name: string, valueM: number): number {
+function writeQtyLength(w: IfcWriter, name: string, value: number): number {
   const id = w.nextId();
   w.writeLine({
     expressID: id,
@@ -243,13 +242,13 @@ function writeQtyLength(w: IfcWriter, name: string, valueM: number): number {
     Name: w.mkType(WebIFC.IFCLABEL, name),
     Description: null,
     Unit: null,
-    LengthValue: w.mkType(WebIFC.IFCLENGTHMEASURE, valueM),
+    LengthValue: w.mkType(WebIFC.IFCLENGTHMEASURE, value),
     Formula: null,
   });
   return id;
 }
 
-function writeQtyArea(w: IfcWriter, name: string, valueM2: number): number {
+function writeQtyArea(w: IfcWriter, name: string, value: number): number {
   const id = w.nextId();
   w.writeLine({
     expressID: id,
@@ -257,13 +256,13 @@ function writeQtyArea(w: IfcWriter, name: string, valueM2: number): number {
     Name: w.mkType(WebIFC.IFCLABEL, name),
     Description: null,
     Unit: null,
-    AreaValue: w.mkType(WebIFC.IFCAREAMEASURE, valueM2),
+    AreaValue: w.mkType(WebIFC.IFCAREAMEASURE, value),
     Formula: null,
   });
   return id;
 }
 
-function writeQtyVolume(w: IfcWriter, name: string, valueM3: number): number {
+function writeQtyVolume(w: IfcWriter, name: string, value: number): number {
   const id = w.nextId();
   w.writeLine({
     expressID: id,
@@ -271,7 +270,7 @@ function writeQtyVolume(w: IfcWriter, name: string, valueM3: number): number {
     Name: w.mkType(WebIFC.IFCLABEL, name),
     Description: null,
     Unit: null,
-    VolumeValue: w.mkType(WebIFC.IFCVOLUMEMEASURE, valueM3),
+    VolumeValue: w.mkType(WebIFC.IFCVOLUMEMEASURE, value),
     Formula: null,
   });
   return id;
@@ -314,18 +313,23 @@ export function resolveDensityKgM3(
 }
 
 /**
- * Appends an analytic IfcQuantityWeight (mass = `volumeM3 * densityKgM3`, kg) to
- * the given quantity-id list when a density is available. Kept inside the
+ * Appends an analytic IfcQuantityWeight using physical cubic metres regardless
+ * of the file unit. The existing metre lane reuses its serialized volume to
+ * preserve byte output; millimetre files convert the authored volume explicitly.
+ * Kept inside the
  * element's existing Qto_*BaseQuantities set rather than a separate same-named
  * set so the weight surfaces alongside the other base quantities on read.
  */
 function pushWeightQuantity(
   w: IfcWriter,
   qtyIds: number[],
-  volumeM3: number,
+  serializedVolume: number,
+  volumeMm3: number,
   densityKgM3: number | undefined
 ): void {
   if (densityKgM3 === undefined) return;
+  const volumeM3 =
+    w.serializationContext.lengthUnit === 'METRE' ? serializedVolume : volumeMm3 / 1_000_000_000;
   qtyIds.push(writeWeightQuantity(w, 'GrossWeight', volumeM3, densityKgM3));
 }
 
@@ -337,39 +341,43 @@ export function writeWallBaseQuantities(
   openings: readonly WallOpeningSpec[],
   densityKgM3?: number
 ): void {
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.thickness);
-  const heightM = toIfcLengthM(spec.height);
-  const grossFootprintM2 = lengthM * widthM;
-  const grossSideAreaM2 = lengthM * heightM;
-  const grossVolumeM3 = lengthM * widthM * heightM;
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.thickness);
+  const height = w.serializationContext.lengthFromMm(spec.height);
+  const grossFootprint = length * width;
+  const grossSideArea = length * height;
+  const grossVolumeMm3 = spec.length * spec.thickness * spec.height;
+  const grossVolume = length * width * height;
 
-  let sumOpeningAreaM2 = 0;
-  let sumFloorTouchingFootprintM2 = 0;
+  let sumOpeningArea = 0;
+  let sumFloorTouchingFootprint = 0;
+  let sumOpeningAreaMm2 = 0;
   for (const op of openings) {
-    const opWidthM = toIfcLengthM(op.width);
-    const opHeightM = toIfcLengthM(op.height);
-    sumOpeningAreaM2 += opWidthM * opHeightM;
-    if (toIfcLengthM(op.offsetFromFloor) < FLOOR_TOUCH_EPSILON_M) {
-      sumFloorTouchingFootprintM2 += opWidthM * widthM;
+    const opWidth = w.serializationContext.lengthFromMm(op.width);
+    const opHeight = w.serializationContext.lengthFromMm(op.height);
+    sumOpeningArea += opWidth * opHeight;
+    sumOpeningAreaMm2 += op.width * op.height;
+    if (op.offsetFromFloor < FLOOR_TOUCH_EPSILON_MM) {
+      sumFloorTouchingFootprint += opWidth * width;
     }
   }
-  const netSideAreaM2 = grossSideAreaM2 - sumOpeningAreaM2;
-  const netVolumeM3 = grossVolumeM3 - sumOpeningAreaM2 * widthM;
-  const netFootprintM2 = grossFootprintM2 - sumFloorTouchingFootprintM2;
+  const netSideArea = grossSideArea - sumOpeningArea;
+  const netVolumeMm3 = grossVolumeMm3 - sumOpeningAreaMm2 * spec.thickness;
+  const netVolume = grossVolume - sumOpeningArea * width;
+  const netFootprint = grossFootprint - sumFloorTouchingFootprint;
 
   const qtyIds = [
-    writeQtyLength(w, 'Length', lengthM),
-    writeQtyLength(w, 'Width', widthM),
-    writeQtyLength(w, 'Height', heightM),
-    writeQtyArea(w, 'GrossFootprintArea', grossFootprintM2),
-    writeQtyArea(w, 'NetFootprintArea', netFootprintM2),
-    writeQtyArea(w, 'GrossSideArea', grossSideAreaM2),
-    writeQtyArea(w, 'NetSideArea', netSideAreaM2),
-    writeQtyVolume(w, 'GrossVolume', grossVolumeM3),
-    writeQtyVolume(w, 'NetVolume', netVolumeM3),
+    writeQtyLength(w, 'Length', length),
+    writeQtyLength(w, 'Width', width),
+    writeQtyLength(w, 'Height', height),
+    writeQtyArea(w, 'GrossFootprintArea', grossFootprint),
+    writeQtyArea(w, 'NetFootprintArea', netFootprint),
+    writeQtyArea(w, 'GrossSideArea', grossSideArea),
+    writeQtyArea(w, 'NetSideArea', netSideArea),
+    writeQtyVolume(w, 'GrossVolume', grossVolume),
+    writeQtyVolume(w, 'NetVolume', netVolume),
   ];
-  pushWeightQuantity(w, qtyIds, netVolumeM3, densityKgM3);
+  pushWeightQuantity(w, qtyIds, netVolume, netVolumeMm3, densityKgM3);
 
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_WallBaseQuantities', qtyIds);
   writeRelDefinesByProperties(w, ownerHistoryId, wallExpressId, qtoId);
@@ -402,33 +410,37 @@ export function writeSlabBaseQuantities(
   openings: readonly SlabOpeningSpec[],
   densityKgM3?: number
 ): void {
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const thicknessM = toIfcLengthM(spec.thickness);
-  const grossAreaM2 = lengthM * widthM;
-  const perimeterM = 2 * (lengthM + widthM);
-  const grossVolumeM3 = grossAreaM2 * thicknessM;
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.width);
+  const thickness = w.serializationContext.lengthFromMm(spec.thickness);
+  const grossArea = length * width;
+  const perimeter = 2 * (length + width);
+  const grossVolumeMm3 = spec.length * spec.width * spec.thickness;
+  const grossVolume = grossArea * thickness;
 
-  let sumOpeningAreaM2 = 0;
+  let sumOpeningArea = 0;
+  let sumOpeningAreaMm2 = 0;
   for (const op of openings) {
-    const opSizeXM = toIfcLengthM(op.sizeX);
-    const opSizeYM = toIfcLengthM(op.sizeY);
-    sumOpeningAreaM2 += opSizeXM * opSizeYM;
+    const opSizeX = w.serializationContext.lengthFromMm(op.sizeX);
+    const opSizeY = w.serializationContext.lengthFromMm(op.sizeY);
+    sumOpeningArea += opSizeX * opSizeY;
+    sumOpeningAreaMm2 += op.sizeX * op.sizeY;
   }
-  const netAreaM2 = grossAreaM2 - sumOpeningAreaM2;
-  const netVolumeM3 = grossVolumeM3 - sumOpeningAreaM2 * thicknessM;
+  const netArea = grossArea - sumOpeningArea;
+  const netVolumeMm3 = grossVolumeMm3 - sumOpeningAreaMm2 * spec.thickness;
+  const netVolume = grossVolume - sumOpeningArea * thickness;
 
   const qtyIds = [
-    writeQtyLength(w, 'Width', widthM),
-    writeQtyLength(w, 'Length', lengthM),
-    writeQtyLength(w, 'Depth', thicknessM),
-    writeQtyLength(w, 'Perimeter', perimeterM),
-    writeQtyArea(w, 'GrossArea', grossAreaM2),
-    writeQtyArea(w, 'NetArea', netAreaM2),
-    writeQtyVolume(w, 'GrossVolume', grossVolumeM3),
-    writeQtyVolume(w, 'NetVolume', netVolumeM3),
+    writeQtyLength(w, 'Width', width),
+    writeQtyLength(w, 'Length', length),
+    writeQtyLength(w, 'Depth', thickness),
+    writeQtyLength(w, 'Perimeter', perimeter),
+    writeQtyArea(w, 'GrossArea', grossArea),
+    writeQtyArea(w, 'NetArea', netArea),
+    writeQtyVolume(w, 'GrossVolume', grossVolume),
+    writeQtyVolume(w, 'NetVolume', netVolume),
   ];
-  pushWeightQuantity(w, qtyIds, netVolumeM3, densityKgM3);
+  pushWeightQuantity(w, qtyIds, netVolume, netVolumeMm3, densityKgM3);
 
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_SlabBaseQuantities', qtyIds);
   writeRelDefinesByProperties(w, ownerHistoryId, slabExpressId, qtoId);
@@ -479,16 +491,16 @@ export function writeBeamBaseQuantities(
   beamExpressId: number,
   spec: BeamSpec
 ): void {
-  const lengthM = toIfcLengthM(spec.length);
-  // Profile area is in mm²; convert to m² (divide by 1e6).
-  const crossSectionAreaM2 = profileCrossSectionArea(spec.profile) / 1_000_000;
-  const grossVolumeM3 = crossSectionAreaM2 * lengthM;
+  const crossSectionAreaMm2 = profileCrossSectionArea(spec.profile);
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const crossSectionArea = w.serializationContext.areaFromMm2(crossSectionAreaMm2);
+  const grossVolume = crossSectionArea * length;
 
   const qtyIds = [
-    writeQtyLength(w, 'Length', lengthM),
-    writeQtyArea(w, 'CrossSectionArea', crossSectionAreaM2),
-    writeQtyVolume(w, 'GrossVolume', grossVolumeM3),
-    writeQtyVolume(w, 'NetVolume', grossVolumeM3),
+    writeQtyLength(w, 'Length', length),
+    writeQtyArea(w, 'CrossSectionArea', crossSectionArea),
+    writeQtyVolume(w, 'GrossVolume', grossVolume),
+    writeQtyVolume(w, 'NetVolume', grossVolume),
   ];
 
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_BeamBaseQuantities', qtyIds);
@@ -501,15 +513,16 @@ export function writeColumnBaseQuantities(
   columnExpressId: number,
   spec: ColumnSpec
 ): void {
-  const heightM = toIfcLengthM(spec.height);
-  const crossSectionAreaM2 = profileCrossSectionArea(spec.profile) / 1_000_000;
-  const grossVolumeM3 = crossSectionAreaM2 * heightM;
+  const crossSectionAreaMm2 = profileCrossSectionArea(spec.profile);
+  const height = w.serializationContext.lengthFromMm(spec.height);
+  const crossSectionArea = w.serializationContext.areaFromMm2(crossSectionAreaMm2);
+  const grossVolume = crossSectionArea * height;
 
   const qtyIds = [
-    writeQtyLength(w, 'Length', heightM),
-    writeQtyArea(w, 'CrossSectionArea', crossSectionAreaM2),
-    writeQtyVolume(w, 'GrossVolume', grossVolumeM3),
-    writeQtyVolume(w, 'NetVolume', grossVolumeM3),
+    writeQtyLength(w, 'Length', height),
+    writeQtyArea(w, 'CrossSectionArea', crossSectionArea),
+    writeQtyVolume(w, 'GrossVolume', grossVolume),
+    writeQtyVolume(w, 'NetVolume', grossVolume),
   ];
 
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_ColumnBaseQuantities', qtyIds);
@@ -536,20 +549,20 @@ export function writeSpaceBaseQuantities(
   spaceExpressId: number,
   spec: SpaceSpec
 ): void {
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const heightM = toIfcLengthM(spec.height);
-  const grossFloorAreaM2 = lengthM * widthM;
-  const grossPerimeterM = 2 * (lengthM + widthM);
-  const grossVolumeM3 = grossFloorAreaM2 * heightM;
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.width);
+  const height = w.serializationContext.lengthFromMm(spec.height);
+  const grossFloorArea = length * width;
+  const grossPerimeter = 2 * (length + width);
+  const grossVolume = grossFloorArea * height;
 
   const qtyIds = [
-    writeQtyLength(w, 'Height', heightM),
-    writeQtyLength(w, 'GrossPerimeter', grossPerimeterM),
-    writeQtyArea(w, 'GrossFloorArea', grossFloorAreaM2),
-    writeQtyArea(w, 'NetFloorArea', grossFloorAreaM2),
-    writeQtyVolume(w, 'GrossVolume', grossVolumeM3),
-    writeQtyVolume(w, 'NetVolume', grossVolumeM3),
+    writeQtyLength(w, 'Height', height),
+    writeQtyLength(w, 'GrossPerimeter', grossPerimeter),
+    writeQtyArea(w, 'GrossFloorArea', grossFloorArea),
+    writeQtyArea(w, 'NetFloorArea', grossFloorArea),
+    writeQtyVolume(w, 'GrossVolume', grossVolume),
+    writeQtyVolume(w, 'NetVolume', grossVolume),
   ];
 
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_SpaceBaseQuantities', qtyIds);
@@ -577,19 +590,16 @@ export function writeRoofBaseQuantities(
   roofExpressId: number,
   spec: RoofSpec
 ): void {
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const thicknessM = toIfcLengthM(spec.thickness);
-  const grossAreaM2 = lengthM * widthM;
-  const grossVolumeM3 = grossAreaM2 * thicknessM;
+  const grossArea =
+    w.serializationContext.lengthFromMm(spec.length) *
+    w.serializationContext.lengthFromMm(spec.width);
 
   // Qto_RoofBaseQuantities defines only the three area quantities (QTY001);
   // roof volumes have no standard home and are not emitted.
-  void grossVolumeM3;
   const qtyIds = [
-    writeQtyArea(w, 'GrossArea', grossAreaM2),
-    writeQtyArea(w, 'NetArea', grossAreaM2),
-    writeQtyArea(w, 'ProjectedArea', grossAreaM2),
+    writeQtyArea(w, 'GrossArea', grossArea),
+    writeQtyArea(w, 'NetArea', grossArea),
+    writeQtyArea(w, 'ProjectedArea', grossArea),
   ];
 
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_RoofBaseQuantities', qtyIds);
@@ -631,18 +641,18 @@ export function writeFootingBaseQuantities(
   footingExpressId: number,
   spec: FootingSpec
 ): void {
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const depthM = toIfcLengthM(spec.thickness);
-  const grossVolumeM3 = lengthM * widthM * depthM;
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.width);
+  const depth = w.serializationContext.lengthFromMm(spec.thickness);
+  const grossVolume = length * width * depth;
 
   const qtyIds = [
-    writeQtyLength(w, 'Length', lengthM),
-    writeQtyLength(w, 'Width', widthM),
+    writeQtyLength(w, 'Length', length),
+    writeQtyLength(w, 'Width', width),
     // Qto_FootingBaseQuantities names the vertical extent 'Height' (QTY001).
-    writeQtyLength(w, 'Height', depthM),
-    writeQtyVolume(w, 'GrossVolume', grossVolumeM3),
-    writeQtyVolume(w, 'NetVolume', grossVolumeM3),
+    writeQtyLength(w, 'Height', depth),
+    writeQtyVolume(w, 'GrossVolume', grossVolume),
+    writeQtyVolume(w, 'NetVolume', grossVolume),
   ];
 
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_FootingBaseQuantities', qtyIds);
@@ -667,15 +677,16 @@ export function writePileBaseQuantities(
   pileExpressId: number,
   spec: PileSpec
 ): void {
-  const lengthM = toIfcLengthM(spec.length);
-  const crossSectionAreaM2 = profileCrossSectionArea(spec.profile) / 1_000_000;
-  const grossVolumeM3 = crossSectionAreaM2 * lengthM;
+  const crossSectionAreaMm2 = profileCrossSectionArea(spec.profile);
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const crossSectionArea = w.serializationContext.areaFromMm2(crossSectionAreaMm2);
+  const grossVolume = crossSectionArea * length;
 
   const qtyIds = [
-    writeQtyLength(w, 'Length', lengthM),
-    writeQtyArea(w, 'CrossSectionArea', crossSectionAreaM2),
-    writeQtyVolume(w, 'GrossVolume', grossVolumeM3),
-    writeQtyVolume(w, 'NetVolume', grossVolumeM3),
+    writeQtyLength(w, 'Length', length),
+    writeQtyArea(w, 'CrossSectionArea', crossSectionArea),
+    writeQtyVolume(w, 'GrossVolume', grossVolume),
+    writeQtyVolume(w, 'NetVolume', grossVolume),
   ];
 
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_PileBaseQuantities', qtyIds);

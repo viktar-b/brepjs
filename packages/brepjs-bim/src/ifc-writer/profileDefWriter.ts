@@ -1,10 +1,9 @@
 import * as WebIFC from 'web-ifc';
 import type { IfcWriter } from './ifcWriter.js';
 import type { ExtendedProfile, Pt2 } from '../specs/profilesExtended.js';
-import { toIfcLengthM } from '../units/units.js';
 
 // Emits the matching IfcXxxProfileDef for an ExtendedProfile and returns its
-// express ID. All dimensions are converted to metres for IFC. web-ifc's
+// express ID. All dimensions are converted through the writer's unit context. web-ifc's
 // WriteLine does not enforce WHERE rules, so geometric validity is the caller's
 // responsibility (see extendedProfileToFace in specs/profilesExtended.ts).
 
@@ -150,7 +149,10 @@ export function writeExtendedProfileDef(w: IfcWriter, profile: ExtendedProfile):
         BottomXDim: len(w, profile.bottomXDim),
         TopXDim: len(w, profile.topXDim),
         YDim: len(w, profile.yDim),
-        TopXOffset: w.mkType(WebIFC.IFCLENGTHMEASURE, toIfcLengthM(profile.topXOffset)),
+        TopXOffset: w.mkType(
+          WebIFC.IFCLENGTHMEASURE,
+          w.serializationContext.lengthFromMm(profile.topXOffset)
+        ),
       });
       return id;
     }
@@ -213,7 +215,7 @@ export function writeExtendedProfileDef(w: IfcWriter, profile: ExtendedProfile):
 }
 
 function len(w: IfcWriter, mm: number): Record<string, unknown> {
-  return w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(mm));
+  return w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, w.serializationContext.lengthFromMm(mm));
 }
 
 function optLen(w: IfcWriter, mm: number | undefined): Record<string, unknown> | null {
@@ -237,8 +239,8 @@ function writeAxis2Placement2D(w: IfcWriter): number {
   return id;
 }
 
-// Emits a closed IfcPolyline (first point repeated at the end) from 2D points in
-// metres. Used for the OuterCurve / InnerCurves of arbitrary profile defs.
+// Emits a closed IfcPolyline (first point repeated at the end) from authored 2D
+// millimetre points in the writer's file unit. Used for arbitrary profile curves.
 function writePolyline(w: IfcWriter, points: ReadonlyArray<Pt2>): number {
   const pointRefs = points.map(([x, y]) => {
     const pid = w.nextId();
@@ -246,8 +248,8 @@ function writePolyline(w: IfcWriter, points: ReadonlyArray<Pt2>): number {
       expressID: pid,
       type: WebIFC.IFCCARTESIANPOINT,
       Coordinates: [
-        w.mkType(WebIFC.IFCLENGTHMEASURE, toIfcLengthM(x)),
-        w.mkType(WebIFC.IFCLENGTHMEASURE, toIfcLengthM(y)),
+        w.mkType(WebIFC.IFCLENGTHMEASURE, w.serializationContext.lengthFromMm(x)),
+        w.mkType(WebIFC.IFCLENGTHMEASURE, w.serializationContext.lengthFromMm(y)),
       ],
     });
     return w.ref(pid);

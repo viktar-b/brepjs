@@ -1,14 +1,12 @@
 export type IfcLengthUnit = 'METRE' | 'MILLIMETRE';
 
 export class IfcSerializationContext {
-  readonly #lengthScale: number;
   readonly lengthUnit: IfcLengthUnit;
   readonly siPrefix: 'MILLI' | null;
 
   private constructor(lengthUnit: IfcLengthUnit) {
     this.lengthUnit = lengthUnit;
     this.siPrefix = lengthUnit === 'METRE' ? null : 'MILLI';
-    this.#lengthScale = lengthUnit === 'METRE' ? 1 / 1_000 : 1;
     Object.freeze(this);
   }
 
@@ -17,7 +15,7 @@ export class IfcSerializationContext {
   }
 
   lengthFromMm(valueMm: number): number {
-    return valueMm * this.#lengthScale;
+    return this.lengthUnit === 'METRE' ? valueMm / 1_000 : valueMm;
   }
 
   /** Convert legacy public CRS coordinates, whose contract is explicitly metres. */
@@ -26,11 +24,11 @@ export class IfcSerializationContext {
   }
 
   areaFromMm2(valueMm2: number): number {
-    return valueMm2 * this.#lengthScale ** 2;
+    return this.lengthUnit === 'METRE' ? valueMm2 / 1_000_000 : valueMm2;
   }
 
   volumeFromMm3(valueMm3: number): number {
-    return valueMm3 * this.#lengthScale ** 3;
+    return this.lengthUnit === 'METRE' ? valueMm3 / 1_000_000_000 : valueMm3;
   }
 }
 

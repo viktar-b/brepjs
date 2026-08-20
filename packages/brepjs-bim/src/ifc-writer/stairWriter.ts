@@ -4,7 +4,6 @@ import { writeAxis2Placement3D } from './headerWriter.js';
 import { writeTessellation } from './tessellationWriter.js';
 import { writeRelAggregates } from './relWriter.js';
 import { deriveIfcGuidSync } from '../identity/guidDerivation.js';
-import { toIfcLengthM } from '../units/units.js';
 import type { StairSpec, StairFlightSpec } from '../specs/stairSpec.js';
 import type { RampSpec } from '../specs/rampSpec.js';
 import { stairFlightToSolid } from '../elementFns/stairFns.js';
@@ -36,7 +35,11 @@ function writeLocalPlacement(
 ): number {
   const placement3DId = writeAxis2Placement3D(
     w,
-    origin.map(toIfcLengthM) as [number, number, number],
+    origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     axisZ,
     axisX
   );
@@ -143,12 +146,18 @@ function writeStairFlightCommonPset(
     writeSingleValue(
       w,
       'RiserHeight',
-      w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(flight.riserHeight))
+      w.mkType(
+        WebIFC.IFCPOSITIVELENGTHMEASURE,
+        w.serializationContext.lengthFromMm(flight.riserHeight)
+      )
     ),
     writeSingleValue(
       w,
       'TreadLength',
-      w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(flight.treadLength))
+      w.mkType(
+        WebIFC.IFCPOSITIVELENGTHMEASURE,
+        w.serializationContext.lengthFromMm(flight.treadLength)
+      )
     ),
   ];
   const psetId = w.nextId();

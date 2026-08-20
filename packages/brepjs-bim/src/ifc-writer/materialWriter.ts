@@ -2,7 +2,6 @@ import * as WebIFC from 'web-ifc';
 import type { IfcWriter } from './ifcWriter.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import type { MaterialLayer } from '../types/materialTypes.js';
-import { toIfcLengthM } from '../units/units.js';
 
 export type { MaterialLayer } from '../types/materialTypes.js';
 
@@ -51,7 +50,10 @@ function writeMaterialLayer(w: IfcWriter, layer: MaterialLayer): number {
     expressID: w.nextId(),
     type: WebIFC.IFCMATERIALLAYER,
     Material: w.ref(materialId),
-    LayerThickness: w.mkType(WebIFC.IFCNONNEGATIVELENGTHMEASURE, toIfcLengthM(layer.thicknessMm)),
+    LayerThickness: w.mkType(
+      WebIFC.IFCNONNEGATIVELENGTHMEASURE,
+      w.serializationContext.lengthFromMm(layer.thicknessMm)
+    ),
     IsVentilated: w.mkType(WebIFC.IFCLOGICAL, isVentilated),
     Name: w.mkType(WebIFC.IFCLABEL, layer.name),
     Description: null,
@@ -108,14 +110,14 @@ export function writeMaterialLayerSet(
     Description: null,
   });
 
-  const offsetM = toIfcLengthM(spec.offsetFromReferenceLine ?? 0);
+  const offset = w.serializationContext.lengthFromMm(spec.offsetFromReferenceLine ?? 0);
   const usageId = w.writeLine({
     expressID: w.nextId(),
     type: WebIFC.IFCMATERIALLAYERSETUSAGE,
     ForLayerSet: w.ref(layerSetId),
     LayerSetDirection: { type: 3, value: direction },
     DirectionSense: { type: 3, value: 'POSITIVE' },
-    OffsetFromReferenceLine: w.mkType(WebIFC.IFCLENGTHMEASURE, offsetM),
+    OffsetFromReferenceLine: w.mkType(WebIFC.IFCLENGTHMEASURE, offset),
     ReferenceExtent: null,
   });
 

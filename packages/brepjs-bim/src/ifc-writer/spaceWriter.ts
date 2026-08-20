@@ -3,7 +3,6 @@ import type { IfcWriter } from './ifcWriter.js';
 import { writeAxis2Placement3D, writeDirection } from './headerWriter.js';
 import type { SpaceSpec, SpacePredefinedType } from '../specs/spaceSpec.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
-import { toIfcLengthM } from '../units/units.js';
 
 export interface SpaceRepresentationIds {
   localPlacementId: number;
@@ -22,7 +21,11 @@ export function writeSpaceGeometry(
 ): SpaceRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
@@ -35,9 +38,9 @@ export function writeSpaceGeometry(
     RelativePlacement: w.ref(placement3DId),
   });
 
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const heightM = toIfcLengthM(spec.height);
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.width);
+  const height = w.serializationContext.lengthFromMm(spec.height);
 
   // IFC rectangle profiles are centered on their position, so shift the position
   // to (length/2, width/2) to keep the corner of the footprint at the origin.
@@ -46,8 +49,8 @@ export function writeSpaceGeometry(
     expressID: profileOriginId,
     type: WebIFC.IFCCARTESIANPOINT,
     Coordinates: [
-      w.mkType(WebIFC.IFCLENGTHMEASURE, lengthM / 2),
-      w.mkType(WebIFC.IFCLENGTHMEASURE, widthM / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, length / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, width / 2),
     ],
   });
   const profilePosId = w.nextId();
@@ -65,8 +68,8 @@ export function writeSpaceGeometry(
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
     Position: w.ref(profilePosId),
-    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, lengthM),
-    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, widthM),
+    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, length),
+    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, width),
   });
 
   const extrusionPosId = writeAxis2Placement3D(w, [0, 0, 0]);
@@ -78,7 +81,7 @@ export function writeSpaceGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, heightM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, height),
   });
 
   const shapeRepId = w.nextId();

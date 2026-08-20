@@ -2,7 +2,6 @@ import * as WebIFC from 'web-ifc';
 import type { IfcWriter } from './ifcWriter.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { writeAxis2Placement3D, writeDirection } from './headerWriter.js';
-import { toIfcLengthM } from '../units/units.js';
 import type { CoveringSpec, CoveringPredefinedType } from '../specs/coveringSpec.js';
 
 export interface CoveringRepresentationIds {
@@ -24,7 +23,11 @@ export function writeCoveringGeometry(
 ): CoveringRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
@@ -37,9 +40,9 @@ export function writeCoveringGeometry(
     RelativePlacement: w.ref(placement3DId),
   });
 
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const thicknessM = toIfcLengthM(spec.thickness);
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.width);
+  const thickness = w.serializationContext.lengthFromMm(spec.thickness);
 
   // Profile centered at (length/2, width/2) so the local frame matches the
   // brepjs solid (corner at origin, extends to +X/+Y).
@@ -48,8 +51,8 @@ export function writeCoveringGeometry(
     expressID: profileOriginId,
     type: WebIFC.IFCCARTESIANPOINT,
     Coordinates: [
-      w.mkType(WebIFC.IFCLENGTHMEASURE, lengthM / 2),
-      w.mkType(WebIFC.IFCLENGTHMEASURE, widthM / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, length / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, width / 2),
     ],
   });
   const profilePosId = w.nextId();
@@ -67,8 +70,8 @@ export function writeCoveringGeometry(
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
     Position: w.ref(profilePosId),
-    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, lengthM),
-    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, widthM),
+    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, length),
+    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, width),
   });
 
   const extrusionPosId = writeAxis2Placement3D(w, [0, 0, 0]);
@@ -80,7 +83,7 @@ export function writeCoveringGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thicknessM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thickness),
   });
 
   const shapeRepId = w.nextId();

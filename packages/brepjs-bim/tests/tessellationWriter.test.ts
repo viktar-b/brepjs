@@ -4,6 +4,7 @@ import { polygon, extrude, isValidSolid } from 'brepjs';
 import type { ValidSolid } from 'brepjs';
 import { initOCCT } from '../../../tests/setup.js';
 import { IfcWriter } from '../src/ifc-writer/ifcWriter.js';
+import type { IfcLengthUnit } from '../src/ifc-writer/serializationContext.js';
 import { writeHeader } from '../src/ifc-writer/headerWriter.js';
 import {
   writeTessellation,
@@ -32,8 +33,8 @@ function makeBoxSolid(): ValidSolid {
   return solid.value;
 }
 
-async function makeWriter(): Promise<IfcWriter> {
-  const result = await IfcWriter.create();
+async function makeWriter(lengthUnit: IfcLengthUnit = 'METRE'): Promise<IfcWriter> {
+  const result = await IfcWriter.create(undefined, undefined, undefined, lengthUnit);
   if (!result.ok) throw new Error(result.error.message);
   return result.value;
 }
@@ -120,6 +121,33 @@ describe('tessellationWriter', () => {
     expect(maxCoord).toBeGreaterThan(0);
 
     api.CloseModel(mid);
+  });
+
+  it('derives tessellation coordinates from the writer unit context', async () => {
+    for (const [lengthUnit, expectedMaximum] of [
+      ['METRE', 1],
+      ['MILLIMETRE', 1_000],
+    ] as const) {
+      const w = await makeWriter(lengthUnit);
+      const { geomSubContextId } = writeHeader(w, META);
+      using solid = makeBoxSolid();
+
+      writeTessellation(w, solid, geomSubContextId, null);
+
+      const { api, mid } = await openSaved(w);
+      const pointList = api.GetLine(
+        mid,
+        api.GetLineIDsWithType(mid, WebIFC.IFCCARTESIANPOINTLIST3D).get(0)
+      ) as Record<string, unknown>;
+      const coordList = pointList['CoordList'] as Array<Array<{ value?: number } | number>>;
+      const maximum = Math.max(
+        ...coordList.flatMap((point) =>
+          point.map((entry) => Math.abs(typeof entry === 'number' ? entry : (entry.value ?? 0)))
+        )
+      );
+      expect(maximum).toBeCloseTo(expectedMaximum, 6);
+      api.CloseModel(mid);
+    }
   });
 
   it('wraps the face set in an IfcShapeRepresentation with RepresentationType Tessellation', async () => {

@@ -10,7 +10,6 @@ import type {
   PilePredefinedType,
   PileConstructionType,
 } from '../specs/foundationSpec.js';
-import { toIfcLengthM } from '../units/units.js';
 
 export interface FoundationRepresentationIds {
   localPlacementId: number;
@@ -30,7 +29,11 @@ export function writeFootingGeometry(
 ): FoundationRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
@@ -43,17 +46,17 @@ export function writeFootingGeometry(
     RelativePlacement: w.ref(placement3DId),
   });
 
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.width);
-  const thicknessM = toIfcLengthM(spec.thickness);
+  const length = w.serializationContext.lengthFromMm(spec.length);
+  const width = w.serializationContext.lengthFromMm(spec.width);
+  const thickness = w.serializationContext.lengthFromMm(spec.thickness);
 
   const profileOriginId = w.nextId();
   w.writeLine({
     expressID: profileOriginId,
     type: WebIFC.IFCCARTESIANPOINT,
     Coordinates: [
-      w.mkType(WebIFC.IFCLENGTHMEASURE, lengthM / 2),
-      w.mkType(WebIFC.IFCLENGTHMEASURE, widthM / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, length / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, width / 2),
     ],
   });
   const profilePosId = w.nextId();
@@ -71,8 +74,8 @@ export function writeFootingGeometry(
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
     Position: w.ref(profilePosId),
-    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, lengthM),
-    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, widthM),
+    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, length),
+    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, width),
   });
 
   const extrusionPosId = writeAxis2Placement3D(w, [0, 0, 0]);
@@ -84,7 +87,7 @@ export function writeFootingGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thicknessM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, thickness),
   });
 
   return finishRepresentation(w, extrusionId, geomSubContextId, localPlacementId);
@@ -101,7 +104,11 @@ export function writePileGeometry(
 ): FoundationRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
@@ -124,7 +131,10 @@ export function writePileGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, toIfcLengthM(spec.length)),
+    Depth: w.mkType(
+      WebIFC.IFCPOSITIVELENGTHMEASURE,
+      w.serializationContext.lengthFromMm(spec.length)
+    ),
   });
 
   return finishRepresentation(w, extrusionId, geomSubContextId, localPlacementId);

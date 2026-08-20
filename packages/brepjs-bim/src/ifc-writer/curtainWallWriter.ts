@@ -3,7 +3,6 @@ import type { IfcWriter } from './ifcWriter.js';
 import { writeAxis2Placement3D, writeDirection } from './headerWriter.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { deriveIfcGuidSync } from '../identity/guidDerivation.js';
-import { toIfcLengthM } from '../units/units.js';
 import type { CurtainWallSpec } from '../specs/curtainWallSpec.js';
 import type { CurtainWallComponent, CurtainWallGrid } from '../elementFns/curtainWallFns.js';
 
@@ -30,7 +29,11 @@ function writeComponentGeometry(
 ): { localPlacementId: number; productDefinitionShapeId: number } {
   const placement3DId = writeAxis2Placement3D(
     w,
-    component.origin.map(toIfcLengthM) as [number, number, number]
+    component.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ]
   );
 
   const localPlacementId = w.nextId();
@@ -42,9 +45,9 @@ function writeComponentGeometry(
   });
 
   const [sizeX, sizeY, sizeZ] = component.size;
-  const xDimM = toIfcLengthM(sizeX);
-  const yDimM = toIfcLengthM(sizeY);
-  const depthM = toIfcLengthM(sizeZ);
+  const xDim = w.serializationContext.lengthFromMm(sizeX);
+  const yDim = w.serializationContext.lengthFromMm(sizeY);
+  const depth = w.serializationContext.lengthFromMm(sizeZ);
 
   // IFC rectangle profiles are centred on their position; shift the profile
   // origin to (sizeX/2, sizeY/2) so the solid corner sits at the local origin
@@ -54,8 +57,8 @@ function writeComponentGeometry(
     expressID: profileOriginId,
     type: WebIFC.IFCCARTESIANPOINT,
     Coordinates: [
-      w.mkType(WebIFC.IFCLENGTHMEASURE, xDimM / 2),
-      w.mkType(WebIFC.IFCLENGTHMEASURE, yDimM / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, xDim / 2),
+      w.mkType(WebIFC.IFCLENGTHMEASURE, yDim / 2),
     ],
   });
   const profilePosId = w.nextId();
@@ -73,8 +76,8 @@ function writeComponentGeometry(
     ProfileType: { type: 3, value: 'AREA' },
     ProfileName: null,
     Position: w.ref(profilePosId),
-    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, xDimM),
-    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, yDimM),
+    XDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, xDim),
+    YDim: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, yDim),
   });
 
   const extrusionPosId = writeAxis2Placement3D(w, [0, 0, 0]);
@@ -86,7 +89,7 @@ function writeComponentGeometry(
     SweptArea: w.ref(profileId),
     Position: w.ref(extrusionPosId),
     ExtrudedDirection: w.ref(extrusionDirId),
-    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, depthM),
+    Depth: w.mkType(WebIFC.IFCPOSITIVELENGTHMEASURE, depth),
   });
 
   const shapeRepId = w.nextId();
@@ -182,7 +185,11 @@ export function writeCurtainWall(
 ): CurtainWallWriteResult {
   const placement3DId = writeAxis2Placement3D(
     w,
-    spec.origin.map(toIfcLengthM) as [number, number, number],
+    spec.origin.map((valueMm) => w.serializationContext.lengthFromMm(valueMm)) as [
+      number,
+      number,
+      number,
+    ],
     spec.axisZ,
     spec.axisX
   );
