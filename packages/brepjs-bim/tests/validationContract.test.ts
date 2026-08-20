@@ -193,4 +193,79 @@ describe('bim/bridge/v1 Validation Contract report', () => {
     const result = buildBridgeValidationReport(input([malformed]));
     expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_CONTRACT_INPUT' } });
   });
+
+  it('rejects Bridge reports with schema or view provenance outside the fixed contract', () => {
+    expect(buildBridgeValidationReport({ ...input(), ifcSchema: 'IFC4' })).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_CONTRACT_INPUT' },
+    });
+    expect(
+      buildBridgeValidationReport({ ...input(), ifcView: 'ReferenceView_v1.2' })
+    ).toMatchObject({ ok: false, error: { code: 'VALIDATION_CONTRACT_INPUT' } });
+  });
+
+  it('rejects a passing gate without a concrete evidence reference', () => {
+    const gate = passingProjectResults()[0];
+    if (gate === undefined) throw new Error('required gate missing');
+    const result = buildBridgeValidationReport(input([{ ...gate, evidence: [] }]));
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_CONTRACT_INPUT' } });
+  });
+
+  it('returns a contract error instead of throwing for malformed runtime input', () => {
+    const malformed = {
+      ifcSchema: 'IFC4X3_ADD2',
+      ifcView: 'ReferenceView',
+    } as BridgeValidationInput;
+    expect(() => buildBridgeValidationReport(malformed)).not.toThrow();
+    expect(buildBridgeValidationReport(malformed)).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_CONTRACT_INPUT' },
+    });
+  });
+
+  it('canonicalizes nested issue context and isolates the frozen report from caller mutation', () => {
+    const mutableValidator = {
+      id: 'brepjs-bim',
+      name: 'brepjs-bim local validators',
+      version: '0.16.1',
+    };
+    const nestedContext = { z: { b: 2, a: 1 }, a: [{ d: 4, c: 3 }] };
+    const firstResults = passingProjectResults().map((result, index) =>
+      index === 0
+        ? {
+            ...result,
+            issues: [issue('warning', 'CONTEXT', 'Context evidence', undefined, nestedContext)],
+          }
+        : result
+    );
+    const secondResults = passingProjectResults().map((result, index) =>
+      index === 0
+        ? {
+            ...result,
+            issues: [
+              issue('warning', 'CONTEXT', 'Context evidence', undefined, {
+                a: [{ c: 3, d: 4 }],
+                z: { a: 1, b: 2 },
+              }),
+            ],
+          }
+        : result
+    );
+    const first = unwrap(
+      buildBridgeValidationReport({
+        ...input(firstResults),
+        validators: [mutableValidator, VALIDATORS[1], VALIDATORS[2]],
+      })
+    );
+    const second = unwrap(buildBridgeValidationReport(input(secondResults)));
+
+    mutableValidator.name = 'mutated after report creation';
+    nestedContext.z.a = 99;
+
+    expect(serializeBridgeValidationReport(first)).toBe(serializeBridgeValidationReport(second));
+    expect(first.validators[0]?.name).toBe('brepjs-bim local validators');
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.gates[0]?.issues[0]?.context)).toBe(true);
+  });
 });

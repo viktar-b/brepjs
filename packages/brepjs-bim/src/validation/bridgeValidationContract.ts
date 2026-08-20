@@ -1,6 +1,7 @@
 import { err, ok, type Result } from 'brepjs';
 import type { BimError } from '../errors/bimError.js';
 import { specError } from '../errors/bimError.js';
+import { isIfc4x3Add2ReferenceView } from '../ifc-writer/schemaVersion.js';
 import type { ValidationIssue, ValidationSeverity, SeverityCounts } from './severity.js';
 
 export const BRIDGE_VALIDATION_REPORT_SCHEMA_VERSION = '1';
@@ -134,26 +135,38 @@ export interface BridgeValidationReport {
 export function buildBridgeValidationReport(
   input: BridgeValidationInput
 ): Result<BridgeValidationReport, BimError> {
-  const inputError = validateInput(input);
-  if (inputError !== null) return err(inputError);
+  try {
+    const inputError = validateInput(input);
+    if (inputError !== null) return err(inputError);
 
-  const resultsById = new Map(input.gateResults.map((result) => [result.gateId, result]));
-  const gates = BRIDGE_VALIDATION_GATES.map((definition) =>
-    normalizeGate(definition, resultsById.get(definition.id))
-  );
-  const reportWithoutSummary = {
-    schemaVersion: BRIDGE_VALIDATION_REPORT_SCHEMA_VERSION,
-    scaffoldContract: BRIDGE_SCAFFOLD_CONTRACT,
-    ifc: { schema: input.ifcSchema, view: input.ifcView },
-    modelHash: { algorithm: 'sha256' as const, value: input.modelHash.value.toLowerCase() },
-    validators: [...input.validators].sort((left, right) => left.id.localeCompare(right.id)),
-    gates,
-  } as const;
-  const report: BridgeValidationReport = {
-    ...reportWithoutSummary,
-    summary: summarizeGates(gates),
-  };
-  return ok(report);
+    const resultsById = new Map(input.gateResults.map((result) => [result.gateId, result]));
+    const gates = BRIDGE_VALIDATION_GATES.map((definition) =>
+      normalizeGate(definition, resultsById.get(definition.id))
+    );
+    const reportWithoutSummary = {
+      schemaVersion: BRIDGE_VALIDATION_REPORT_SCHEMA_VERSION,
+      scaffoldContract: BRIDGE_SCAFFOLD_CONTRACT,
+      ifc: { schema: input.ifcSchema, view: input.ifcView },
+      modelHash: { algorithm: 'sha256' as const, value: input.modelHash.value.toLowerCase() },
+      validators: input.validators
+        .map((validator) => ({
+          id: validator.id,
+          name: validator.name,
+          version: validator.version,
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      gates,
+    } as const;
+    const report: BridgeValidationReport = {
+      ...reportWithoutSummary,
+      summary: summarizeGates(gates),
+    };
+    return ok(deepFreeze(report));
+  } catch (cause) {
+    return err(
+      specError('VALIDATION_CONTRACT_INPUT', 'Malformed validation contract input', cause)
+    );
+  }
 }
 
 /** Maps a completed report to the generated command's stable 0/1/2 exit contract. */
@@ -207,8 +220,8 @@ function normalizeGate(
     status: input.status,
     validatorId: input.validatorId ?? null,
     unavailableReason: input.status === 'unavailable' ? input.unavailableReason : null,
-    issues: [...input.issues].sort(compareIssues),
-    evidence: [...input.evidence].sort(compareEvidence),
+    issues: input.issues.map(normalizeIssue).sort(compareIssues),
+    evidence: input.evidence.map(normalizeEvidence).sort(compareEvidence),
   };
 }
 
@@ -232,8 +245,13 @@ function summarizeGates(gates: readonly BridgeValidationGateResult[]): BridgeVal
 }
 
 function validateInput(input: BridgeValidationInput): BimError | null {
-  if (input.ifcSchema.length === 0 || input.ifcView.length === 0) {
-    return contractError('IFC schema and view must be non-empty');
+  if (
+    !isIfc4x3Add2ReferenceView({
+      schema: input.ifcSchema,
+      viewDefinition: input.ifcView,
+    })
+  ) {
+    return contractError('Bridge reports require exact IFC4X3_ADD2 Reference View provenance');
   }
   if (!/^[0-9a-fA-F]{64}$/.test(input.modelHash.value)) {
     return contractError('modelHash.value must be a 64-character SHA-256 hexadecimal digest');
@@ -284,6 +302,17 @@ function validateInput(input: BridgeValidationInput): BimError | null {
     if (result.status === 'pass' && result.issues.some((next) => next.severity === 'error')) {
       return contractError(`Passing gate "${result.gateId}" cannot contain error issues`);
     }
+    if (result.status === 'pass' && result.evidence.length === 0) {
+      return contractError(`Passing gate "${result.gateId}" requires evidence`);
+    }
+    if (
+      result.evidence.some(
+        (reference) =>
+          reference.kind.length === 0 || reference.value.length === 0 || reference.checksum === ''
+      )
+    ) {
+      return contractError(`Gate "${result.gateId}" contains an incomplete evidence reference`);
+    }
   }
   return null;
 }
@@ -312,4 +341,74 @@ function compareEvidence(
     left.value.localeCompare(right.value) ||
     (left.checksum ?? '').localeCompare(right.checksum ?? '')
   );
+}
+
+function normalizeIssue(nextIssue: ValidationIssue): ValidationIssue {
+  return {
+    severity: nextIssue.severity,
+    code: nextIssue.code,
+    message: nextIssue.message,
+    ...(nextIssue.entity !== undefined ? { entity: nextIssue.entity } : {}),
+    ...(nextIssue.context !== undefined ? { context: canonicalizeContext(nextIssue.context) } : {}),
+  };
+}
+
+function normalizeEvidence(reference: ValidationEvidenceReference): ValidationEvidenceReference {
+  return {
+    kind: reference.kind,
+    value: reference.value,
+    ...(reference.checksum !== undefined ? { checksum: reference.checksum } : {}),
+  };
+}
+
+function canonicalizeContext(
+  context: Readonly<Record<string, unknown>>
+): Readonly<Record<string, unknown>> {
+  return canonicalizeObject(context, new Set<object>());
+}
+
+function canonicalizeValue(value: unknown, ancestors: Set<object>): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError('Validation context numbers must be finite');
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (ancestors.has(value)) throw new TypeError('Validation context must not contain cycles');
+    ancestors.add(value);
+    const result = value.map((entry) => canonicalizeValue(entry, ancestors));
+    ancestors.delete(value);
+    return result;
+  }
+  if (typeof value === 'object') {
+    const prototype = Reflect.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError('Validation context must contain only JSON objects');
+    }
+    return canonicalizeObject(value as Readonly<Record<string, unknown>>, ancestors);
+  }
+  throw new TypeError('Validation context must contain only JSON values');
+}
+
+function canonicalizeObject(
+  value: Readonly<Record<string, unknown>>,
+  ancestors: Set<object>
+): Readonly<Record<string, unknown>> {
+  if (ancestors.has(value)) throw new TypeError('Validation context must not contain cycles');
+  ancestors.add(value);
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    const entry = value[key];
+    if (entry !== undefined) result[key] = canonicalizeValue(entry, ancestors);
+  }
+  ancestors.delete(value);
+  return result;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
