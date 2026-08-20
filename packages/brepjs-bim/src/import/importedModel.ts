@@ -2,6 +2,7 @@ import type { ValidSolid } from 'brepjs';
 import type { ValidationReport } from '../validation/severity.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import type { ImportedSchema } from './spfReader.js';
+import type { ImportedIfcObservations } from './observations.js';
 
 export type { ImportedSchema } from './spfReader.js';
 
@@ -123,6 +124,7 @@ export interface ImportedModel {
   readonly schema: ImportedSchema;
   /** MVD ViewDefinition declared in the STEP FILE_DESCRIPTION header. */
   readonly viewDefinition: string | null;
+  readonly observations: ImportedIfcObservations;
   readonly spatialTree: ImportedSpatialNode | null;
   readonly elements: readonly ImportedElement[];
   /** Express id → ImportedElement for fast lookup. */

@@ -15,6 +15,14 @@ export { disposeImportedModel } from './import/importedModel.js';
 export type { FromIfcOptions } from './import/fromIfc.js';
 export { SpfReader } from './import/spfReader.js';
 export type { SpfReaderSettings } from './import/spfReader.js';
+export type {
+  ImportedIfcObservations,
+  SpatialSemanticObservation,
+  LocalPlacementObservation,
+  IfcUnitObservation,
+  IfcCrsObservation,
+  IfcMapConversionObservation,
+} from './import/observations.js';
 export { parseWallSpec } from './specs/wallSpec.js';
 export { parseSlabSpec } from './specs/slabSpec.js';
 export { parseBeamSpec } from './specs/beamSpec.js';
@@ -45,7 +53,7 @@ export { deriveIfcGuid, deriveIfcGuidSync } from './identity/guidDerivation.js';
 export { makeLocalIdCounter } from './identity/localId.js';
 export { checkReferentialIntegrity } from './validation/referentialIntegrity.js';
 export { checkSchema } from './validation/schemaCheck.js';
-export { checkRoundTrip } from './validation/roundTrip.js';
+export { checkRoundTrip, observeIfc, compareIfcObservations } from './validation/roundTrip.js';
 export { checkGeometryValidity } from './validation/geometryValidity.js';
 export { checkGherkinRules } from './validation/gherkinChecks.js';
 export { issue, emptyReport, hasErrors, countBySeverity } from './validation/severity.js';
@@ -244,7 +252,7 @@ export type {
   SeverityCounts,
 } from './validation/severity.js';
 export type { ModelGraph, IntegrityInput } from './validation/referentialIntegrity.js';
-export type { RoundTripReport, EntityCounts } from './validation/roundTrip.js';
+export type { RoundTripReport, RoundTripPass, EntityCounts } from './validation/roundTrip.js';
 export type { IfcTypeName, TypeWriteResult } from './ifc-writer/typeWriter.js';
 export type { IfcSchema, IfcSchemaProvenance } from './ifc-writer/schemaVersion.js';
 export type { OwnerHistoryAuthor, OwnerHistoryMeta } from './ifc-writer/ownerHistoryWriter.js';

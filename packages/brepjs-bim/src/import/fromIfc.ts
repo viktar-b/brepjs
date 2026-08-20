@@ -13,6 +13,7 @@ import {
 } from '../validation/severity.js';
 import { SpfReader, type SpfReaderSettings } from './spfReader.js';
 import { readLengthScale } from './placement.js';
+import { collectIfcObservations } from './observations.js';
 import { buildSpatialTree, buildElementContainmentMap, type SpatialNode } from './spatialTree.js';
 import { readBodyGeometry, type GeometryResult } from './geometryRead.js';
 import {
@@ -143,6 +144,7 @@ export async function fromIfc(
     const model: ImportedModel = {
       schema: reader.schema,
       viewDefinition: reader.viewDefinition,
+      observations: collectIfcObservations(reader),
       spatialTree: spatialRoot === null ? null : mapSpatialNode(spatialRoot),
       elements,
       byExpressId,
