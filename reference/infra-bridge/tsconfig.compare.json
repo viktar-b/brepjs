@@ -9,6 +9,7 @@
   },
   "include": [
     "src/**/*.ts",
+    "node/**/*.ts",
     "scripts/**/*.ts",
     "../../examples/infra-bridge/src/**/*.ts",
     "../../examples/infra-bridge/src/**/*.tsx"

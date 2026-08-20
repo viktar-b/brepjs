@@ -86,9 +86,9 @@ export function scoreCandidate(
   candidate: SurfaceObservation
 ): ReferenceHarnessResult<CandidateScore> {
   try {
-    const preparedTarget = prepareSurface(target.comparisonSurface);
+    const preparedTarget = prepareSurface(target.comparisonSurface, 'reference');
     if (!preparedTarget.ok) return preparedTarget;
-    const preparedCandidate = prepareSurface(candidate);
+    const preparedCandidate = prepareSurface(candidate, 'candidate');
     if (!preparedCandidate.ok) return preparedCandidate;
 
     const targetTriangles = triangleGeometry(preparedTarget.value);
@@ -166,17 +166,20 @@ export function scoreCandidate(
     return {
       ok: false,
       error: referenceHarnessError(
-        'INVALID_TOPOLOGY',
-        'Candidate scoring could not evaluate the supplied comparison surface',
-        { cause: cause instanceof Error ? cause.message : String(cause) }
+        'SCORING_FAILURE',
+        'The Reference Harness scorer could not evaluate the prepared comparison surfaces',
+        { source: 'scoring', cause: errorMessage(cause) }
       ),
     };
   }
 }
 
-function prepareSurface(surface: SurfaceObservation): ReferenceHarnessResult<PreparedSurface> {
+function prepareSurface(
+  surface: SurfaceObservation,
+  source: 'reference' | 'candidate'
+): ReferenceHarnessResult<PreparedSurface> {
   if (!hasMillimetreUnit(surface) || surface.vertices.length < 3 || surface.triangles.length < 1) {
-    return invalidSurface('Comparison surface must contain physical-mm triangle geometry');
+    return invalidSurface('Comparison surface must contain physical-mm triangle geometry', source);
   }
   const vertices: ObservationVector[] = [];
   const indexByPoint = new Map<string, number>();
@@ -184,7 +187,7 @@ function prepareSurface(surface: SurfaceObservation): ReferenceHarnessResult<Pre
   for (let sourceIndex = 0; sourceIndex < surface.vertices.length; sourceIndex++) {
     const point = surface.vertices[sourceIndex];
     if (point === undefined || point.some((value) => !Number.isFinite(value))) {
-      return invalidSurface('Comparison surface contains a non-finite vertex');
+      return invalidSurface('Comparison surface contains a non-finite vertex', source);
     }
     const key = point.map((value) => Math.round(value * 1e7)).join(':');
     let weldedIndex = indexByPoint.get(key);
@@ -201,16 +204,22 @@ function prepareSurface(surface: SurfaceObservation): ReferenceHarnessResult<Pre
     const b = sourceToWelded.get(sourceTriangle[1]);
     const c = sourceToWelded.get(sourceTriangle[2]);
     if (a === undefined || b === undefined || c === undefined || new Set([a, b, c]).size !== 3) {
-      return invalidSurface('Comparison surface contains invalid or degenerate triangle indices');
+      return invalidSurface(
+        'Comparison surface contains invalid or degenerate triangle indices',
+        source
+      );
     }
     const triangle: Triangle = [a, b, c];
     if (triangleNormal(vertices, triangle) === null) {
-      return invalidSurface('Comparison surface contains a zero-area triangle');
+      return invalidSurface('Comparison surface contains a zero-area triangle', source);
     }
     triangles.push(triangle);
   }
   if (surface.closed && !isClosedTopology(triangles)) {
-    return invalidSurface('A closed comparison surface must be a two-manifold triangle shell');
+    return invalidSurface(
+      'A closed comparison surface must be a two-manifold triangle shell',
+      source
+    );
   }
   return { ok: true, value: { vertices, triangles, closed: surface.closed } };
 }
@@ -711,9 +720,20 @@ function clean(value: number): number {
   return value;
 }
 
-function invalidSurface(message: string): ReferenceHarnessResult<never> {
+function invalidSurface(
+  message: string,
+  source: 'reference' | 'candidate'
+): ReferenceHarnessResult<never> {
   return {
     ok: false,
-    error: referenceHarnessError('INVALID_TOPOLOGY', message),
+    error: referenceHarnessError('INVALID_TOPOLOGY', message, { source }),
   };
+}
+
+function errorMessage(cause: unknown): string {
+  try {
+    return cause instanceof Error ? cause.message : String(cause);
+  } catch {
+    return 'Unknown scoring failure';
+  }
 }

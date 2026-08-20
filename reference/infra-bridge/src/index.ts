@@ -40,3 +40,15 @@ export {
   type ReferenceInspectionProduct,
 } from './referenceHarness.js';
 export { scoreCandidate, type CandidateScore, type EnvelopeDeltas } from './scoring.js';
+export {
+  compareReconstructionCase,
+  type CandidateOccurrenceObservation,
+  type CompareReconstructionCaseRequest,
+  type FidelityGateId,
+  type FidelityGateEvidence,
+  type ComponentComparisonCase,
+  type ComparisonCaseErrorStage,
+  type ComparisonCaseErrorCode,
+  type ComparisonCaseError,
+  type ComparisonCaseResult,
+} from './comparisonCase.js';

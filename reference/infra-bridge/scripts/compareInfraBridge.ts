@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { isAbsolute, resolve as resolvePath } from 'node:path';
+import { dirname, isAbsolute, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { csg, unwrap, type ShapeMesh } from 'brepjs';
 import {
@@ -25,22 +25,20 @@ import {
 import {
   inspectReference,
   loadReference,
-  scoreCandidate,
-  type CandidateScore,
   type ReconstructionTarget,
   type ReferenceManifest,
   type ReferenceInspectionProduct,
   type ReferenceProductNode,
-  type SurfaceObservation,
 } from '@brepjs/infra-bridge-reference';
+import { compareEvaluatedOccurrence } from '../node/compareEvaluatedOccurrence.js';
+import {
+  collectFreshBatchComparisonEvidence,
+  type ComparisonReportRow,
+} from './comparisonEvidence.js';
 
 interface ComparisonCase {
   readonly targetKey: string;
   readonly candidateKey: string;
-  readonly canonicalAxes?: {
-    readonly x: SignedAxis;
-    readonly z: SignedAxis;
-  };
 }
 
 interface EnvelopeComparison {
@@ -67,9 +65,6 @@ interface SemanticFidelityRow {
   };
   readonly pass: boolean;
 }
-
-type AxisName = 'x' | 'y' | 'z';
-type SignedAxis = AxisName | `-${AxisName}`;
 
 const ifcPath = argumentValue('--ifc');
 if (ifcPath === undefined) throw new Error('Usage: npm run reference:compare -- --ifc <path>');
@@ -125,47 +120,28 @@ try {
 } finally {
   disposeImportedModel(candidateImport);
 }
-const comparisons: readonly ComparisonCase[] = loaded.value.targets.map(({ semanticKey }) => {
-  const canonicalAxes = canonicalAxesFor(semanticKey);
-  return {
-    targetKey: semanticKey,
-    candidateKey: semanticKey,
-    ...(canonicalAxes === undefined ? {} : { canonicalAxes }),
-  };
-});
-const reports = comparisons.map(({ targetKey, candidateKey, canonicalAxes }) => {
-  const target = requiredTarget(targets, targetKey);
-  const referenceScene = scenes.get(targetKey);
-  if (referenceScene === undefined)
-    throw new Error(`Reference scene node is missing: ${targetKey}`);
-  const candidate = resolvedNodes.get(candidateKey);
-  const mesh = evaluated.byKeyPath.get(candidateKey)?.mesh;
-  if (candidate === undefined || mesh === undefined || !mesh.ok) {
-    throw new Error(`Candidate evaluation failed: ${candidateKey}`);
+const comparisons: readonly ComparisonCase[] = loaded.value.targets.map(({ semanticKey }) => ({
+  targetKey: semanticKey,
+  candidateKey: semanticKey,
+}));
+const reports: readonly ComparisonReportRow[] = comparisons.map(({ targetKey, candidateKey }) => {
+  const compared = compareEvaluatedOccurrence({
+    semanticKey: targetKey,
+    targets,
+    referenceScenes: scenes,
+    resolvedNodes,
+    evaluatedNodes: evaluated.byKeyPath,
+  });
+  if (!compared.ok) {
+    throw new Error(`${targetKey}: ${compared.error.code}: ${compared.error.message}`);
   }
-  const expectedFrame = canonicalFrame(referenceScene.worldFrame, canonicalAxes);
-  const canonicalTarget = targetInFrame(target, referenceScene.worldFrame, expectedFrame);
-  const scored = scoreCandidate(canonicalTarget, surfaceFromMesh(mesh.value, candidate.worldFrame));
-  if (!scored.ok) {
-    throw new Error(`${targetKey}: ${scored.error.code}: ${scored.error.message}`);
-  }
-  const controlPointDeltaMm = distance(candidate.worldFrame.origin, expectedFrame.origin);
-  const xAxisDeltaDegrees = angleDegrees(candidate.worldFrame.xAxis, expectedFrame.xAxis);
-  const zAxisDeltaDegrees = angleDegrees(candidate.worldFrame.zAxis, expectedFrame.zAxis);
+  const { frameDeltas, score, pass } = compared.value;
   return {
     targetKey,
     candidateKey,
-    controlPointDeltaMm,
-    xAxisDeltaDegrees,
-    zAxisDeltaDegrees,
-    score: scored.value,
-    pass: gatePass(
-      targetKey,
-      scored.value,
-      controlPointDeltaMm,
-      xAxisDeltaDegrees,
-      zAxisDeltaDegrees
-    ),
+    ...frameDeltas,
+    score,
+    pass,
   };
 });
 
@@ -191,6 +167,17 @@ const report = {
     bridgeEnvelopes.every(({ pass }) => pass) &&
     semanticFidelity.every(({ pass }) => pass),
 };
+const parityEvidencePath = argumentValue('--parity-evidence');
+if (parityEvidencePath !== undefined) {
+  const outputPath = isAbsolute(parityEvidencePath)
+    ? parityEvidencePath
+    : resolvePath(process.cwd(), parityEvidencePath);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(
+    outputPath,
+    `${JSON.stringify(collectFreshBatchComparisonEvidence(reports, manifest.checksum), null, 2)}\n`
+  );
+}
 const reportUrl = new URL('../tmp/comparisonReport.json', import.meta.url);
 await mkdir(new URL('../tmp/', import.meta.url), { recursive: true });
 await writeFile(reportUrl, `${JSON.stringify(report, null, 2)}\n`);
@@ -235,24 +222,6 @@ function argumentValue(flag: string): string | undefined {
   return index < 0 ? undefined : process.argv[index + 1];
 }
 
-function canonicalAxesFor(semanticKey: string): ComparisonCase['canonicalAxes'] {
-  if (semanticKey.endsWith('/bridge-deck')) return { x: 'y', z: 'z' };
-  if (semanticKey.includes('/main-girder-01')) return { x: 'z', z: '-y' };
-  if (semanticKey.includes('/main-girder-')) return { x: 'z', z: 'y' };
-  if (
-    semanticKey.includes('/cross-girder') &&
-    (semanticKey.includes('/pier-01/') || semanticKey.includes('/pier-03/'))
-  ) {
-    return { x: 'z', z: '-y' };
-  }
-  if (semanticKey.includes('/cross-girder')) return { x: 'z', z: 'y' };
-  if (semanticKey.includes('/railing-') || semanticKey.endsWith('/approach-slab')) {
-    return { x: 'y', z: 'z' };
-  }
-  if (semanticKey.includes('/name-sign-')) return { x: 'x', z: 'y' };
-  return undefined;
-}
-
 function isTargetProduct(
   node: unknown
 ): node is ReferenceProductNode & { readonly targetKey: string } {
@@ -273,63 +242,6 @@ function requiredTarget(
   const target = targets.get(semanticKey);
   if (target === undefined) throw new Error(`Reference target is missing: ${semanticKey}`);
   return target;
-}
-
-function surfaceFromMesh(mesh: ShapeMesh, localFrame: Frame): SurfaceObservation {
-  const vertices: [number, number, number][] = [];
-  for (let index = 0; index < mesh.vertices.length; index += 3) {
-    const x = mesh.vertices[index];
-    const y = mesh.vertices[index + 1];
-    const z = mesh.vertices[index + 2];
-    if (x === undefined || y === undefined || z === undefined) {
-      throw new Error('Malformed candidate mesh vertex');
-    }
-    vertices.push(worldToLocal([x, y, z], localFrame));
-  }
-  const triangles: [number, number, number][] = [];
-  for (let index = 0; index < mesh.triangles.length; index += 3) {
-    const a = mesh.triangles[index];
-    const b = mesh.triangles[index + 1];
-    const c = mesh.triangles[index + 2];
-    if (a === undefined || b === undefined || c === undefined) {
-      throw new Error('Malformed candidate mesh index');
-    }
-    triangles.push([a, b, c]);
-  }
-  return { unit: 'millimetre', vertices, triangles, closed: true };
-}
-
-function canonicalFrame(source: Frame, axes: ComparisonCase['canonicalAxes']): Frame {
-  if (axes === undefined) return source;
-  return {
-    origin: source.origin,
-    xAxis: signedAxis(source, axes.x),
-    zAxis: signedAxis(source, axes.z),
-  };
-}
-
-function signedAxis(frame: Frame, signedName: SignedAxis): [number, number, number] {
-  const negative = signedName.startsWith('-');
-  const name = (negative ? signedName.slice(1) : signedName) as AxisName;
-  const yAxis = cross(frame.zAxis, frame.xAxis);
-  const axis = name === 'x' ? frame.xAxis : name === 'y' ? yAxis : frame.zAxis;
-  return negative ? [-axis[0], -axis[1], -axis[2]] : [...axis];
-}
-
-function targetInFrame(
-  target: ReconstructionTarget,
-  sourceFrame: Frame,
-  canonical: Frame
-): ReconstructionTarget {
-  return {
-    ...target,
-    comparisonSurface: {
-      ...target.comparisonSurface,
-      vertices: target.comparisonSurface.vertices.map((point) =>
-        worldToLocal(localToWorld(point, sourceFrame), canonical)
-      ),
-    },
-  };
 }
 
 function localToWorld(
@@ -354,67 +266,11 @@ function indexResolved(root: ResolvedElement): ReadonlyMap<string, ResolvedEleme
   return indexed;
 }
 
-function worldToLocal(
-  point: readonly [number, number, number],
-  frame: Frame
-): [number, number, number] {
-  const offset: [number, number, number] = [
-    point[0] - frame.origin[0],
-    point[1] - frame.origin[1],
-    point[2] - frame.origin[2],
-  ];
-  const yAxis = cross(frame.zAxis, frame.xAxis);
-  return [dot(offset, frame.xAxis), dot(offset, yAxis), dot(offset, frame.zAxis)];
-}
-
-function dot(a: readonly number[], b: readonly number[]): number {
-  return (a[0] ?? 0) * (b[0] ?? 0) + (a[1] ?? 0) * (b[1] ?? 0) + (a[2] ?? 0) * (b[2] ?? 0);
-}
-
 function cross(
   a: readonly [number, number, number],
   b: readonly [number, number, number]
 ): [number, number, number] {
   return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-}
-
-function distance(a: readonly number[], b: readonly number[]): number {
-  return Math.hypot(
-    (a[0] ?? 0) - (b[0] ?? 0),
-    (a[1] ?? 0) - (b[1] ?? 0),
-    (a[2] ?? 0) - (b[2] ?? 0)
-  );
-}
-
-function angleDegrees(a: readonly number[], b: readonly number[]): number {
-  const denominator = Math.hypot(...a) * Math.hypot(...b);
-  if (denominator === 0) return Number.POSITIVE_INFINITY;
-  const cosine = Math.max(-1, Math.min(1, dot(a, b) / denominator));
-  return (Math.acos(cosine) * 180) / Math.PI;
-}
-
-function gatePass(
-  targetKey: string,
-  score: CandidateScore,
-  controlPointDeltaMm: number,
-  xAxisDeltaDegrees: number,
-  zAxisDeltaDegrees: number
-): boolean {
-  const isCurvedProfile =
-    targetKey.includes('/filler-') ||
-    targetKey.includes('/arch-segment-') ||
-    targetKey.includes('/spandrel-wall-');
-  return (
-    controlPointDeltaMm <= 5 &&
-    xAxisDeltaDegrees <= 0.01 &&
-    zAxisDeltaDegrees <= 0.01 &&
-    score.envelope.maximumAbsoluteDeltaMm <= 2 &&
-    score.surfaceDistance.p95Mm <= 25 &&
-    score.surfaceDistance.maximumMm <= 75 &&
-    (!isCurvedProfile || score.normalAgreement.meanCosine >= 0.99) &&
-    score.volume !== undefined &&
-    score.volume.relativeError <= 0.02
-  );
 }
 
 function compareBridgeEnvelopes(

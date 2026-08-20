@@ -64,6 +64,7 @@ describe('source-neutral Reference Harness contracts', () => {
     'UNIT_FAILURE',
     'OPEN_TOPOLOGY',
     'INVALID_TOPOLOGY',
+    'SCORING_FAILURE',
     'CHECKSUM_MISMATCH',
   ] as const)('provides the structured %s error', (code) => {
     expect(referenceHarnessError(code, 'synthetic failure', { referenceKey: 'fixture' })).toEqual({

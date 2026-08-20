@@ -74,8 +74,37 @@ describe('Reference Harness physical-unit candidate scoring', () => {
     };
     expect(scoreCandidate(target(reference), malformed)).toMatchObject({
       ok: false,
-      error: { code: 'INVALID_TOPOLOGY' },
+      error: { code: 'INVALID_TOPOLOGY', context: { source: 'candidate' } },
     });
+  });
+
+  it('identifies malformed Reference topology separately from Candidate topology', () => {
+    const candidate = boxSurface([0, 0, 0], [10, 20, 30]);
+    const malformedReference: SurfaceObservation = {
+      ...candidate,
+      triangles: [[0, 1, 99]],
+    };
+
+    expect(scoreCandidate(target(malformedReference), candidate)).toMatchObject({
+      ok: false,
+      error: { code: 'INVALID_TOPOLOGY', context: { source: 'reference' } },
+    });
+  });
+
+  it('distinguishes an unexpected scorer failure from invalid input topology', () => {
+    const reference = boxSurface([0, 0, 0], [10, 20, 30]);
+    const overflow = overflowSurface();
+
+    const result = scoreCandidate(target(reference), overflow);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'SCORING_FAILURE',
+        context: { source: 'scoring', cause: expect.any(String) },
+      },
+    });
+    expect(JSON.parse(JSON.stringify(result))).toEqual(result);
   });
 
   it('uses voxel IoU for a non-envelope closed solid', () => {
@@ -157,6 +186,20 @@ function tetrahedronSurface(): SurfaceObservation {
       [1, 2, 3],
     ],
     closed: true,
+  };
+}
+
+function overflowSurface(): SurfaceObservation {
+  const magnitude = Number.MAX_VALUE;
+  return {
+    unit: 'millimetre',
+    vertices: [
+      [magnitude, magnitude, 0],
+      [-magnitude, magnitude, 0],
+      [0, -magnitude, 0],
+    ],
+    triangles: [[0, 1, 2]],
+    closed: false,
   };
 }
 

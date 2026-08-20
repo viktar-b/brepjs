@@ -5,6 +5,7 @@ export type ReferenceHarnessErrorCode =
   | 'UNIT_FAILURE'
   | 'OPEN_TOPOLOGY'
   | 'INVALID_TOPOLOGY'
+  | 'SCORING_FAILURE'
   | 'CHECKSUM_MISMATCH';
 
 export type ReferenceHarnessErrorContext = Readonly<Record<string, string | number | boolean>>;
