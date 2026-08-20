@@ -19,7 +19,7 @@ import {
 } from './serializationContext.js';
 
 /** Default MVD ViewDefinition declared in the STEP FILE_DESCRIPTION header. */
-export const DEFAULT_MVD_VIEW_DEFINITION = IFC4X3_ADD2_REFERENCE_VIEW;
+export const DEFAULT_MVD_VIEW_DEFINITION = 'ReferenceView_v1.2';
 
 // web-ifc emits a default ViewDefinition (e.g. "[CoordinationView]") in the STEP
 // FILE_DESCRIPTION; we rewrite whatever is between the brackets with our MVD.
@@ -91,7 +91,7 @@ export class IfcWriter {
   }
 
   static async create(
-    mvdViewDefinition: string = DEFAULT_MVD_VIEW_DEFINITION,
+    mvdViewDefinition: string | undefined = undefined,
     ifcSchema: IfcSchema = DEFAULT_IFC_SCHEMA,
     header: IfcHeaderMeta = {},
     lengthUnit: IfcLengthUnit = 'METRE'
@@ -100,11 +100,14 @@ export class IfcWriter {
       const api = new IfcAPI();
       await initIfcApi(api);
       const modelId = api.CreateModel({ schema: webIfcSchemaString(ifcSchema) });
+      const resolvedViewDefinition =
+        mvdViewDefinition ??
+        (ifcSchema === 'IFC4X3_ADD2' ? IFC4X3_ADD2_REFERENCE_VIEW : DEFAULT_MVD_VIEW_DEFINITION);
       return ok(
         new IfcWriter(
           api,
           modelId,
-          mvdViewDefinition,
+          resolvedViewDefinition,
           header,
           createIfcSerializationContext(lengthUnit)
         )

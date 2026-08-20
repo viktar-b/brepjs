@@ -64,7 +64,7 @@ function stableIfcBytes(bytes: Uint8Array): Uint8Array {
 
 describe('IfcWriter STEP header', () => {
   it('declares exact IFC4X3_ADD2 and Reference View through the runtime', async () => {
-    const created = await IfcWriter.create(IFC4X3_ADD2_REFERENCE_VIEW, 'IFC4X3_ADD2', {});
+    const created = await IfcWriter.create(undefined, 'IFC4X3_ADD2', {});
     if (!created.ok) throw new Error(created.error.message);
     const saved = created.value.save();
     if (!saved.ok) throw new Error(saved.error.message);

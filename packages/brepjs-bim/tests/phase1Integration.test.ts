@@ -107,7 +107,6 @@ describe('Phase 1 integration', () => {
     const result = await toIfcValidated(buildModel(), {
       ...META,
       ifcSchema: 'IFC4X3_ADD2',
-      mvdViewDefinition: IFC4X3_ADD2_REFERENCE_VIEW,
     });
     if (!result.ok) throw new Error(result.error.message);
     expect(hasErrors(result.value.report)).toBe(false);

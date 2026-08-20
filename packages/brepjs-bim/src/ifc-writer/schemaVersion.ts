@@ -20,7 +20,7 @@ export type IfcSchema = (typeof IFC_SCHEMAS)[number];
 export const DEFAULT_IFC_SCHEMA: IfcSchema = 'IFC4';
 
 /** Exact Reference View identifier used by the IFC4X3_ADD2 Bridge lane. */
-export const IFC4X3_ADD2_REFERENCE_VIEW = 'ReferenceView_v1.2';
+export const IFC4X3_ADD2_REFERENCE_VIEW = 'ReferenceView';
 
 /**
  * The FILE_SCHEMA token for the STEP header.

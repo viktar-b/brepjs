@@ -82,10 +82,11 @@ describe('schemaSupports', () => {
 
 describe('IFC4X3_ADD2 Reference View provenance', () => {
   it('accepts only the exact schema and Reference View pair', () => {
+    expect(IFC4X3_ADD2_REFERENCE_VIEW).toBe('ReferenceView');
     expect(
       isIfc4x3Add2ReferenceView({
         schema: 'IFC4X3_ADD2',
-        viewDefinition: IFC4X3_ADD2_REFERENCE_VIEW,
+        viewDefinition: 'ReferenceView',
       })
     ).toBe(true);
     expect(
