@@ -21,6 +21,8 @@ export interface BridgeExportFileSystem {
   readonly mkdtemp: (prefix: string) => Promise<string>;
   readonly writeFile: (path: string, data: Uint8Array) => Promise<void>;
   readonly rename: (from: string, to: string) => Promise<void>;
+  /** Atomically hard-links a staged file only when the target path is absent. */
+  readonly linkFileNoReplace: (from: string, to: string) => Promise<void>;
   readonly unlinkFile: (path: string) => Promise<void>;
   /** Recursively removes only a directory returned by this adapter's mkdtemp call. */
   readonly removeOwnedDirectory: (path: string) => Promise<void>;
@@ -105,115 +107,143 @@ async function commitValidatedBridgeExportTransaction(
   const lock = await fileSystem.acquireExclusiveLock(
     fileSystem.join(input.outputDirectory, '.brepjs-export.lock')
   );
-  try {
-    const stagingDirectory = await fileSystem.mkdtemp(
-      fileSystem.join(input.outputDirectory, '.brepjs-export-')
-    );
-    const stagedIfcPath = fileSystem.join(stagingDirectory, `${input.projectKey}.ifc`);
-    const stagedReportPath = fileSystem.join(stagingDirectory, 'validation-report.json');
-    const previousIfcPath = fileSystem.join(stagingDirectory, 'previous.ifc');
-    const previousReportPath = fileSystem.join(stagingDirectory, 'previous-validation-report.json');
-    let backedUpIfc = false;
-    let backedUpReport = false;
-    let installedIfc = false;
-    let installedReport = false;
-    let preserveStaging = false;
+  const stagingDirectory = await fileSystem.mkdtemp(
+    fileSystem.join(input.outputDirectory, '.brepjs-export-')
+  );
+  const state: ExportTransactionState = {
+    fileSystem,
+    ifcPath,
+    reportPath,
+    stagedIfcPath: fileSystem.join(stagingDirectory, `${input.projectKey}.ifc`),
+    stagedReportPath: fileSystem.join(stagingDirectory, 'validation-report.json'),
+    previousIfcPath: fileSystem.join(stagingDirectory, 'previous.ifc'),
+    previousReportPath: fileSystem.join(stagingDirectory, 'previous-validation-report.json'),
+    backedUpIfc: false,
+    backedUpReport: false,
+    installedIfc: false,
+    installedReport: false,
+  };
+  let preserveStaging = false;
+  let transactionResult: Result<ValidatedBridgeExportResult, BimError>;
 
-    try {
-      await fileSystem.writeFile(stagedIfcPath, ifcBytes);
-      await fileSystem.writeFile(stagedReportPath, reportBytes);
-      const ifcTargetKind = await fileSystem.kind(ifcPath);
-      const reportTargetKind = await fileSystem.kind(reportPath);
-      if (ifcTargetKind === 'other' || reportTargetKind === 'other') {
-        return err(targetNotFileError());
-      }
-      if (ifcTargetKind === 'file') {
-        await fileSystem.rename(ifcPath, previousIfcPath);
-        backedUpIfc = true;
-        if ((await fileSystem.kind(previousIfcPath)) !== 'file') {
-          throw new ExportTargetChangedError();
-        }
-      }
-      if (reportTargetKind === 'file') {
-        await fileSystem.rename(reportPath, previousReportPath);
-        backedUpReport = true;
-        if ((await fileSystem.kind(previousReportPath)) !== 'file') {
-          throw new ExportTargetChangedError();
-        }
-      }
-      if (
-        (await fileSystem.kind(ifcPath)) !== 'missing' ||
-        (await fileSystem.kind(reportPath)) !== 'missing'
-      ) {
+  try {
+    await fileSystem.writeFile(state.stagedIfcPath, ifcBytes);
+    await fileSystem.writeFile(state.stagedReportPath, reportBytes);
+    const ifcTargetKind = await fileSystem.kind(ifcPath);
+    const reportTargetKind = await fileSystem.kind(reportPath);
+    if (ifcTargetKind === 'other' || reportTargetKind === 'other') {
+      throw new ExportTargetChangedError();
+    }
+    if (ifcTargetKind === 'file') {
+      await fileSystem.rename(ifcPath, state.previousIfcPath);
+      state.backedUpIfc = true;
+      if ((await fileSystem.kind(state.previousIfcPath)) !== 'file') {
         throw new ExportTargetChangedError();
       }
-      await fileSystem.rename(stagedIfcPath, ifcPath);
-      installedIfc = true;
-      await fileSystem.rename(stagedReportPath, reportPath);
-      installedReport = true;
-      return ok({ committed: true, exitClassification: 0, ifcPath, reportPath });
-    } catch (cause) {
-      const rollbackFailures = await rollback({
-        fileSystem,
-        ifcPath,
-        reportPath,
-        previousIfcPath,
-        previousReportPath,
-        backedUpIfc,
-        backedUpReport,
-        installedIfc,
-        installedReport,
-      });
-      preserveStaging = rollbackFailures.length > 0;
-      if (cause instanceof ExportTargetChangedError && rollbackFailures.length === 0) {
-        return err(targetNotFileError());
-      }
-      return err(
-        ifcError(
-          'BRIDGE_EXPORT_COMMIT_FAILED',
-          rollbackFailures.length === 0
-            ? 'Could not atomically commit the validated IFC/report pair; prior output was restored'
-            : `Could not commit or fully restore the IFC/report pair: ${rollbackFailures.join('; ')}. Recovery files were preserved at ${stagingDirectory}`,
-          cause
-        )
-      );
-    } finally {
-      if (!preserveStaging) {
-        await fileSystem.removeOwnedDirectory(stagingDirectory).catch(() => undefined);
+    }
+    if (reportTargetKind === 'file') {
+      await fileSystem.rename(reportPath, state.previousReportPath);
+      state.backedUpReport = true;
+      if ((await fileSystem.kind(state.previousReportPath)) !== 'file') {
+        throw new ExportTargetChangedError();
       }
     }
-  } finally {
-    await lock.release();
+    await fileSystem.linkFileNoReplace(state.stagedIfcPath, ifcPath);
+    state.installedIfc = true;
+    await fileSystem.linkFileNoReplace(state.stagedReportPath, reportPath);
+    state.installedReport = true;
+    transactionResult = ok({ committed: true, exitClassification: 0, ifcPath, reportPath });
+  } catch (cause) {
+    const rollbackFailures = await rollback(state);
+    preserveStaging = rollbackFailures.length > 0;
+    transactionResult = transactionError(cause, rollbackFailures, stagingDirectory);
   }
+
+  try {
+    await lock.release();
+  } catch (cause) {
+    const rollbackFailures =
+      transactionResult.ok && transactionResult.value.committed ? await rollback(state) : [];
+    preserveStaging ||= rollbackFailures.length > 0;
+    transactionResult = err(
+      ifcError(
+        'BRIDGE_EXPORT_COMMIT_FAILED',
+        rollbackFailures.length === 0
+          ? 'Could not release the Bridge export lock; the candidate output was rolled back'
+          : `Could not release the Bridge export lock or fully restore the prior pair: ${rollbackFailures.join('; ')}. Recovery files were preserved at ${stagingDirectory}`,
+        cause
+      )
+    );
+  }
+
+  if (!preserveStaging) {
+    await fileSystem.removeOwnedDirectory(stagingDirectory).catch(() => undefined);
+  }
+  return transactionResult;
 }
 
-interface RollbackInput {
+interface ExportTransactionState {
   readonly fileSystem: BridgeExportFileSystem;
   readonly ifcPath: string;
   readonly reportPath: string;
+  readonly stagedIfcPath: string;
+  readonly stagedReportPath: string;
   readonly previousIfcPath: string;
   readonly previousReportPath: string;
-  readonly backedUpIfc: boolean;
-  readonly backedUpReport: boolean;
-  readonly installedIfc: boolean;
-  readonly installedReport: boolean;
+  backedUpIfc: boolean;
+  backedUpReport: boolean;
+  installedIfc: boolean;
+  installedReport: boolean;
 }
 
-async function rollback(input: RollbackInput): Promise<string[]> {
+async function rollback(input: ExportTransactionState): Promise<string[]> {
   const failures: string[] = [];
   if (input.installedReport)
     await attempt(() => input.fileSystem.unlinkFile(input.reportPath), failures);
   if (input.installedIfc) await attempt(() => input.fileSystem.unlinkFile(input.ifcPath), failures);
   if (input.backedUpIfc) {
-    await attempt(() => input.fileSystem.rename(input.previousIfcPath, input.ifcPath), failures);
+    await attempt(
+      () => restoreBackup(input.fileSystem, input.previousIfcPath, input.ifcPath),
+      failures
+    );
   }
   if (input.backedUpReport) {
     await attempt(
-      () => input.fileSystem.rename(input.previousReportPath, input.reportPath),
+      () => restoreBackup(input.fileSystem, input.previousReportPath, input.reportPath),
       failures
     );
   }
   return failures;
+}
+
+async function restoreBackup(
+  fileSystem: BridgeExportFileSystem,
+  backupPath: string,
+  targetPath: string
+): Promise<void> {
+  if ((await fileSystem.kind(targetPath)) !== 'missing') {
+    throw new Error(`Refusing to overwrite a new owner target at ${targetPath}`);
+  }
+  await fileSystem.rename(backupPath, targetPath);
+}
+
+function transactionError(
+  cause: unknown,
+  rollbackFailures: readonly string[],
+  stagingDirectory: string
+): Result<never, BimError> {
+  if (cause instanceof ExportTargetChangedError && rollbackFailures.length === 0) {
+    return err(targetNotFileError());
+  }
+  return err(
+    ifcError(
+      'BRIDGE_EXPORT_COMMIT_FAILED',
+      rollbackFailures.length === 0
+        ? 'Could not atomically commit the validated IFC/report pair; prior output was restored'
+        : `Could not commit or fully restore the IFC/report pair: ${rollbackFailures.join('; ')}. Recovery files were preserved at ${stagingDirectory}`,
+      cause
+    )
+  );
 }
 
 async function attempt(action: () => Promise<void>, failures: string[]): Promise<void> {
