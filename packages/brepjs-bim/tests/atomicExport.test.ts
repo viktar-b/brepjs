@@ -4,6 +4,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   readdir,
   rename,
@@ -11,7 +12,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { unwrap } from 'brepjs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -48,6 +49,30 @@ const NODE_FILE_SYSTEM: BridgeExportFileSystem = {
       }
       throw cause;
     }
+  },
+  acquireExclusiveLock: async (path) => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      try {
+        const handle = await open(path, 'wx');
+        return {
+          release: async () => {
+            await handle.close();
+            await rm(path, { force: true });
+          },
+        };
+      } catch (cause) {
+        if (
+          cause === null ||
+          typeof cause !== 'object' ||
+          !('code' in cause) ||
+          cause.code !== 'EEXIST'
+        ) {
+          throw cause;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+    throw new Error(`Timed out acquiring Bridge export lock at ${path}`);
   },
 };
 
@@ -326,6 +351,33 @@ describe('atomic validated Bridge export', () => {
     await expect(access(outputDirectory)).rejects.toThrow();
   });
 
+  it('treats a full forged passing report without evidence as unavailable', async () => {
+    const outputDirectory = await temporaryOutput();
+    const ifcBytes = new TextEncoder().encode('full forged report candidate');
+    const complete = reportFor(ifcBytes);
+    const firstRequired = complete.gates.find((gate) => gate.required);
+    if (firstRequired === undefined) throw new Error('required Bridge gate missing');
+    const forged = {
+      ...complete,
+      gates: complete.gates.map((gate) =>
+        gate.id === firstRequired.id ? { ...gate, validatorId: null, evidence: [] } : gate
+      ),
+    } as BridgeValidationReport;
+
+    const result = unwrap(
+      await commitValidatedBridgeExport({
+        outputDirectory,
+        projectKey: 'test-bridge',
+        ifcBytes,
+        report: forged,
+        fileSystem: NODE_FILE_SYSTEM,
+      })
+    );
+
+    expect(result).toMatchObject({ committed: false, exitClassification: 2 });
+    await expect(access(outputDirectory)).rejects.toThrow();
+  });
+
   it('hashes and writes one immutable snapshot of caller-owned IFC bytes', async () => {
     const outputDirectory = await temporaryOutput();
     const ifcBytes = new TextEncoder().encode('immutable candidate snapshot');
@@ -412,7 +464,7 @@ describe('atomic validated Bridge export', () => {
     });
     await firstReportRename;
     const second = commitValidatedBridgeExport({
-      outputDirectory,
+      outputDirectory: relative(process.cwd(), outputDirectory),
       projectKey: 'test-bridge',
       ifcBytes: secondBytes,
       report: reportFor(secondBytes),
@@ -426,6 +478,75 @@ describe('atomic validated Bridge export', () => {
       await readFile(join(outputDirectory, 'validation-report.json'), 'utf8')
     ) as BridgeValidationReport;
     expect(createHash('sha256').update(finalIfc).digest('hex')).toBe(finalReport.modelHash.value);
+  });
+
+  it('restores an artifact-shaped directory introduced during staging instead of deleting it', async () => {
+    const outputDirectory = await temporaryOutput();
+    const artifactDirectory = join(outputDirectory, 'test-bridge.ifc');
+    const sentinelPath = join(artifactDirectory, 'user-data.txt');
+    const ifcBytes = new TextEncoder().encode('racing directory candidate');
+    let writes = 0;
+    const racingFileSystem: BridgeExportFileSystem = {
+      ...NODE_FILE_SYSTEM,
+      writeFile: async (path, data) => {
+        writes += 1;
+        await NODE_FILE_SYSTEM.writeFile(path, data);
+        if (writes === 2) {
+          await mkdir(artifactDirectory, { recursive: true });
+          await writeFile(sentinelPath, 'must survive the race');
+        }
+      },
+    };
+
+    const result = await commitValidatedBridgeExport({
+      outputDirectory,
+      projectKey: 'test-bridge',
+      ifcBytes,
+      report: reportFor(ifcBytes),
+      fileSystem: racingFileSystem,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'BRIDGE_EXPORT_TARGET_NOT_FILE' },
+    });
+    expect(await readFile(sentinelPath, 'utf8')).toBe('must survive the race');
+  });
+
+  it('revalidates and restores a target replaced after its regular-file check', async () => {
+    const outputDirectory = await temporaryOutput();
+    const artifactPath = join(outputDirectory, 'test-bridge.ifc');
+    const sentinelPath = join(artifactPath, 'user-data.txt');
+    await mkdir(outputDirectory, { recursive: true });
+    await writeFile(artifactPath, 'checked regular file');
+    const ifcBytes = new TextEncoder().encode('post-check replacement candidate');
+    let replaced = false;
+    const racingFileSystem: BridgeExportFileSystem = {
+      ...NODE_FILE_SYSTEM,
+      rename: async (from, to) => {
+        if (!replaced && from === artifactPath && to.endsWith('previous.ifc')) {
+          replaced = true;
+          await rm(artifactPath, { force: true });
+          await mkdir(artifactPath);
+          await writeFile(sentinelPath, 'must survive post-check replacement');
+        }
+        await NODE_FILE_SYSTEM.rename(from, to);
+      },
+    };
+
+    const result = await commitValidatedBridgeExport({
+      outputDirectory,
+      projectKey: 'test-bridge',
+      ifcBytes,
+      report: reportFor(ifcBytes),
+      fileSystem: racingFileSystem,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'BRIDGE_EXPORT_TARGET_NOT_FILE' },
+    });
+    expect(await readFile(sentinelPath, 'utf8')).toBe('must survive post-check replacement');
   });
 
   it('preserves and reports the recovery directory when restoring a prior file fails', async () => {

@@ -3,10 +3,17 @@ import type { BimError } from '../errors/bimError.js';
 import { ifcError, specError } from '../errors/bimError.js';
 import {
   BRIDGE_VALIDATION_GATES,
+  buildBridgeValidationReport,
+  classifyBridgeValidationExit,
   serializeBridgeValidationReport,
+  type BridgeGateResultInput,
   type BridgeValidationExitClassification,
   type BridgeValidationReport,
 } from './bridgeValidationContract.js';
+
+export interface BridgeExportLock {
+  readonly release: () => Promise<void>;
+}
 
 export interface BridgeExportFileSystem {
   readonly join: (...parts: readonly string[]) => string;
@@ -18,6 +25,8 @@ export interface BridgeExportFileSystem {
   /** Recursively removes only a directory returned by this adapter's mkdtemp call. */
   readonly removeOwnedDirectory: (path: string) => Promise<void>;
   readonly kind: (path: string) => Promise<'missing' | 'file' | 'other'>;
+  /** Waits for an exclusive filesystem lock shared by all exporter processes. */
+  readonly acquireExclusiveLock: (path: string) => Promise<BridgeExportLock>;
 }
 
 export interface ValidatedBridgeExportInput {
@@ -69,38 +78,34 @@ async function commitValidatedBridgeExportTransaction(
     );
   }
 
-  const ifcBytes = Uint8Array.from(input.ifcBytes);
-  const expectedModelHash = input.report.modelHash.value;
-  const reportBytes = new TextEncoder().encode(serializeBridgeValidationReport(input.report));
   const ifcPath = input.fileSystem.join(input.outputDirectory, `${input.projectKey}.ifc`);
   const reportPath = input.fileSystem.join(input.outputDirectory, 'validation-report.json');
-  const exitClassification = classifyCompleteBridgeReport(input.report);
+  const canonicalReport = rebuildCanonicalReport(input.report);
+  const exitClassification =
+    canonicalReport === null ? 2 : classifyBridgeValidationExit(canonicalReport);
   const result = { committed: false, exitClassification, ifcPath, reportPath } as const;
   if (exitClassification !== 0) return ok(result);
+  if (canonicalReport === null) return ok({ ...result, exitClassification: 2 });
 
-  return withDestinationLock(reportPath, async () => {
-    const actualHash = await sha256Hex(ifcBytes);
-    if (actualHash !== expectedModelHash) {
-      return err(
-        ifcError(
-          'BRIDGE_EXPORT_MODEL_HASH_MISMATCH',
-          'Validation report model hash does not match the IFC bytes'
-        )
-      );
-    }
+  const ifcBytes = Uint8Array.from(input.ifcBytes);
+  const expectedModelHash = canonicalReport.modelHash.value;
+  const reportBytes = new TextEncoder().encode(serializeBridgeValidationReport(canonicalReport));
+  const actualHash = await sha256Hex(ifcBytes);
+  if (actualHash !== expectedModelHash) {
+    return err(
+      ifcError(
+        'BRIDGE_EXPORT_MODEL_HASH_MISMATCH',
+        'Validation report model hash does not match the IFC bytes'
+      )
+    );
+  }
 
-    const fileSystem = input.fileSystem;
-    const ifcTargetKind = await fileSystem.kind(ifcPath);
-    const reportTargetKind = await fileSystem.kind(reportPath);
-    if (ifcTargetKind === 'other' || reportTargetKind === 'other') {
-      return err(
-        ifcError(
-          'BRIDGE_EXPORT_TARGET_NOT_FILE',
-          'Bridge export targets may be absent or regular files, but not directories or special files'
-        )
-      );
-    }
-    await fileSystem.mkdir(input.outputDirectory);
+  const fileSystem = input.fileSystem;
+  await fileSystem.mkdir(input.outputDirectory);
+  const lock = await fileSystem.acquireExclusiveLock(
+    fileSystem.join(input.outputDirectory, '.brepjs-export.lock')
+  );
+  try {
     const stagingDirectory = await fileSystem.mkdtemp(
       fileSystem.join(input.outputDirectory, '.brepjs-export-')
     );
@@ -117,13 +122,30 @@ async function commitValidatedBridgeExportTransaction(
     try {
       await fileSystem.writeFile(stagedIfcPath, ifcBytes);
       await fileSystem.writeFile(stagedReportPath, reportBytes);
+      const ifcTargetKind = await fileSystem.kind(ifcPath);
+      const reportTargetKind = await fileSystem.kind(reportPath);
+      if (ifcTargetKind === 'other' || reportTargetKind === 'other') {
+        return err(targetNotFileError());
+      }
       if (ifcTargetKind === 'file') {
         await fileSystem.rename(ifcPath, previousIfcPath);
         backedUpIfc = true;
+        if ((await fileSystem.kind(previousIfcPath)) !== 'file') {
+          throw new ExportTargetChangedError();
+        }
       }
       if (reportTargetKind === 'file') {
         await fileSystem.rename(reportPath, previousReportPath);
         backedUpReport = true;
+        if ((await fileSystem.kind(previousReportPath)) !== 'file') {
+          throw new ExportTargetChangedError();
+        }
+      }
+      if (
+        (await fileSystem.kind(ifcPath)) !== 'missing' ||
+        (await fileSystem.kind(reportPath)) !== 'missing'
+      ) {
+        throw new ExportTargetChangedError();
       }
       await fileSystem.rename(stagedIfcPath, ifcPath);
       installedIfc = true;
@@ -143,6 +165,9 @@ async function commitValidatedBridgeExportTransaction(
         installedReport,
       });
       preserveStaging = rollbackFailures.length > 0;
+      if (cause instanceof ExportTargetChangedError && rollbackFailures.length === 0) {
+        return err(targetNotFileError());
+      }
       return err(
         ifcError(
           'BRIDGE_EXPORT_COMMIT_FAILED',
@@ -157,7 +182,9 @@ async function commitValidatedBridgeExportTransaction(
         await fileSystem.removeOwnedDirectory(stagingDirectory).catch(() => undefined);
       }
     }
-  });
+  } finally {
+    await lock.release();
+  }
 }
 
 interface RollbackInput {
@@ -204,43 +231,41 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function classifyCompleteBridgeReport(
-  report: Pick<BridgeValidationReport, 'gates'>
-): BridgeValidationExitClassification {
-  if (report.gates.length !== BRIDGE_VALIDATION_GATES.length) return 2;
-  let unavailable = false;
-  for (const [index, definition] of BRIDGE_VALIDATION_GATES.entries()) {
-    const gate = report.gates[index];
-    if (
-      gate === undefined ||
-      gate.id !== definition.id ||
-      gate.evidenceLayer !== definition.evidenceLayer ||
-      gate.required !== definition.required
-    ) {
-      return 2;
-    }
-    if (!definition.required) continue;
-    if (gate.status === 'fail') return 1;
-    if (gate.status !== 'pass') unavailable = true;
-  }
-  return unavailable ? 2 : 0;
-}
-
-const destinationLocks = new Map<string, Promise<void>>();
-
-async function withDestinationLock<T>(key: string, action: () => Promise<T>): Promise<T> {
-  const previous = destinationLocks.get(key) ?? Promise.resolve();
-  let release: (() => void) | undefined;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const tail = previous.then(() => current);
-  destinationLocks.set(key, tail);
-  await previous;
+function rebuildCanonicalReport(report: BridgeValidationReport): BridgeValidationReport | null {
   try {
-    return await action();
-  } finally {
-    release?.();
-    if (destinationLocks.get(key) === tail) destinationLocks.delete(key);
+    if (report.gates.length !== BRIDGE_VALIDATION_GATES.length) return null;
+    const gateResults = report.gates.map((gate) => ({
+      gateId: gate.id,
+      status: gate.status,
+      ...(gate.validatorId === null ? {} : { validatorId: gate.validatorId }),
+      ...(gate.status === 'unavailable' && gate.unavailableReason !== null
+        ? { unavailableReason: gate.unavailableReason }
+        : {}),
+      issues: gate.issues,
+      evidence: gate.evidence,
+    })) as BridgeGateResultInput[];
+    const rebuilt = buildBridgeValidationReport({
+      ifcSchema: report.ifc.schema,
+      ifcView: report.ifc.view,
+      modelHash: report.modelHash,
+      validators: report.validators,
+      gateResults,
+    });
+    if (!rebuilt.ok) return null;
+    return serializeBridgeValidationReport(rebuilt.value) ===
+      serializeBridgeValidationReport(report)
+      ? rebuilt.value
+      : null;
+  } catch {
+    return null;
   }
 }
+
+function targetNotFileError(): BimError {
+  return ifcError(
+    'BRIDGE_EXPORT_TARGET_NOT_FILE',
+    'Bridge export targets may be absent or regular files, but not directories, special files, or targets changed during commit'
+  );
+}
+
+class ExportTargetChangedError extends Error {}
