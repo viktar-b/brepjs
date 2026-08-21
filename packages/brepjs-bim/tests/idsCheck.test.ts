@@ -133,7 +133,10 @@ function buildWallModel(withIsExternal: boolean): BimModel {
   return model;
 }
 
-async function buildBridgeIfc(bridgeName = 'Accepted Bridge'): Promise<Uint8Array> {
+async function buildBridgeIfc(
+  bridgeName = 'Accepted Bridge',
+  includeBridgePart = true
+): Promise<Uint8Array> {
   const model = new BimModel();
   const project = unwrap(
     model.init({ name: 'Bridge IDS Project', projectId: 'bridge-ids-project' })
@@ -149,20 +152,22 @@ async function buildBridgeIfc(bridgeName = 'Accepted Bridge'): Promise<Uint8Arra
       predefinedType: 'GIRDER',
     })
   );
-  const part = unwrap(
-    model.addBridgePart({
-      name: 'Bridge Deck',
-      origin: [0, 0, 0],
-      axisX: [1, 0, 0],
-      axisZ: [0, 0, 1],
-      compositionType: 'ELEMENT',
-      usageType: 'LATERAL',
-      predefinedType: 'DECK',
-    })
-  );
   model.aggregate(project, site);
   model.aggregate(site, bridge);
-  model.aggregate(bridge, part);
+  if (includeBridgePart) {
+    const part = unwrap(
+      model.addBridgePart({
+        name: 'Bridge Deck',
+        origin: [0, 0, 0],
+        axisX: [1, 0, 0],
+        axisZ: [0, 0, 1],
+        compositionType: 'ELEMENT',
+        usageType: 'LATERAL',
+        predefinedType: 'DECK',
+      })
+    );
+    model.aggregate(bridge, part);
+  }
   return unwrap(
     await toIfc(model, {
       ...META,
@@ -318,6 +323,27 @@ describe('bim/bridge/v1 baseline and project IDS', () => {
       status: 'fail',
       validatorId: 'brepjs-bim.ids',
       issues: [{ code: 'BRIDGE_BASELINE_IDS_CHECKSUM_MISMATCH' }],
+    });
+    expect(evaluation.gateResults[1]).toMatchObject({
+      gateId: 'ids.project',
+      status: 'pass',
+    });
+  });
+
+  it('fails an unchanged baseline requirement without replacing the separate project result', async () => {
+    const ifcBytes = await buildBridgeIfc('Accepted Bridge', false);
+    const evaluation = unwrap(
+      await evaluateBridgeIds({
+        ifcBytes,
+        baselineIdsXml: BRIDGE_BASELINE_IDS_XML,
+        projectIdsXml: PROJECT_BRIDGE_NAME_IDS,
+      })
+    );
+
+    expect(evaluation.gateResults[0]).toMatchObject({
+      gateId: 'ids.baseline',
+      status: 'fail',
+      issues: [{ code: 'IDS_NOTHING_APPLICABLE' }],
     });
     expect(evaluation.gateResults[1]).toMatchObject({
       gateId: 'ids.project',
