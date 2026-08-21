@@ -4,6 +4,7 @@ import { act, createElement, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
+  ComponentSourceDiagnostic,
   ComparisonDiagnostic,
   OverallDiagnostic,
   WorkbenchCatalog,
@@ -117,7 +118,8 @@ describe('Survey Bench application', () => {
     expect(requests.slice(0, 2)).toEqual(['/api/workbench', '/api/workbench/overall']);
     expect(button('Overall comparison')?.getAttribute('aria-pressed')).toBe('true');
     expect(button('Manifest products')?.getAttribute('aria-pressed')).toBe('false');
-    expect(host.querySelectorAll('.mode-rail__button')).toHaveLength(2);
+    expect(button('Component source')?.getAttribute('aria-pressed')).toBe('false');
+    expect(host.querySelectorAll('.mode-rail__button')).toHaveLength(3);
     expect(labelledControl('Search Semantic Keys')).toBeNull();
     expect(host.textContent).toContain('Candidate model');
     expect(host.querySelectorAll('[data-testid="shared-r3f-canvas"]')).toHaveLength(2);
@@ -143,6 +145,201 @@ describe('Survey Bench application', () => {
     expect(button('Overall comparison')?.getAttribute('aria-pressed')).toBe('false');
     expect(button('Manifest products')?.getAttribute('aria-pressed')).toBe('true');
     expect(host.textContent).toContain('Fidelity evidence');
+  });
+
+  it('inspects the selected Family TSX beside its canonical Candidate on one bright canvas', async () => {
+    const requests: string[] = [];
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = requestUrl(input);
+        requests.push(url);
+        if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        if (url === '/api/workbench/overall') {
+          return Promise.resolve(jsonResponse(success(overallDiagnostic())));
+        }
+        if (url.startsWith('/api/workbench/component-source')) {
+          const key =
+            new URL(url, 'http://workbench.local').searchParams.get('semanticKey') ?? FIRST;
+          return Promise.resolve(jsonResponse(success(componentSourceDiagnostic(key))));
+        }
+        return Promise.resolve(jsonResponse(success(diagnostic())));
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => button('Component source') !== null);
+    act(() => button('Component source')?.click());
+    await waitFor(() => host.querySelector('.component-source-code .shiki') !== null);
+
+    expect(requests.at(-1)).toContain('/api/workbench/component-source?semanticKey=');
+    expect(button('Component source')?.getAttribute('aria-pressed')).toBe('true');
+    expect(host.querySelectorAll('.mode-rail__button')).toHaveLength(3);
+    expect(labelledControl('Search Semantic Keys')).not.toBeNull();
+    expect(host.textContent).toContain('Component source');
+    expect(host.textContent).toContain('ArchSegment');
+    expect(host.textContent).toContain('archSegment.tsx');
+    expect(host.textContent).toContain('READ ONLY · edit in IDE');
+    expect(host.querySelector('.component-source-code pre > code > .line')).not.toBeNull();
+    expect(host.querySelector('.component-source-code [data-line="2"]')).not.toBeNull();
+    expect(host.querySelectorAll('[data-testid="shared-r3f-canvas"]')).toHaveLength(1);
+    expect(host.querySelector('[data-layer-color="#f0ad55"]')).not.toBeNull();
+    expect(host.querySelector('[data-color-scheme="dark"]')).not.toBeNull();
+    expect(host.textContent).toContain('Canonical component-local');
+    expect(host.textContent).not.toContain('Fidelity evidence');
+    expect(button('Candidate x-ray')?.getAttribute('aria-pressed')).toBe('false');
+    expect(button('Candidate edges')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Fit source geometry')?.hasAttribute('aria-pressed')).toBe(false);
+
+    await act(async () => {
+      button('Copy Family source')?.click();
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledWith(
+      'export const ArchSegment = family();\n\n// Candidate geometry'
+    );
+    expect(button('Copy Family source')?.textContent).toContain('Copied');
+
+    act(() => host.querySelector<HTMLButtonElement>(`[data-semantic-key="${SECOND}"]`)?.click());
+    await waitFor(() => host.textContent.includes('bridgeDeck.tsx'));
+    expect(button('Copy Family source')?.textContent).toContain('Copy source');
+    expect(
+      host.querySelector(`[data-semantic-key="${SECOND}"]`)?.getAttribute('aria-current')
+    ).toBe('true');
+
+    act(() => button('Manifest products')?.click());
+    await waitFor(() => host.textContent.includes('Fidelity evidence'));
+    expect(
+      host.querySelector(`[data-semantic-key="${SECOND}"]`)?.getAttribute('aria-current')
+    ).toBe('true');
+    act(() => button('Component source')?.click());
+    await waitFor(() => host.textContent.includes('bridgeDeck.tsx'));
+    expect(
+      host.querySelector(`[data-semantic-key="${SECOND}"]`)?.getAttribute('aria-current')
+    ).toBe('true');
+  });
+
+  it('holds source, selection, scroll, and useful view state through a same-key refresh and mode switch', async () => {
+    const pendingRefresh = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        if (url === '/api/workbench/overall') {
+          return Promise.resolve(jsonResponse(success(overallDiagnostic())));
+        }
+        if (url.startsWith('/api/workbench/component-source')) {
+          if (init?.method === 'POST') return pendingRefresh.promise;
+          return Promise.resolve(jsonResponse(success(componentSourceDiagnostic())));
+        }
+        return Promise.resolve(jsonResponse(success(diagnostic())));
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => button('Component source') !== null);
+    act(() => button('Component source')?.click());
+    await waitFor(() => host.querySelector('.component-source-code') !== null);
+    const codeScroller = host.querySelector<HTMLDivElement>('.component-source-code');
+    const originalCanvas = host.querySelector('[data-testid="shared-r3f-canvas"]');
+    if (codeScroller === null || originalCanvas === null)
+      throw new Error('source bench did not mount');
+    codeScroller.scrollTop = 120;
+    act(() => {
+      codeScroller.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    act(() => button('Top')?.click());
+    act(() => button('Candidate x-ray')?.click());
+
+    act(() => button('Recompute')?.click());
+    expect(host.textContent).toContain('Previous successful source and geometry held');
+    expect(host.querySelector('[data-testid="shared-r3f-canvas"]')).toBe(originalCanvas);
+    expect(button('Candidate x-ray')?.getAttribute('aria-pressed')).toBe('true');
+
+    pendingRefresh.resolve(
+      jsonResponse(success({ ...componentSourceDiagnostic(), revision: 8, durationMs: 101 }))
+    );
+    await waitFor(() => host.textContent.includes('Revision 8'));
+    expect(host.querySelector<HTMLDivElement>('.component-source-code')?.scrollTop).toBe(120);
+    expect(host.querySelector('[data-testid="shared-r3f-canvas"]')).toBe(originalCanvas);
+
+    act(() => button('Manifest products')?.click());
+    await waitFor(() => host.textContent.includes('Fidelity evidence'));
+    act(() => button('Component source')?.click());
+    await waitFor(() => host.querySelector('.component-source-code') !== null);
+    expect(host.querySelector('[data-testid="shared-r3f-canvas"]')?.getAttribute('data-view')).toBe(
+      'top'
+    );
+    expect(host.querySelector<HTMLDivElement>('.component-source-code')?.scrollTop).toBe(120);
+  });
+
+  it('shows structured Component Source failures and retries source plus geometry', async () => {
+    const requests: { readonly url: string; readonly method: string }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        const method = init?.method ?? 'GET';
+        requests.push({ url, method });
+        if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        if (url === '/api/workbench/overall') {
+          return Promise.resolve(jsonResponse(success(overallDiagnostic())));
+        }
+        if (url.startsWith('/api/workbench/component-source') && method === 'POST') {
+          return Promise.resolve(
+            jsonResponse(success({ ...componentSourceDiagnostic(), revision: 8 }))
+          );
+        }
+        if (url.startsWith('/api/workbench/component-source')) {
+          return Promise.resolve(
+            jsonResponse({
+              ok: false,
+              revision: 7,
+              error: {
+                stage: 'source-file',
+                code: 'COMPONENT_SOURCE_READ_FAILED',
+                message: 'The approved Family source could not be read.',
+                context: {
+                  semanticKey: FIRST,
+                  path: 'examples/infra-bridge/src/families/archSegment.tsx',
+                },
+                retryable: true,
+                action: 'Restore the approved TSX file, then retry.',
+              },
+            })
+          );
+        }
+        return Promise.resolve(jsonResponse(success(diagnostic())));
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => button('Component source') !== null);
+    act(() => button('Component source')?.click());
+    await waitFor(() => host.querySelector('.component-source-error') !== null);
+
+    const alert = host.querySelector('.component-source-error');
+    expect(alert?.textContent).toContain('source file');
+    expect(alert?.textContent).toContain('COMPONENT_SOURCE_READ_FAILED');
+    expect(alert?.textContent).toContain('The approved Family source could not be read.');
+    expect(alert?.textContent).toContain('Restore the approved TSX file, then retry.');
+    expect(alert?.textContent).toContain('semanticKey');
+    expect(alert?.textContent).toContain('archSegment.tsx');
+
+    act(() => button('Retry source and geometry')?.click());
+    await waitFor(() => host.textContent.includes('Candidate source and geometry ready'));
+    expect(requests.at(-1)?.method).toBe('POST');
+    expect(host.querySelector('.component-source-error')).toBeNull();
+    expect(host.querySelector('[data-testid="shared-r3f-canvas"]')).not.toBeNull();
   });
 
   it('keeps the complete models visible and exposes an actionable refresh failure', async () => {
@@ -826,6 +1023,28 @@ function overallDiagnostic(options: { readonly revision?: number } = {}): Overal
         vertices: surface.vertices.map(([x, y, z]) => [x + 40, y, z] as const),
       },
     },
+  };
+}
+
+function componentSourceDiagnostic(semanticKey: string = FIRST): ComponentSourceDiagnostic {
+  const bridgeDeck = semanticKey === SECOND;
+  const definitionName = bridgeDeck ? 'BridgeDeck' : 'ArchSegment';
+  const fileName = bridgeDeck ? 'bridgeDeck.tsx' : 'archSegment.tsx';
+  return {
+    semanticKey,
+    revision: 7,
+    durationMs: 94,
+    computedAt: '2026-08-20T08:00:00.000Z',
+    definitionName,
+    coordinateSpace: 'canonical-component-local',
+    source: {
+      fileName,
+      path: `examples/infra-bridge/src/families/${fileName}`,
+      language: 'tsx',
+      text: `export const ${definitionName} = family();\n\n// Candidate geometry`,
+      highlightedHtml: `<pre class="shiki shiki-themes"><code><span class="line" data-line="1">export const ${definitionName}</span>\n<span class="line" data-line="2"></span>\n<span class="line" data-line="3">// Candidate geometry</span></code></pre>`,
+    },
+    candidate: diagnostic().surfaces.candidate,
   };
 }
 

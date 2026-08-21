@@ -105,6 +105,26 @@ export interface OverallDiagnostic {
   };
 }
 
+export interface ComponentSourceFile {
+  readonly fileName: string;
+  /** Server-selected, repo-relative display path. Never accepted as request input. */
+  readonly path: string;
+  readonly language: 'tsx';
+  readonly text: string;
+  readonly highlightedHtml: string;
+}
+
+export interface ComponentSourceDiagnostic {
+  readonly semanticKey: string;
+  readonly revision: number;
+  readonly durationMs: number;
+  readonly computedAt: string;
+  readonly definitionName: string;
+  readonly coordinateSpace: 'canonical-component-local';
+  readonly source: ComponentSourceFile;
+  readonly candidate: DiagnosticSurface;
+}
+
 export interface WorkbenchProduct {
   readonly semanticKey: string;
   readonly group: string;
@@ -130,6 +150,7 @@ export type WorkbenchErrorStage =
   | 'checksum'
   | 'reference-decode'
   | 'authored-evaluation'
+  | 'source-file'
   | 'topology'
   | 'scoring';
 
@@ -158,6 +179,8 @@ export const WORKBENCH_API = {
   overallRefresh: '/api/workbench/overall/refresh',
   comparison: '/api/workbench/comparison',
   refresh: '/api/workbench/refresh',
+  componentSource: '/api/workbench/component-source',
+  componentSourceRefresh: '/api/workbench/component-source/refresh',
 } as const;
 
 export const SOURCE_INVALIDATED_EVENT = 'infra-workbench:source-invalidated';

@@ -25,14 +25,17 @@ import type {
 } from './uiState.js';
 
 export interface WorkbenchViewportProps {
-  readonly diagnostic: ComparisonDiagnostic | undefined;
+  readonly diagnostic: ViewportDiagnostic | undefined;
   readonly error: WorkbenchDiagnosticError | undefined;
   readonly busy: boolean;
   readonly theme: WorkbenchTheme;
   readonly ui: WorkbenchUiState;
   readonly dispatch: Dispatch<WorkbenchUiAction>;
   readonly onRetry: (() => void) | undefined;
+  readonly variant?: 'comparison' | 'candidate' | undefined;
 }
+
+export type ViewportDiagnostic = Pick<ComparisonDiagnostic, 'semanticKey' | 'surfaces'>;
 
 const REFERENCE_COLOR = '#61d7f4';
 const CANDIDATE_COLOR = '#f0ad55';
@@ -48,16 +51,26 @@ export function WorkbenchViewport({
   ui,
   dispatch,
   onRetry,
+  variant = 'comparison',
 }: WorkbenchViewportProps) {
+  const candidateOnly = variant === 'candidate';
   return (
-    <section className="viewport-pane" aria-label="Canonical comparison viewport">
+    <section
+      className={`viewport-pane${candidateOnly ? ' viewport-pane--candidate' : ''}`}
+      aria-label={candidateOnly ? 'Evaluated Candidate geometry' : 'Canonical comparison viewport'}
+    >
       <div className="viewport-stage">
         {diagnostic === undefined && error !== undefined ? (
           <ViewportFailure error={error} onRetry={onRetry} />
         ) : diagnostic === undefined ? (
           <ViewportLoading />
         ) : (
-          <DiagnosticCanvas diagnostic={diagnostic} theme={theme} ui={ui} />
+          <DiagnosticCanvas
+            diagnostic={diagnostic}
+            theme={theme}
+            ui={ui}
+            candidateOnly={candidateOnly}
+          />
         )}
         {busy && diagnostic !== undefined && (
           <div className="recompute-scrim" role="status" aria-live="polite">
@@ -66,7 +79,7 @@ export function WorkbenchViewport({
           </div>
         )}
       </div>
-      <ViewportControls ui={ui} dispatch={dispatch} />
+      <ViewportControls ui={ui} dispatch={dispatch} candidateOnly={candidateOnly} />
     </section>
   );
 }
@@ -74,9 +87,11 @@ export function WorkbenchViewport({
 function ViewportControls({
   ui,
   dispatch,
+  candidateOnly,
 }: {
   ui: WorkbenchUiState;
   dispatch: Dispatch<WorkbenchUiAction>;
+  candidateOnly: boolean;
 }) {
   return (
     <details className="viewport-controls" open>
@@ -85,21 +100,23 @@ function ViewportControls({
         <span>{ui.presetIsCustomized ? 'Custom view' : ui.activePreset}</span>
       </summary>
       <div className="viewport-controls__body">
-        <div className="mode-switcher" role="group" aria-label="Comparison mode">
-          {PRESETS.map((preset) => (
-            <ControlButton
-              key={preset}
-              label={titleCase(preset)}
-              active={ui.activePreset === preset && !ui.presetIsCustomized}
-              onClick={() => {
-                dispatch({ type: 'apply-preset', preset });
-              }}
-            />
-          ))}
-        </div>
+        {!candidateOnly && (
+          <div className="mode-switcher" role="group" aria-label="Comparison mode">
+            {PRESETS.map((preset) => (
+              <ControlButton
+                key={preset}
+                label={titleCase(preset)}
+                active={ui.activePreset === preset && !ui.presetIsCustomized}
+                onClick={() => {
+                  dispatch({ type: 'apply-preset', preset });
+                }}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="layer-controls" aria-label="Layer controls">
-          <LayerRow layer="reference" ui={ui} dispatch={dispatch} />
+          {!candidateOnly && <LayerRow layer="reference" ui={ui} dispatch={dispatch} />}
           <LayerRow layer="candidate" ui={ui} dispatch={dispatch} />
         </div>
 
@@ -128,7 +145,8 @@ function ViewportControls({
             }}
           />
           <ControlButton
-            label="Fit"
+            label={candidateOnly ? 'Fit source geometry' : 'Fit'}
+            shortLabel="Fit"
             onClick={() => {
               dispatch({ type: 'request-fit' });
             }}
@@ -204,10 +222,12 @@ function DiagnosticCanvas({
   diagnostic,
   theme,
   ui,
+  candidateOnly,
 }: {
-  diagnostic: ComparisonDiagnostic;
+  diagnostic: ViewportDiagnostic;
   theme: WorkbenchTheme;
   ui: WorkbenchUiState;
+  candidateOnly: boolean;
 }) {
   const referenceCache = useRef(new Map<string, MeshData>());
   const referenceData = useMemo(() => {
@@ -240,7 +260,7 @@ function DiagnosticCanvas({
   >(undefined);
   const framingData = useMemo(() => {
     const cached = framingCache.current;
-    const visibilityKey = `${ui.layers.reference.visible ? 'reference' : ''}|${
+    const visibilityKey = `${!candidateOnly && ui.layers.reference.visible ? 'reference' : ''}|${
       ui.layers.candidate.visible ? 'candidate' : ''
     }`;
     if (
@@ -252,7 +272,7 @@ function DiagnosticCanvas({
       return cached.data;
     }
     const visible = [
-      ...(ui.layers.reference.visible ? [referenceData] : []),
+      ...(!candidateOnly && ui.layers.reference.visible ? [referenceData] : []),
       ...(ui.layers.candidate.visible ? [candidateData] : []),
     ];
     const data = mergeMeshData(visible.length > 0 ? visible : [referenceData, candidateData]);
@@ -270,6 +290,7 @@ function DiagnosticCanvas({
     ui.camera.fitRequest,
     ui.layers.candidate.visible,
     ui.layers.reference.visible,
+    candidateOnly,
   ]);
   const clippingPlanes = useMemo(() => {
     if (!ui.section.enabled) return undefined;
@@ -321,14 +342,14 @@ function DiagnosticCanvas({
             infiniteGrid
           />
         )}
-        {ui.layers.reference.visible && (
+        {!candidateOnly && ui.layers.reference.visible && (
           <Renderer
             data={referenceData}
             viewMode={ui.layers.reference.xray ? 'xray' : 'solid'}
             {...clippingProps}
           />
         )}
-        {ui.layers.reference.visible && ui.layers.reference.edges && (
+        {!candidateOnly && ui.layers.reference.visible && ui.layers.reference.edges && (
           <EdgeRenderer edges={referenceData.edges} {...clippingProps} />
         )}
         {ui.layers.candidate.visible && (

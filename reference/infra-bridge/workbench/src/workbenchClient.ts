@@ -1,5 +1,6 @@
 import {
   WORKBENCH_API,
+  type ComponentSourceDiagnostic,
   type ComparisonDiagnostic,
   type DiagnosticContextValue,
   type DiagnosticSurface,
@@ -28,6 +29,12 @@ export interface WorkbenchClient {
   refreshComparison(
     semanticKey: string
   ): Promise<WorkbenchResult<ComparisonDiagnostic> | undefined>;
+  loadComponentSource(
+    semanticKey: string
+  ): Promise<WorkbenchResult<ComponentSourceDiagnostic> | undefined>;
+  refreshComponentSource(
+    semanticKey: string
+  ): Promise<WorkbenchResult<ComponentSourceDiagnostic> | undefined>;
   cancelActive(): void;
   getRequestState(): WorkbenchClientRequestState;
 }
@@ -166,6 +173,20 @@ export function createWorkbenchClient(options: WorkbenchClientOptions = {}): Wor
         withSemanticKey(WORKBENCH_API.refresh, semanticKey),
         'POST',
         readComparisonDiagnostic,
+        semanticKey
+      ),
+    loadComponentSource: (semanticKey) =>
+      request(
+        withSemanticKey(WORKBENCH_API.componentSource, semanticKey),
+        'GET',
+        readComponentSourceDiagnostic,
+        semanticKey
+      ),
+    refreshComponentSource: (semanticKey) =>
+      request(
+        withSemanticKey(WORKBENCH_API.componentSourceRefresh, semanticKey),
+        'POST',
+        readComponentSourceDiagnostic,
         semanticKey
       ),
     cancelActive: () => {
@@ -323,6 +344,71 @@ function readComparisonDiagnostic(
   envelopeRevision: number
 ): ComparisonDiagnostic | undefined {
   return isComparisonDiagnostic(value) && value.revision === envelopeRevision ? value : undefined;
+}
+
+function readComponentSourceDiagnostic(
+  value: unknown,
+  envelopeRevision: number
+): ComponentSourceDiagnostic | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value['semanticKey'] !== 'string' ||
+    value['revision'] !== envelopeRevision ||
+    !isRevision(value['revision']) ||
+    !isFiniteNumber(value['durationMs']) ||
+    typeof value['computedAt'] !== 'string' ||
+    typeof value['definitionName'] !== 'string' ||
+    value['coordinateSpace'] !== 'canonical-component-local' ||
+    !isRecord(value['source']) ||
+    !isDiagnosticSurface(value['candidate'])
+  ) {
+    return undefined;
+  }
+  const source = value['source'];
+  const fileName = source['fileName'];
+  const path = source['path'];
+  const language = source['language'];
+  const text = source['text'];
+  const highlightedHtml = source['highlightedHtml'];
+  if (
+    typeof fileName !== 'string' ||
+    !/^[A-Za-z]+\.tsx$/u.test(fileName) ||
+    typeof path !== 'string' ||
+    !isComponentSourcePath(path) ||
+    !path.endsWith(`/${fileName}`) ||
+    language !== 'tsx' ||
+    typeof text !== 'string' ||
+    typeof highlightedHtml !== 'string' ||
+    !isShikiHtml(highlightedHtml)
+  ) {
+    return undefined;
+  }
+  return {
+    semanticKey: value['semanticKey'],
+    revision: value['revision'],
+    durationMs: value['durationMs'],
+    computedAt: value['computedAt'],
+    definitionName: value['definitionName'],
+    coordinateSpace: 'canonical-component-local',
+    source: { fileName, path, language, text, highlightedHtml },
+    candidate: value['candidate'],
+  };
+}
+
+function isShikiHtml(value: string): boolean {
+  return (
+    /^<pre\b[^>]*class="[^"]*\bshiki\b[^"]*"[^>]*><code>/u.test(value) &&
+    value.endsWith('</code></pre>') &&
+    !/<(?:script|iframe|object|embed)\b/iu.test(value) &&
+    !/\son[a-z]+\s*=/iu.test(value) &&
+    !/javascript\s*:/iu.test(value)
+  );
+}
+
+function isComponentSourcePath(value: string): boolean {
+  return (
+    /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.tsx$/u.test(value) && !value.split('/').includes('..')
+  );
 }
 
 function isComparisonDiagnostic(value: unknown): value is ComparisonDiagnostic {
@@ -571,6 +657,7 @@ function isWorkbenchErrorStage(value: unknown): value is WorkbenchErrorStage {
     value === 'checksum' ||
     value === 'reference-decode' ||
     value === 'authored-evaluation' ||
+    value === 'source-file' ||
     value === 'topology' ||
     value === 'scoring'
   );

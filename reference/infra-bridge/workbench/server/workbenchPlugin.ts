@@ -134,6 +134,31 @@ async function handleApiRequest(
     return;
   }
 
+  if (url.pathname === WORKBENCH_API.componentSource) {
+    if (request.method !== 'GET') {
+      await writeMethodNotAllowed(runtime, response, 'GET');
+      return;
+    }
+    const semanticKey = await readSemanticKey(runtime, url, response);
+    if (semanticKey === undefined) return;
+    const result = await runtime.componentSource(semanticKey);
+    writeJson(response, statusFor(result), result);
+    return;
+  }
+
+  if (url.pathname === WORKBENCH_API.componentSourceRefresh) {
+    if (request.method !== 'POST') {
+      await writeMethodNotAllowed(runtime, response, 'POST');
+      return;
+    }
+    const semanticKey = await readSemanticKey(runtime, url, response);
+    if (semanticKey === undefined) return;
+    invalidateSsrAuthoredModules(server);
+    const result = await runtime.refreshComponentSource(semanticKey);
+    writeJson(response, statusFor(result), result);
+    return;
+  }
+
   if (url.pathname === WORKBENCH_API.comparison) {
     if (request.method !== 'GET') {
       await writeMethodNotAllowed(runtime, response, 'GET');
@@ -169,7 +194,7 @@ async function handleApiRequest(
       message: 'The requested workbench API route does not exist',
       context: { path: url.pathname },
       retryable: false,
-      action: 'Use the catalog, overall, comparison, or refresh workbench route',
+      action: 'Use a catalog, overall, comparison, Component Source, or refresh route',
     })
   );
 }

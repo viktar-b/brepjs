@@ -7,6 +7,8 @@ const FORBIDDEN_PACKAGE_ROOTS = [
   'brepjs',
   'brepjs-bim',
   'brepjs-families',
+  'shiki',
+  '@shikijs',
 ] as const;
 
 const FORBIDDEN_REPOSITORY_ROOTS = [

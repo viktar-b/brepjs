@@ -9,6 +9,7 @@ import {
 } from 'react';
 import {
   SOURCE_INVALIDATED_EVENT,
+  type ComponentSourceDiagnostic,
   type ComparisonDiagnostic,
   type OverallDiagnostic,
   type SourceInvalidatedPayload,
@@ -16,6 +17,7 @@ import {
   type WorkbenchDiagnosticError,
 } from '../shared/protocol.js';
 import { EvidenceLedger } from './EvidenceLedger.js';
+import { ComponentSourceBench } from './ComponentSourceBench.js';
 import { ModeRail, type WorkbenchMode } from './ModeRail.js';
 import { OverallComparison } from './OverallComparison.js';
 import { ProductRail } from './ProductRail.js';
@@ -50,20 +52,32 @@ export function App() {
   const [catalogError, setCatalogError] = useState<WorkbenchDiagnosticError>();
   const [diagnostic, setDiagnostic] = useState<ComparisonDiagnostic>();
   const [overallDiagnostic, setOverallDiagnostic] = useState<OverallDiagnostic>();
+  const [sourceDiagnostic, setSourceDiagnostic] = useState<ComponentSourceDiagnostic>();
   const [comparisonError, setComparisonError] = useState<WorkbenchDiagnosticError>();
   const [overallError, setOverallError] = useState<WorkbenchDiagnosticError>();
+  const [sourceError, setSourceError] = useState<WorkbenchDiagnosticError>();
   const [comparisonRevision, setComparisonRevision] = useState<number>();
   const [overallRevision, setOverallRevision] = useState<number>();
+  const [sourceRevision, setSourceRevision] = useState<number>();
   const [phase, setPhase] = useState<RequestPhase>('catalog');
   const [query, setQuery] = useState('');
+  const [sourceScrollTop, setSourceScrollTop] = useState(0);
   const [watcherState, setWatcherState] = useState<'watching' | 'changed'>('watching');
   const [ui, dispatch] = useReducer(workbenchUiReducer, null, () =>
     createInitialWorkbenchUiState()
+  );
+  const [sourceUi, sourceDispatch] = useReducer(workbenchUiReducer, null, () =>
+    workbenchUiReducer(createInitialWorkbenchUiState(), {
+      type: 'apply-preset',
+      preset: 'candidate',
+    })
   );
   const diagnosticRef = useRef<ComparisonDiagnostic | undefined>(undefined);
   diagnosticRef.current = diagnostic;
   const overallDiagnosticRef = useRef<OverallDiagnostic | undefined>(undefined);
   overallDiagnosticRef.current = overallDiagnostic;
+  const sourceDiagnosticRef = useRef<ComponentSourceDiagnostic | undefined>(undefined);
+  sourceDiagnosticRef.current = sourceDiagnostic;
   const selectedKeyRef = useRef<string | null>(ui.selectedSemanticKey);
   selectedKeyRef.current = ui.selectedSemanticKey;
   const modeRef = useRef<WorkbenchMode>(mode);
@@ -97,6 +111,7 @@ export function App() {
     setCatalog(result.value);
     const firstKey = result.value.products[0]?.semanticKey ?? null;
     dispatch({ type: 'select', semanticKey: firstKey });
+    sourceDispatch({ type: 'select', semanticKey: firstKey });
   }, [client]);
 
   const requestComparison = useCallback(
@@ -155,6 +170,38 @@ export function App() {
     [client]
   );
 
+  const requestComponentSource = useCallback(
+    async (semanticKey: string, kind: 'load' | 'refresh' | 'source-change') => {
+      const keepPrevious = sourceDiagnosticRef.current?.semanticKey === semanticKey;
+      setPhase(kind === 'load' && !keepPrevious ? 'comparison' : 'recompute');
+      setSourceError(undefined);
+      if (!keepPrevious) setSourceDiagnostic(undefined);
+
+      const result =
+        kind === 'refresh'
+          ? await client.refreshComponentSource(semanticKey)
+          : await client.loadComponentSource(semanticKey);
+      if (
+        result === undefined ||
+        modeRef.current !== 'source' ||
+        selectedKeyRef.current !== semanticKey
+      ) {
+        return;
+      }
+      setSourceRevision(result.revision);
+      if (!result.ok) {
+        setSourceError(result.error);
+        setPhase('error');
+        return;
+      }
+      setSourceDiagnostic(result.value);
+      setSourceError(undefined);
+      setPhase('ready');
+      setWatcherState('watching');
+    },
+    [client]
+  );
+
   useEffect(() => {
     void loadCatalog();
     return () => {
@@ -174,6 +221,12 @@ export function App() {
   }, [catalog, mode, requestOverall]);
 
   useEffect(() => {
+    const semanticKey = ui.selectedSemanticKey;
+    if (mode !== 'source' || catalog === undefined || semanticKey === null) return;
+    void requestComponentSource(semanticKey, 'load');
+  }, [catalog, mode, requestComponentSource, ui.selectedSemanticKey]);
+
+  useEffect(() => {
     const active = diagnostic;
     if (active === undefined || active.semanticKey !== ui.selectedSemanticKey) return;
     const [minimumMm, maximumMm] = combinedSurfaceRange(active, ui.section.axis);
@@ -191,21 +244,31 @@ export function App() {
         return;
       }
       const semanticKey = selectedKeyRef.current;
-      if (semanticKey !== null) void requestComparison(semanticKey, 'source-change');
+      if (semanticKey === null) return;
+      if (modeRef.current === 'source') {
+        void requestComponentSource(semanticKey, 'source-change');
+      } else {
+        void requestComparison(semanticKey, 'source-change');
+      }
     };
     hot.on(SOURCE_INVALIDATED_EVENT, handleInvalidation);
     return () => {
       hot.off?.(SOURCE_INVALIDATED_EVENT, handleInvalidation);
     };
-  }, [requestComparison, requestOverall]);
+  }, [requestComparison, requestComponentSource, requestOverall]);
 
   const handleSelect = (semanticKey: string) => {
     if (semanticKey !== ui.selectedSemanticKey) {
       setComparisonError(undefined);
       setDiagnostic(undefined);
       setComparisonRevision(undefined);
+      setSourceError(undefined);
+      setSourceDiagnostic(undefined);
+      setSourceRevision(undefined);
+      setSourceScrollTop(0);
     }
     dispatch({ type: 'select', semanticKey });
+    sourceDispatch({ type: 'select', semanticKey });
   };
 
   const handleModeChange = (nextMode: WorkbenchMode) => {
@@ -251,18 +314,36 @@ export function App() {
       : undefined;
   const retryOverall =
     overallError?.retryable === true ? () => void requestOverall('refresh') : undefined;
-  const activeDiagnostic = mode === 'overall' ? overallDiagnostic : selectedDiagnostic;
-  const activeError = mode === 'overall' ? overallError : comparisonError;
+  const selectedSourceDiagnostic =
+    sourceDiagnostic?.semanticKey === selectedKey ? sourceDiagnostic : undefined;
+  const previousSource =
+    selectedSourceDiagnostic !== undefined && (phase === 'recompute' || sourceError !== undefined);
+  const retrySource =
+    sourceError?.retryable === true
+      ? () => void requestComponentSource(selectedKey, 'refresh')
+      : undefined;
+  const activeDiagnostic =
+    mode === 'overall'
+      ? overallDiagnostic
+      : mode === 'source'
+        ? selectedSourceDiagnostic
+        : selectedDiagnostic;
+  const activeError =
+    mode === 'overall' ? overallError : mode === 'source' ? sourceError : comparisonError;
   const activeRevision =
     mode === 'overall'
       ? (overallRevision ?? overallDiagnostic?.revision ?? catalog.sourceRevision)
-      : footerRevision;
+      : mode === 'source'
+        ? (sourceRevision ?? selectedSourceDiagnostic?.revision ?? catalog.sourceRevision)
+        : footerRevision;
   const recompute =
-    busy || (mode === 'products' && selectedKey.length === 0)
+    busy || (mode !== 'overall' && selectedKey.length === 0)
       ? undefined
       : mode === 'overall'
         ? () => void requestOverall('refresh')
-        : () => void requestComparison(selectedKey, 'refresh');
+        : mode === 'source'
+          ? () => void requestComponentSource(selectedKey, 'refresh')
+          : () => void requestComparison(selectedKey, 'refresh');
 
   return (
     <main className="workbench-shell" data-theme={theme}>
@@ -285,6 +366,24 @@ export function App() {
             busy={busy}
             theme={theme}
             onRetry={retryOverall}
+          />
+        ) : mode === 'source' ? (
+          <ComponentSourceBench
+            products={catalog.products}
+            selectedKey={selectedKey}
+            query={query}
+            diagnostic={selectedSourceDiagnostic}
+            error={sourceError}
+            busy={busy}
+            previous={previousSource}
+            theme={theme}
+            ui={sourceUi}
+            dispatch={sourceDispatch}
+            sourceScrollTop={sourceScrollTop}
+            onSourceScroll={setSourceScrollTop}
+            onQueryChange={setQuery}
+            onSelect={handleSelect}
+            onRetry={retrySource}
           />
         ) : (
           <div className="survey-workspace">
@@ -337,7 +436,9 @@ export function App() {
             {activeDiagnostic === undefined
               ? mode === 'overall'
                 ? 'Awaiting models'
-                : 'Awaiting score'
+                : mode === 'source'
+                  ? 'Awaiting source'
+                  : 'Awaiting score'
               : `${activeDiagnostic.durationMs.toLocaleString('en-US')} ms`}
           </span>
           <span title={catalog.reference.expectedChecksum}>
@@ -534,7 +635,7 @@ function StatusSummary({
   mode,
 }: {
   phase: RequestPhase;
-  diagnostic: ComparisonDiagnostic | OverallDiagnostic | undefined;
+  diagnostic: ComparisonDiagnostic | OverallDiagnostic | ComponentSourceDiagnostic | undefined;
   error: WorkbenchDiagnosticError | undefined;
   mode: WorkbenchMode;
 }) {
@@ -552,10 +653,14 @@ function StatusSummary({
         {phase === 'recompute'
           ? mode === 'overall'
             ? 'Recomputing complete models'
-            : 'Recomputing selected comparison'
+            : mode === 'source'
+              ? 'Refreshing source and geometry'
+              : 'Recomputing selected comparison'
           : mode === 'overall'
             ? 'Assembling complete models'
-            : 'Evaluating selected Occurrence'}
+            : mode === 'source'
+              ? 'Loading Family source and Candidate'
+              : 'Evaluating selected Occurrence'}
       </span>
     );
   }
@@ -564,6 +669,16 @@ function StatusSummary({
       <span className="footer-state footer-state--ready">
         <i aria-hidden="true" />
         {diagnostic === undefined ? 'Workbench ready' : 'Complete models ready for inspection'}
+      </span>
+    );
+  }
+  if (mode === 'source') {
+    return (
+      <span className="footer-state footer-state--ready">
+        <i aria-hidden="true" />
+        {diagnostic === undefined
+          ? 'Component Source ready'
+          : 'Candidate source and geometry ready'}
       </span>
     );
   }
@@ -605,13 +720,14 @@ function stageLabel(stage: WorkbenchDiagnosticError['stage']): string {
     checksum: 'Checksum',
     'reference-decode': 'Reference decode',
     'authored-evaluation': 'Authored evaluation',
+    'source-file': 'Source file',
     topology: 'Topology',
     scoring: 'Scoring',
   }[stage];
 }
 
 function referenceVerification(
-  diagnostic: ComparisonDiagnostic | OverallDiagnostic | undefined,
+  diagnostic: ComparisonDiagnostic | OverallDiagnostic | ComponentSourceDiagnostic | undefined,
   error: WorkbenchDiagnosticError | undefined
 ): ReferenceVerification {
   if (
@@ -624,6 +740,7 @@ function referenceVerification(
   if (
     diagnostic !== undefined ||
     error?.stage === 'authored-evaluation' ||
+    error?.stage === 'source-file' ||
     error?.stage === 'topology' ||
     error?.stage === 'scoring'
   ) {

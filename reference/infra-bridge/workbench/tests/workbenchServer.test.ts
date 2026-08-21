@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   SOURCE_INVALIDATED_EVENT,
   WORKBENCH_API,
+  type ComponentSourceDiagnostic,
   type ComparisonDiagnostic,
   type OverallDiagnostic,
   type SourceInvalidatedPayload,
@@ -108,7 +109,34 @@ describe('programmatic workbench server', () => {
         value: { semanticKey: KEY },
       });
       expect(harness.refreshes).toEqual([KEY]);
-      expect(invalidateGraph).toHaveBeenCalledTimes(2);
+
+      const source = await fetch(
+        new URL(
+          `${WORKBENCH_API.componentSource}?semanticKey=${encodeURIComponent(KEY)}`,
+          started.url
+        )
+      );
+      expect(source.status).toBe(200);
+      await expect(source.json()).resolves.toMatchObject({
+        ok: true,
+        revision: 6,
+        value: { semanticKey: KEY, definitionName: 'BridgeDeck' },
+      });
+
+      const sourceRefresh = await fetch(
+        new URL(
+          `${WORKBENCH_API.componentSourceRefresh}?semanticKey=${encodeURIComponent(KEY)}`,
+          started.url
+        ),
+        { method: 'POST' }
+      );
+      expect(sourceRefresh.status).toBe(200);
+      await expect(sourceRefresh.json()).resolves.toMatchObject({
+        ok: true,
+        revision: 7,
+        value: { semanticKey: KEY, definitionName: 'BridgeDeck' },
+      });
+      expect(invalidateGraph).toHaveBeenCalledTimes(3);
 
       const firstClose = started.close();
       const concurrentClose = started.close();
@@ -510,6 +538,14 @@ function runtimeHarness(): {
       revision += 1;
       return Promise.resolve(comparisonResult(semanticKey, revision));
     },
+    componentSource(semanticKey) {
+      return Promise.resolve(componentSourceResult(semanticKey, revision));
+    },
+    refreshComponentSource(semanticKey) {
+      refreshes.push(semanticKey);
+      revision += 1;
+      return Promise.resolve(componentSourceResult(semanticKey, revision));
+    },
     invalidateSource() {
       invalidations += 1;
       revision += 1;
@@ -684,6 +720,34 @@ function comparisonResult(
       },
       gates: [],
       pass: true,
+    },
+  };
+}
+
+function componentSourceResult(
+  semanticKey: string,
+  revision: number
+): WorkbenchResult<ComponentSourceDiagnostic> {
+  const comparison = comparisonResult(semanticKey, revision);
+  if (!comparison.ok) return comparison;
+  return {
+    ok: true,
+    revision,
+    value: {
+      semanticKey,
+      revision,
+      durationMs: 4,
+      computedAt: '2026-08-20T08:00:00.000Z',
+      definitionName: 'BridgeDeck',
+      coordinateSpace: 'canonical-component-local',
+      source: {
+        fileName: 'bridgeDeck.tsx',
+        path: 'examples/infra-bridge/src/families/bridgeDeck.tsx',
+        language: 'tsx',
+        text: 'export const BridgeDeck = family();',
+        highlightedHtml: '<pre><code><span class="line">source</span></code></pre>',
+      },
+      candidate: comparison.value.surfaces.candidate,
     },
   };
 }

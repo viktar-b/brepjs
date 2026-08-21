@@ -10,6 +10,7 @@ const forbidden = [
   'examples/infra-bridge',
   'evaluateAuthoredSnapshot',
   'createWorkbenchRuntime',
+  '@shikijs',
 ] as const;
 
 const emittedFiles = await filesBelow(dist);

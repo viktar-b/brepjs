@@ -53,6 +53,78 @@ describe('cached workbench runtime', () => {
     expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 2, overall: 0 });
   });
 
+  it('publishes one cached source/Candidate diagnostic from the same selected comparison revision', async () => {
+    const harness = runtimeHarness();
+
+    const [first, concurrent] = await Promise.all([
+      harness.runtime.componentSource(SECOND),
+      harness.runtime.componentSource(SECOND),
+    ]);
+    const cached = await harness.runtime.componentSource(SECOND);
+
+    expect(first).toMatchObject({
+      ok: true,
+      revision: 0,
+      value: {
+        semanticKey: SECOND,
+        revision: 0,
+        definitionName: 'BridgeDeck',
+        coordinateSpace: 'canonical-component-local',
+        source: { path: 'examples/infra-bridge/src/families/bridgeDeck.tsx' },
+      },
+    });
+    expect(concurrent).toEqual(first);
+    expect(cached).toEqual(first);
+    if (first.ok) {
+      expect(first.value.candidate).toEqual(comparisonCase(SECOND).surfaces.candidate);
+    }
+    expect(harness.sourceReads()).toBe(1);
+    expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 1, overall: 0 });
+  });
+
+  it('does not publish source text loaded for a revision made stale by a newer edit', async () => {
+    const staleSource = deferred<
+      BackendResult<{
+        readonly definitionName: string;
+        readonly source: {
+          readonly definitionName: string;
+          readonly fileName: string;
+          readonly path: `examples/infra-bridge/src/families/${string}.tsx`;
+          readonly language: 'tsx';
+          readonly text: string;
+          readonly highlightedHtml: string;
+        };
+      }>
+    >();
+    const currentSource = deferred<Awaited<typeof staleSource.promise>>();
+    let sourceCalls = 0;
+    const harness = runtimeHarness({
+      loadComponentSource() {
+        sourceCalls += 1;
+        return sourceCalls === 1 ? staleSource.promise : currentSource.promise;
+      },
+    });
+
+    const beforeEdit = harness.runtime.componentSource(SECOND);
+    await waitFor(() => sourceCalls === 1);
+    harness.runtime.invalidateSource();
+    const afterEdit = harness.runtime.componentSource(SECOND);
+    staleSource.resolve(sourceLoad('stale'));
+    await waitFor(() => sourceCalls === 2);
+    currentSource.resolve(sourceLoad('current'));
+
+    await expect(beforeEdit).resolves.toMatchObject({
+      ok: true,
+      revision: 1,
+      value: { source: { text: 'current' } },
+    });
+    await expect(afterEdit).resolves.toMatchObject({
+      ok: true,
+      revision: 1,
+      value: { source: { text: 'current' } },
+    });
+  });
+
   it('publishes and caches one whole-model diagnostic at the current source revision', async () => {
     const harness = runtimeHarness();
 
@@ -628,7 +700,7 @@ describe('cached workbench runtime', () => {
   });
 });
 
-function runtimeHarness() {
+function runtimeHarness(overrides: Partial<WorkbenchRuntimeDependencies> = {}) {
   const counts = { reference: 0, authored: 0, compare: 0, overall: 0 };
   const referenceResults: Array<
     | { readonly ok: true; readonly value: ReferenceSnapshot }
@@ -655,7 +727,12 @@ function runtimeHarness() {
   const authoredSnapshot: AuthoredSnapshot = {
     resolvedNodes: new Map(),
     evaluatedNodes: new Map(),
+    sourceDescriptors: new Map([
+      [FIRST, { semanticKey: FIRST, definitionName: 'EarthFill' }],
+      [SECOND, { semanticKey: SECOND, definitionName: 'BridgeDeck' }],
+    ]),
   };
+  let sourceReadCount = 0;
   const dependencies: WorkbenchRuntimeDependencies = {
     loadReference() {
       counts.reference += 1;
@@ -685,8 +762,13 @@ function runtimeHarness() {
         },
       };
     },
+    loadComponentSource() {
+      sourceReadCount += 1;
+      return Promise.resolve(sourceLoad('export const BridgeDeck = family();'));
+    },
     now: () => 1_000,
     isoNow: () => '2026-08-20T08:00:00.000Z',
+    ...overrides,
   };
   const runtime = createWorkbenchRuntime(
     {
@@ -700,6 +782,7 @@ function runtimeHarness() {
     counts,
     referenceResults,
     referenceRejections,
+    sourceReads: () => sourceReadCount,
     get comparisonError() {
       return comparisonError;
     },
@@ -777,6 +860,24 @@ function authoredSnapshotAt(originX: number): AuthoredSnapshot {
       ],
     ]),
     evaluatedNodes: new Map(),
+    sourceDescriptors: new Map([[FIRST, { semanticKey: FIRST, definitionName: 'EarthFill' }]]),
+  };
+}
+
+function sourceLoad(text: string) {
+  return {
+    ok: true as const,
+    value: {
+      definitionName: 'BridgeDeck',
+      source: {
+        definitionName: 'BridgeDeck',
+        fileName: 'bridgeDeck.tsx',
+        path: 'examples/infra-bridge/src/families/bridgeDeck.tsx' as const,
+        language: 'tsx' as const,
+        text,
+        highlightedHtml: `<pre><code>${text}</code></pre>`,
+      },
+    },
   };
 }
 

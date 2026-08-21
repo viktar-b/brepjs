@@ -57,6 +57,7 @@
     "brepjs-families": "*",
     "jsdom": "30.0.1",
     "puppeteer": "25.5.0",
+    "shiki": "2.5.0",
     "tsx": "4.23.11",
     "typescript": "*",
     "vite": "8.2.1",

@@ -37,6 +37,7 @@ describe('nested workbench browser boundary', () => {
       /from ['"]brepjs['"/]/,
       /from ['"]brepjs-bim/,
       /from ['"]brepjs-families/,
+      /from ['"](?:shiki|@shikijs)/,
       /examples\/infra-bridge/,
       /\.\.\/server\//,
       /\.\.\/\.\.\/src\//,
@@ -57,6 +58,7 @@ describe('nested workbench browser boundary', () => {
         '/repo/reference/infra-bridge/workbench/src/main.tsx',
         '/repo/node_modules/.pnpm/web-ifc@0.0.77/node_modules/web-ifc/web-ifc-api.js',
         '/repo/packages/brepjs-bim/dist/index.js',
+        '/repo/node_modules/shiki/dist/index.mjs',
         '/repo/examples/infra-bridge/src/Model.tsx?import',
         '/repo/reference/infra-bridge/workbench/src/decoder.ts?worker',
       ],
@@ -65,6 +67,7 @@ describe('nested workbench browser boundary', () => {
     expect(findings.map(({ moduleId }) => moduleId)).toEqual([
       '/repo/node_modules/.pnpm/web-ifc@0.0.77/node_modules/web-ifc/web-ifc-api.js',
       '/repo/packages/brepjs-bim/dist/index.js',
+      '/repo/node_modules/shiki/dist/index.mjs',
       '/repo/examples/infra-bridge/src/Model.tsx?import',
       '/repo/reference/infra-bridge/workbench/src/decoder.ts?worker',
     ]);

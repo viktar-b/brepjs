@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
+  ComponentSourceDiagnostic,
   ComparisonDiagnostic,
   OverallDiagnostic,
   WorkbenchCatalog,
@@ -8,7 +9,7 @@ import type {
 import { createWorkbenchClient } from '../src/workbenchClient.js';
 
 describe('workbench browser client', () => {
-  it('calls the catalog, overall, comparison, and refresh routes with JSON requests', async () => {
+  it('calls the catalog, overall, comparison, source, and refresh routes with JSON requests', async () => {
     const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(catalogResult(2))));
     const client = createWorkbenchClient({ fetch: fetchMock, baseUrl: 'http://localhost:4173' });
 
@@ -17,6 +18,8 @@ describe('workbench browser client', () => {
     await client.refreshOverall();
     await client.loadComparison('infra-bridge/rail 01');
     await client.refreshComparison('infra-bridge/rail 01');
+    await client.loadComponentSource('infra-bridge/rail 01');
+    await client.refreshComponentSource('infra-bridge/rail 01');
 
     expect(fetchMock.mock.calls.map(([input, init]) => [requestUrl(input), init?.method])).toEqual([
       ['http://localhost:4173/api/workbench', 'GET'],
@@ -24,8 +27,83 @@ describe('workbench browser client', () => {
       ['http://localhost:4173/api/workbench/overall/refresh', 'POST'],
       ['http://localhost:4173/api/workbench/comparison?semanticKey=infra-bridge%2Frail+01', 'GET'],
       ['http://localhost:4173/api/workbench/refresh?semanticKey=infra-bridge%2Frail+01', 'POST'],
+      [
+        'http://localhost:4173/api/workbench/component-source?semanticKey=infra-bridge%2Frail+01',
+        'GET',
+      ],
+      [
+        'http://localhost:4173/api/workbench/component-source/refresh?semanticKey=infra-bridge%2Frail+01',
+        'POST',
+      ],
     ]);
     expect(fetchMock.mock.calls[2]?.[1]?.headers).toEqual({ Accept: 'application/json' });
+  });
+
+  it('accepts one revision-consistent Component Source payload and rejects malformed source HTML', async () => {
+    const valid = componentSourceResult('infra-bridge/deck-01', 6);
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse(valid))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ...valid,
+          value: {
+            ...valid.value,
+            source: { ...valid.value.source, highlightedHtml: 47 },
+          },
+        })
+      );
+    const client = createWorkbenchClient({ fetch: fetchMock });
+
+    await expect(client.loadComponentSource('infra-bridge/deck-01')).resolves.toMatchObject({
+      ok: true,
+      revision: 6,
+      value: {
+        semanticKey: 'infra-bridge/deck-01',
+        definitionName: 'BridgeDeck',
+        coordinateSpace: 'canonical-component-local',
+      },
+    });
+    await expect(client.loadComponentSource('infra-bridge/deck-01')).resolves.toMatchObject({
+      ok: false,
+      revision: 6,
+      error: { code: 'invalid-json-response' },
+    });
+  });
+
+  it.each([
+    {
+      name: 'an escaping display path',
+      source: { path: '../private/secret.tsx' },
+    },
+    {
+      name: 'a path that disagrees with its stable file identity',
+      source: { path: 'families/other.tsx' },
+    },
+    {
+      name: 'executable markup outside native Shiki output',
+      source: {
+        highlightedHtml:
+          '<pre class="shiki"><code><span class="line" data-line="1"><script>x</script></span></code></pre>',
+      },
+    },
+  ])('rejects Component Source payloads containing $name', async ({ source }) => {
+    const valid = componentSourceResult('infra-bridge/deck-01', 6);
+    const fetchMock = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        jsonResponse({
+          ...valid,
+          value: { ...valid.value, source: { ...valid.value.source, ...source } },
+        })
+      )
+    );
+    const client = createWorkbenchClient({ fetch: fetchMock });
+
+    await expect(client.loadComponentSource('infra-bridge/deck-01')).resolves.toMatchObject({
+      ok: false,
+      revision: 6,
+      error: { code: 'invalid-json-response' },
+    });
   });
 
   it('accepts a finite whole-model diagnostic whose payload matches its envelope revision', async () => {
@@ -520,6 +598,33 @@ function comparisonResult(
         },
       ],
       pass: true,
+    },
+  };
+}
+
+function componentSourceResult(
+  semanticKey: string,
+  revision: number
+): Extract<WorkbenchResult<ComponentSourceDiagnostic>, { readonly ok: true }> {
+  return {
+    ok: true,
+    revision,
+    value: {
+      semanticKey,
+      revision,
+      durationMs: 2,
+      computedAt: '2026-08-20T00:00:00.000Z',
+      definitionName: 'BridgeDeck',
+      coordinateSpace: 'canonical-component-local',
+      source: {
+        fileName: 'bridgeDeck.tsx',
+        path: 'examples/infra-bridge/src/families/bridgeDeck.tsx',
+        language: 'tsx',
+        text: 'export const BridgeDeck = family();',
+        highlightedHtml:
+          '<pre class="shiki shiki-themes"><code><span class="line" data-line="1">source</span></code></pre>',
+      },
+      candidate: surface(),
     },
   };
 }

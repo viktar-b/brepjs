@@ -16,18 +16,28 @@ export async function evaluateAuthoredSnapshot(): Promise<BackendResult<Authored
     try {
       const evaluated = evaluateModel(root, evaluator);
       const resolvedNodes = new Map<string, AuthoredOccurrenceNode>();
+      const sourceDescriptors = new Map<
+        string,
+        { readonly semanticKey: string; readonly definitionName: string }
+      >();
       for (const node of flattenResolved(root)) {
         resolvedNodes.set(node.keyPath, {
           keyPath: node.keyPath,
           localFrame: node.localFrame,
           worldFrame: node.worldFrame,
         });
+        if (node.definitionKind === 'Family') {
+          sourceDescriptors.set(node.keyPath, {
+            semanticKey: node.keyPath,
+            definitionName: node.type,
+          });
+        }
       }
       const evaluatedNodes = new Map<string, EvaluatedOccurrenceNode>();
       for (const [keyPath, node] of evaluated.byKeyPath) {
         evaluatedNodes.set(keyPath, { mesh: copyMeshResult(node.mesh) });
       }
-      return { ok: true, value: { resolvedNodes, evaluatedNodes } };
+      return { ok: true, value: { resolvedNodes, evaluatedNodes, sourceDescriptors } };
     } finally {
       evaluator[Symbol.dispose]();
     }

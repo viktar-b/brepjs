@@ -12,6 +12,8 @@ import type {
   ReferenceOccurrenceNode,
 } from '../../node/compareEvaluatedOccurrence.js';
 import type {
+  ComponentSourceDiagnostic,
+  ComponentSourceFile,
   ComparisonDiagnostic,
   OverallDiagnostic,
   WorkbenchCatalog,
@@ -33,6 +35,10 @@ export interface ReferenceSnapshot {
 export interface AuthoredSnapshot {
   readonly resolvedNodes: ReadonlyMap<string, AuthoredOccurrenceNode>;
   readonly evaluatedNodes: ReadonlyMap<string, EvaluatedOccurrenceNode>;
+  readonly sourceDescriptors: ReadonlyMap<
+    string,
+    { readonly semanticKey: string; readonly definitionName: string }
+  >;
 }
 
 export interface WorkbenchRuntimeConfig {
@@ -51,6 +57,18 @@ export interface WorkbenchRuntimeDependencies {
     readonly resolvedNodes: AuthoredSnapshot['resolvedNodes'];
     readonly evaluatedNodes: AuthoredSnapshot['evaluatedNodes'];
   }) => BackendResult<Omit<OverallDiagnostic, 'revision' | 'durationMs' | 'computedAt'>>;
+  readonly loadComponentSource?:
+    | ((request: {
+        readonly semanticKey: string;
+        readonly definitionName: string;
+        readonly revision: number;
+      }) => Promise<
+        BackendResult<{
+          readonly definitionName: string;
+          readonly source: ComponentSourceFile;
+        }>
+      >)
+    | undefined;
   readonly now: () => number;
   readonly isoNow: () => string;
 }
@@ -61,6 +79,8 @@ export interface WorkbenchRuntime {
   refreshOverall(): Promise<WorkbenchResult<OverallDiagnostic>>;
   comparison(semanticKey: string): Promise<WorkbenchResult<ComparisonDiagnostic>>;
   refresh(semanticKey: string): Promise<WorkbenchResult<ComparisonDiagnostic>>;
+  componentSource(semanticKey: string): Promise<WorkbenchResult<ComponentSourceDiagnostic>>;
+  refreshComponentSource(semanticKey: string): Promise<WorkbenchResult<ComponentSourceDiagnostic>>;
   invalidateSource(): number;
 }
 
@@ -78,11 +98,19 @@ export function createWorkbenchRuntime(
       }
     | undefined;
   const comparisons = new Map<string, WorkbenchResult<ComparisonDiagnostic>>();
+  const componentSources = new Map<string, WorkbenchResult<ComponentSourceDiagnostic>>();
   const activeComparisons = new Map<
     string,
     {
       readonly revision: number;
       readonly result: Promise<WorkbenchResult<ComparisonDiagnostic>>;
+    }
+  >();
+  const activeComponentSources = new Map<
+    string,
+    {
+      readonly revision: number;
+      readonly result: Promise<WorkbenchResult<ComponentSourceDiagnostic>>;
     }
   >();
   const knownKeys = new Set(config.manifest.mappings.map(({ semanticKey }) => semanticKey));
@@ -244,9 +272,142 @@ export function createWorkbenchRuntime(
     return revision === authoredSnapshots.revision() ? result : comparison(semanticKey);
   }
 
+  function componentSource(
+    semanticKey: string
+  ): Promise<WorkbenchResult<ComponentSourceDiagnostic>> {
+    const requestedRevision = authoredSnapshots.revision();
+    if (!knownKeys.has(semanticKey)) {
+      return Promise.resolve(unknownKeyFailure(semanticKey));
+    }
+    const cached = componentSources.get(semanticKey);
+    if (cached !== undefined && cached.revision === requestedRevision) {
+      return Promise.resolve(cached);
+    }
+    const active = activeComponentSources.get(semanticKey);
+    if (active?.revision === requestedRevision) return active.result;
+
+    const computed = computeComponentSource(semanticKey, requestedRevision);
+    const result = computed.finally(() => {
+      if (activeComponentSources.get(semanticKey)?.result === result) {
+        activeComponentSources.delete(semanticKey);
+      }
+    });
+    activeComponentSources.set(semanticKey, { revision: requestedRevision, result });
+    return result;
+  }
+
+  async function computeComponentSource(
+    semanticKey: string,
+    requestedRevision: number
+  ): Promise<WorkbenchResult<ComponentSourceDiagnostic>> {
+    const startedAt = dependencies.now();
+    const [comparisonResult, authored] = await Promise.all([
+      comparison(semanticKey),
+      authoredSnapshots.current(),
+    ]);
+    const revision = authored.revision;
+    if (revision !== requestedRevision || revision !== authoredSnapshots.revision()) {
+      return componentSource(semanticKey);
+    }
+    const completedByPeer = componentSources.get(semanticKey);
+    if (completedByPeer !== undefined && completedByPeer.revision === revision) {
+      return completedByPeer;
+    }
+    if (!comparisonResult.ok) return comparisonResult;
+    if (!authored.ok) return failure(revision, authored.error);
+
+    const sourceDescriptor = authored.value.sourceDescriptors.get(semanticKey);
+    if (sourceDescriptor === undefined || sourceDescriptor.semanticKey !== semanticKey) {
+      return sourceResult(
+        revision,
+        {
+          stage: 'source-file',
+          code: 'COMPONENT_SOURCE_DESCRIPTOR_MISSING',
+          message: 'The evaluated Occurrence has no captured Family source descriptor',
+          context: { semanticKey },
+          retryable: true,
+          action: 'Inspect authored Model resolution and ensure the selected product is a Family',
+        },
+        componentSources,
+        semanticKey,
+        authoredSnapshots.revision()
+      );
+    }
+    if (dependencies.loadComponentSource === undefined) {
+      return sourceResult(
+        revision,
+        {
+          stage: 'configuration',
+          code: 'COMPONENT_SOURCE_LOADER_UNAVAILABLE',
+          message: 'The workbench server did not configure Component Source loading',
+          context: { semanticKey, definitionName: sourceDescriptor.definitionName },
+          retryable: false,
+          action: 'Restart the workbench through the supported workbench:dev command',
+        },
+        componentSources,
+        semanticKey,
+        authoredSnapshots.revision()
+      );
+    }
+
+    const loaded = await dependencies.loadComponentSource({
+      semanticKey,
+      definitionName: sourceDescriptor.definitionName,
+      revision,
+    });
+    if (revision !== authoredSnapshots.revision()) return componentSource(semanticKey);
+    if (!loaded.ok) {
+      return sourceResult(
+        revision,
+        loaded.error,
+        componentSources,
+        semanticKey,
+        authoredSnapshots.revision()
+      );
+    }
+    if (loaded.value.definitionName !== sourceDescriptor.definitionName) {
+      return sourceResult(
+        revision,
+        {
+          stage: 'source-file',
+          code: 'COMPONENT_SOURCE_DEFINITION_MISMATCH',
+          message: 'The loaded source does not match the evaluated Family definition',
+          context: {
+            semanticKey,
+            expectedDefinitionName: sourceDescriptor.definitionName,
+            actualDefinitionName: loaded.value.definitionName,
+          },
+          retryable: false,
+          action: 'Correct the server-owned Component Source allow-list mapping',
+        },
+        componentSources,
+        semanticKey,
+        authoredSnapshots.revision()
+      );
+    }
+
+    const result: WorkbenchResult<ComponentSourceDiagnostic> = {
+      ok: true,
+      revision,
+      value: {
+        semanticKey,
+        revision,
+        durationMs: Math.max(0, dependencies.now() - startedAt),
+        computedAt: dependencies.isoNow(),
+        definitionName: sourceDescriptor.definitionName,
+        coordinateSpace: 'canonical-component-local',
+        source: loaded.value.source,
+        candidate: comparisonResult.value.surfaces.candidate,
+      },
+    };
+    componentSources.set(semanticKey, result);
+    return result;
+  }
+
   const invalidateSource = (): number => {
     overallResult = undefined;
     comparisons.clear();
+    componentSources.clear();
     return authoredSnapshots.invalidate();
   };
 
@@ -258,13 +419,31 @@ export function createWorkbenchRuntime(
       return overall();
     },
     comparison,
+    componentSource,
     async refresh(semanticKey) {
       if (!knownKeys.has(semanticKey)) return unknownKeyFailure(semanticKey);
       invalidateSource();
       return comparison(semanticKey);
     },
+    async refreshComponentSource(semanticKey) {
+      if (!knownKeys.has(semanticKey)) return unknownKeyFailure(semanticKey);
+      invalidateSource();
+      return componentSource(semanticKey);
+    },
     invalidateSource,
   };
+}
+
+function sourceResult(
+  revision: number,
+  error: WorkbenchDiagnosticError,
+  cache: Map<string, WorkbenchResult<ComponentSourceDiagnostic>>,
+  semanticKey: string,
+  currentRevision: number
+): WorkbenchResult<ComponentSourceDiagnostic> {
+  const result = failure<ComponentSourceDiagnostic>(revision, error);
+  if (!error.retryable && revision === currentRevision) cache.set(semanticKey, result);
+  return result;
 }
 
 function product(semanticKey: string): WorkbenchProduct {

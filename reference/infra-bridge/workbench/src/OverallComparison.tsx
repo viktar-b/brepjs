@@ -368,6 +368,7 @@ function errorStageLabel(stage: WorkbenchDiagnosticError['stage']): string {
     checksum: 'Checksum',
     'reference-decode': 'Reference decode',
     'authored-evaluation': 'Authored evaluation',
+    'source-file': 'Source file',
     topology: 'Topology',
     scoring: 'Scoring',
   }[stage];

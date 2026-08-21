@@ -67,4 +67,25 @@ describe('workbench interaction styles', () => {
       /\.evidence-scroll\s*\{[^}]*height:\s*auto[^}]*overflow:\s*visible/u
     );
   });
+
+  it('gives Component Source explicit pane, code-scroll, responsive, and dual-theme ownership', async () => {
+    const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const split = styles.match(/\.component-source-split\s*\{(?<rules>[^}]*)\}/u);
+    const code = styles.match(/\.component-source-code\s*\{(?<rules>[^}]*)\}/u);
+
+    expect(split?.groups?.['rules']).toMatch(
+      /grid-template-columns:\s*minmax\(360px, 46%\) minmax\(420px, 54%\)/u
+    );
+    expect(code?.groups?.['rules']).toMatch(/min-height:\s*0/u);
+    expect(code?.groups?.['rules']).toMatch(/overflow:\s*auto/u);
+    expect(styles).toMatch(
+      /\.component-source-code \.shiki \.line::before[\s\S]*content:\s*attr\(data-line\)/u
+    );
+    expect(styles).toMatch(
+      /:root\[data-theme='dark'\] \.component-source-code \.shiki[\s\S]*var\(--shiki-dark\)/u
+    );
+    expect(styles).toMatch(
+      /@media \(max-width: 799px\)[\s\S]*?\.component-source-split\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/u
+    );
+  });
 });

@@ -17,6 +17,10 @@ interface BrowserEvidence {
   readonly canvas: readonly [number, number];
   readonly productCount: number;
   readonly refreshedRevision: number;
+  readonly componentSource: Readonly<{
+    lineCount: number;
+    refreshedRevision: number;
+  }>;
   readonly responsiveSelectors: Readonly<{
     tablet: number;
     mobile: number;
@@ -272,7 +276,12 @@ async function verifyBrowser(
 
     const tabletCount = await verifyCompactLayout(page, monitor, productKeys, 900, false);
     const mobileCount = await verifyCompactLayout(page, monitor, productKeys, 600, true);
-    await verifyWatcherRefresh(page, monitor, signal, registerSourceRestore);
+    const componentSource = await verifyComponentSourceMode(
+      page,
+      monitor,
+      signal,
+      registerSourceRestore
+    );
     await delay(100);
     if (monitor.errors.length > 0) {
       throw new Error(`Browser smoke errors:\n${monitor.errors.join('\n')}`);
@@ -281,6 +290,7 @@ async function verifyBrowser(
       canvas,
       productCount,
       refreshedRevision: await revision(page),
+      componentSource,
       responsiveSelectors: { tablet: tabletCount, mobile: mobileCount },
     };
   } finally {
@@ -317,6 +327,60 @@ async function verifyEveryBrowserSelection(
   smokeProgress('browser', 'text-bearing comparison ready');
 }
 
+async function composedCanvasEvidence(
+  page: Page,
+  pngBase64: string,
+  index: number
+): Promise<{ readonly background: number; readonly accentSamples: number }> {
+  return page.evaluate(
+    async (encoded, canvasIndex) => {
+      const binary = atob(encoded);
+      const bytes = new Uint8Array(binary.length);
+      for (let byte = 0; byte < binary.length; byte += 1) {
+        bytes[byte] = binary.charCodeAt(byte);
+      }
+      const image = await createImageBitmap(new Blob([bytes.buffer], { type: 'image/png' }));
+      const surface = document.createElement('canvas');
+      surface.width = image.width;
+      surface.height = image.height;
+      const context = surface.getContext('2d', { willReadFrequently: true });
+      if (context === null) throw new Error('Screenshot pixel surface could not be created');
+      context.drawImage(image, 0, 0);
+      image.close();
+      const pixels = context.getImageData(0, 0, surface.width, surface.height).data;
+      const corners = [
+        [2, 2],
+        [Math.max(2, surface.width - 3), 2],
+        [2, Math.max(2, surface.height - 3)],
+      ] as const;
+      let background = 0;
+      for (const [x, y] of corners) {
+        const offset = (y * surface.width + x) * 4;
+        background +=
+          ((pixels[offset] ?? 0) + (pixels[offset + 1] ?? 0) + (pixels[offset + 2] ?? 0)) / 3;
+      }
+      background /= corners.length;
+      let accentSamples = 0;
+      for (let row = 0; row < 24; row += 1) {
+        for (let column = 0; column < 36; column += 1) {
+          const x = Math.min(surface.width - 1, Math.floor(((column + 0.5) / 36) * surface.width));
+          const y = Math.min(surface.height - 1, Math.floor(((row + 0.5) / 24) * surface.height));
+          const offset = (y * surface.width + x) * 4;
+          const red = pixels[offset] ?? 0;
+          const green = pixels[offset + 1] ?? 0;
+          const blue = pixels[offset + 2] ?? 0;
+          const referenceColor = blue > red + 28 && green > red + 20;
+          const candidateColor = red > green + 28 && red > blue + 50;
+          if (canvasIndex === 0 ? referenceColor : candidateColor) accentSamples += 1;
+        }
+      }
+      return { background, accentSamples };
+    },
+    pngBase64,
+    index
+  );
+}
+
 async function verifyOverallMode(page: Page, monitor: BrowserErrorMonitor): Promise<void> {
   await page.evaluate(() => {
     const lightMode = document.querySelector<HTMLButtonElement>('button[aria-label="Light mode"]');
@@ -329,62 +393,24 @@ async function verifyOverallMode(page: Page, monitor: BrowserErrorMonitor): Prom
       timeout: 5_000,
     })
   );
-  await delay(120);
+  await delay(500);
+
+  const canvasesBefore = await page.$$('canvas');
+  if (canvasesBefore.length !== 2) {
+    throw new Error(`Overall mode mounted ${String(canvasesBefore.length)} canvases instead of 2`);
+  }
+  const [referenceBefore, candidateBefore] = canvasesBefore;
+  if (referenceBefore === undefined || candidateBefore === undefined) {
+    throw new Error('Overall mode canvas handles were unavailable');
+  }
+  const screenshots = await Promise.all(
+    canvasesBefore.map((canvas) => canvas.screenshot({ type: 'png', encoding: 'base64' }))
+  );
+  const canvasVisuals = await Promise.all(
+    screenshots.map((screenshot, index) => composedCanvasEvidence(page, screenshot, index))
+  );
 
   const state = await page.evaluate(() => {
-    const canvases: Array<{
-      width: number;
-      height: number;
-      background: number;
-      accentSamples: number;
-    }> = [];
-    let index = 0;
-    for (const canvas of document.querySelectorAll<HTMLCanvasElement>('canvas')) {
-      const bounds = canvas.getBoundingClientRect();
-      const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
-      if (gl === null) {
-        canvases.push({
-          width: bounds.width,
-          height: bounds.height,
-          background: -1,
-          accentSamples: 0,
-        });
-        index += 1;
-        continue;
-      }
-      const pixel = new Uint8Array(4);
-      const cornerCoordinates = [
-        [2, 2],
-        [Math.max(2, gl.drawingBufferWidth - 3), 2],
-        [2, Math.max(2, gl.drawingBufferHeight - 3)],
-      ] as const;
-      let background = 0;
-      for (const [x, y] of cornerCoordinates) {
-        gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-        background += ((pixel[0] ?? 0) + (pixel[1] ?? 0) + (pixel[2] ?? 0)) / 3;
-      }
-      background /= cornerCoordinates.length;
-      let accentSamples = 0;
-      for (let row = 0; row < 24; row += 1) {
-        for (let column = 0; column < 36; column += 1) {
-          const x = Math.min(
-            gl.drawingBufferWidth - 1,
-            Math.floor(((column + 0.5) / 36) * gl.drawingBufferWidth)
-          );
-          const y = Math.min(
-            gl.drawingBufferHeight - 1,
-            Math.floor(((row + 0.5) / 24) * gl.drawingBufferHeight)
-          );
-          gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-          const [red = 0, green = 0, blue = 0] = pixel;
-          const referenceColor = blue > red + 28 && green > red + 20;
-          const candidateColor = red > green + 28 && red > blue + 50;
-          if (index === 0 ? referenceColor : candidateColor) accentSamples += 1;
-        }
-      }
-      canvases.push({ width: bounds.width, height: bounds.height, background, accentSamples });
-      index += 1;
-    }
     return {
       railButtons: document.querySelectorAll('.mode-rail__button').length,
       overallPressed: document
@@ -393,25 +419,40 @@ async function verifyOverallMode(page: Page, monitor: BrowserErrorMonitor): Prom
       productsPressed: document
         .querySelector<HTMLButtonElement>('button[aria-label="Manifest products"]')
         ?.getAttribute('aria-pressed'),
+      sourcePressed: document
+        .querySelector<HTMLButtonElement>('button[aria-label="Component source"]')
+        ?.getAttribute('aria-pressed'),
       referenceLabel: document.querySelector('.overall-model-label--reference')?.textContent.trim(),
       candidateLabel: document.querySelector('.overall-model-label--candidate')?.textContent.trim(),
       productCount: document.querySelector('.overall-toolbar__title small')?.textContent.trim(),
       productRail: document.querySelector('.product-pane') !== null,
       theme: document.documentElement.dataset['theme'],
-      canvases,
+      canvases: [...document.querySelectorAll<HTMLCanvasElement>('canvas')].map((canvas) => {
+        const bounds = canvas.getBoundingClientRect();
+        return { width: bounds.width, height: bounds.height };
+      }),
     };
   });
-  const [referenceCanvas, candidateCanvas] = state.canvases;
+  const visualState = {
+    ...state,
+    canvases: state.canvases.map((canvas, index) => ({
+      ...canvas,
+      background: canvasVisuals[index]?.background ?? -1,
+      accentSamples: canvasVisuals[index]?.accentSamples ?? 0,
+    })),
+  };
+  const [referenceCanvas, candidateCanvas] = visualState.canvases;
   if (
-    state.railButtons !== 2 ||
-    state.overallPressed !== 'true' ||
-    state.productsPressed !== 'false' ||
-    state.referenceLabel?.includes('Reference model') !== true ||
-    state.candidateLabel?.includes('Candidate model') !== true ||
-    state.productCount?.includes('47 products per side') !== true ||
-    state.productRail ||
-    state.theme !== 'light' ||
-    state.canvases.length !== 2 ||
+    visualState.railButtons !== 3 ||
+    visualState.overallPressed !== 'true' ||
+    visualState.productsPressed !== 'false' ||
+    visualState.sourcePressed !== 'false' ||
+    visualState.referenceLabel?.includes('Reference model') !== true ||
+    visualState.candidateLabel?.includes('Candidate model') !== true ||
+    visualState.productCount?.includes('47 products per side') !== true ||
+    visualState.productRail ||
+    visualState.theme !== 'light' ||
+    visualState.canvases.length !== 2 ||
     referenceCanvas === undefined ||
     candidateCanvas === undefined ||
     referenceCanvas.width < 320 ||
@@ -423,18 +464,10 @@ async function verifyOverallMode(page: Page, monitor: BrowserErrorMonitor): Prom
     referenceCanvas.accentSamples < 3 ||
     candidateCanvas.accentSamples < 3
   ) {
-    throw new Error(`Overall mode is incomplete: ${JSON.stringify(state)}`);
+    throw new Error(`Overall mode is incomplete: ${JSON.stringify(visualState)}`);
   }
 
   const revisionBefore = await revision(page);
-  const canvasesBefore = await page.$$('canvas');
-  if (canvasesBefore.length !== 2) {
-    throw new Error(`Overall mode mounted ${String(canvasesBefore.length)} canvases instead of 2`);
-  }
-  const [referenceBefore, candidateBefore] = canvasesBefore;
-  if (referenceBefore === undefined || candidateBefore === undefined) {
-    throw new Error('Overall mode canvas handles were unavailable');
-  }
   await page.click('.primary-action');
   await waitForReady(page, monitor, { minimumRevision: revisionBefore + 1 });
   const canvasesStayedMounted = await page.evaluate(
@@ -453,6 +486,7 @@ async function verifyRequiredEvidenceAndControls(page: Page): Promise<void> {
   const requiredControls = [
     'Overall comparison',
     'Manifest products',
+    'Component source',
     'Reference',
     'Candidate',
     'Overlay',
@@ -861,12 +895,115 @@ async function verifyCompactLayout(
   return selector.values.length;
 }
 
-async function verifyWatcherRefresh(
+async function verifyComponentSourceMode(
   page: Page,
   monitor: BrowserErrorMonitor,
   signal: AbortSignal,
   registerSourceRestore: (cleanup: () => Promise<void>) => Promise<void>
-): Promise<void> {
+): Promise<{ readonly lineCount: number; readonly refreshedRevision: number }> {
+  await page.setViewport({ width: 1_440, height: 900, deviceScaleFactor: 1 });
+  await clickControl(page, monitor, 'Component source', 'true');
+  await waitForReady(page, monitor, { semanticKey: TEXT_BEARING_KEY });
+  await raceBrowserFailure(
+    monitor,
+    page.waitForSelector('.component-source-code .shiki > code > .line', { timeout: 10_000 })
+  );
+
+  const sourceState = await page.evaluate(() => {
+    const source = document.querySelector<HTMLElement>('.component-source-code');
+    const path = document.querySelector<HTMLElement>('.source-file-actions > code');
+    const canvas = document.querySelector<HTMLCanvasElement>('canvas');
+    const canvasBounds = canvas?.getBoundingClientRect();
+    return {
+      railButtons: document.querySelectorAll('.mode-rail__button').length,
+      sourcePressed: document
+        .querySelector<HTMLButtonElement>('button[aria-label="Component source"]')
+        ?.getAttribute('aria-pressed'),
+      definition: document.querySelector('.component-source-context small')?.textContent.trim(),
+      fileName: document.querySelector('.component-source-pane__header strong')?.textContent.trim(),
+      path: path?.textContent.trim(),
+      lineCount: document.querySelectorAll('.component-source-code .line').length,
+      hasNativeStructure:
+        document.querySelector('.component-source-code > pre.shiki > code') !== null,
+      sourceScrollable:
+        source !== null && source.scrollHeight > source.clientHeight && source.clientHeight > 0,
+      canvasCount: document.querySelectorAll('canvas').length,
+      canvasWidth: canvasBounds?.width ?? 0,
+      canvasHeight: canvasBounds?.height ?? 0,
+      evidenceVisible: document.querySelector('.evidence-column') !== null,
+      theme: document.documentElement.dataset['theme'],
+      productCount: document.querySelectorAll('.product-option').length,
+    };
+  });
+  const sourceCanvas = await page.$('canvas');
+  if (sourceCanvas === null) throw new Error('Component Source Candidate canvas was not mounted');
+  const sourceScreenshot = await sourceCanvas.screenshot({ type: 'png', encoding: 'base64' });
+  await sourceCanvas.dispose();
+  const sourceVisual = await composedCanvasEvidence(page, sourceScreenshot, 1);
+  const visualSourceState = { ...sourceState, ...sourceVisual };
+  if (
+    visualSourceState.railButtons !== 3 ||
+    visualSourceState.sourcePressed !== 'true' ||
+    visualSourceState.definition?.includes('BridgeNameSign') !== true ||
+    visualSourceState.fileName !== 'bridgeNameSign.tsx' ||
+    visualSourceState.path !== 'examples/infra-bridge/src/families/bridgeNameSign.tsx' ||
+    visualSourceState.lineCount < 40 ||
+    !visualSourceState.hasNativeStructure ||
+    !visualSourceState.sourceScrollable ||
+    visualSourceState.canvasCount !== 1 ||
+    visualSourceState.canvasWidth < 360 ||
+    visualSourceState.canvasHeight < 320 ||
+    visualSourceState.background < 170 ||
+    visualSourceState.accentSamples < 3 ||
+    visualSourceState.evidenceVisible ||
+    visualSourceState.theme !== 'light' ||
+    visualSourceState.productCount !== 47
+  ) {
+    throw new Error(`Component Source mode is incomplete: ${JSON.stringify(visualSourceState)}`);
+  }
+
+  await page.$eval('.component-source-code', (element) => {
+    element.scrollTop = Math.min(240, element.scrollHeight - element.clientHeight);
+  });
+  await clickControl(page, monitor, 'Top', 'true');
+  await clickControl(page, monitor, 'Candidate x-ray', 'true');
+  await clickControl(page, monitor, 'Orthographic', 'true');
+  await clickControl(page, monitor, 'Section plane', 'true');
+  const explicitRevision = await revision(page);
+  const explicitCanvas = await page.$('canvas');
+  if (explicitCanvas === null) throw new Error('Component Source canvas was not mounted');
+  await page.click('.primary-action');
+  await raceBrowserFailure(
+    monitor,
+    page.waitForSelector('.component-source-previous', { timeout: 5_000 })
+  );
+  await waitForReady(page, monitor, {
+    semanticKey: TEXT_BEARING_KEY,
+    minimumRevision: explicitRevision + 1,
+  });
+  const explicitPreserved = await page.evaluate(
+    (before) => ({
+      canvas: before === document.querySelector('canvas'),
+      scrollTop: document.querySelector<HTMLElement>('.component-source-code')?.scrollTop ?? 0,
+      selected: document.querySelector('.selected-key code')?.textContent.trim(),
+    }),
+    explicitCanvas
+  );
+  await explicitCanvas.dispose();
+  if (
+    !explicitPreserved.canvas ||
+    explicitPreserved.scrollTop <= 0 ||
+    explicitPreserved.selected !== TEXT_BEARING_KEY
+  ) {
+    throw new Error(`Component Source recompute lost state: ${JSON.stringify(explicitPreserved)}`);
+  }
+  await assertControlStates(page, {
+    Top: 'true',
+    'Candidate x-ray': 'true',
+    Orthographic: 'true',
+    'Section plane': 'true',
+  });
+
   const original = await stat(WATCHED_SOURCE);
   let touched = false;
   const restore = onceAsync(async () => {
@@ -878,7 +1015,7 @@ async function verifyWatcherRefresh(
 
   const revisionBefore = await revision(page);
   const canvasBefore = await page.$('canvas');
-  if (canvasBefore === null) throw new Error('Watcher smoke could not find the mounted canvas');
+  if (canvasBefore === null) throw new Error('Source watcher could not find the mounted canvas');
   touched = true;
   await utimes(
     WATCHED_SOURCE,
@@ -895,27 +1032,27 @@ async function verifyWatcherRefresh(
     canvasBefore
   );
   await canvasBefore.dispose();
-  if (!canvasStayedMounted) throw new Error('Watcher refresh replaced the shared R3F canvas');
+  if (!canvasStayedMounted) throw new Error('Source watcher replaced the Candidate R3F canvas');
   await assertControlStates(page, {
-    Candidate: 'true',
+    Top: 'true',
+    'Candidate x-ray': 'true',
     Orthographic: 'true',
     'Section plane': 'true',
-    'CAD Z': 'true',
-    'Flip section': 'true',
     Grid: 'true',
-    Iso: 'true',
   });
   const selected = await page.$eval(
     'select[aria-label="Select Semantic Key"]',
     (element) => element.value
   );
   if (selected !== TEXT_BEARING_KEY) {
-    throw new Error(`Watcher refresh changed the selected Semantic Key to ${selected}`);
+    throw new Error(`Source watcher changed the selected Semantic Key to ${selected}`);
   }
+  const refreshedRevision = await revision(page);
   smokeProgress(
     'watcher',
-    `client accepted revision ${String(await revision(page))} without replacing the canvas`
+    `Component Source accepted revision ${String(refreshedRevision)} without replacing the canvas`
   );
+  return { lineCount: visualSourceState.lineCount, refreshedRevision };
 }
 
 async function verifyNativeCollapsibles(page: Page, monitor: BrowserErrorMonitor): Promise<void> {
