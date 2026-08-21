@@ -71,11 +71,16 @@ export {
 export type { BridgeIdsEvaluationInput, BridgeIdsEvaluation } from './validation/bridgeIds.js';
 export {
   commitValidatedBridgeExport,
+  executeBridgeValidationForExport,
   resolveCommittedBridgeExport,
 } from './validation/atomicBridgeExport.js';
 export type {
+  BridgeProjectGateExecution,
+  BridgeProjectGateRunner,
   BridgeExportFileSystem,
   BridgeExportLock,
+  ExecutedBridgeValidation,
+  ExecuteBridgeValidationInput,
   ResolvedBridgeExport,
   ValidatedBridgeExportInput,
   ValidatedBridgeExportResult,

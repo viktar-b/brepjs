@@ -7,12 +7,22 @@ import {
   classifyBridgeValidationExit,
   serializeBridgeValidationReport,
   type BridgeGateResultInput,
+  type ValidationEvidenceReference,
+  type ValidatorProvenance,
   type BridgeValidationReport,
 } from './bridgeValidationContract.js';
+import type { ValidationIssue } from './severity.js';
 
 const POINTER_SCHEMA_VERSION = '1';
 const GENERATION_PREFIX = '.brepjs-export-';
-const executedReports = new WeakMap<BridgeValidationReport, string>();
+const executedValidations = new WeakMap<ExecutedBridgeValidation, ExecutedValidationRecord>();
+
+interface ExecutedValidationRecord {
+  readonly ifcBytes: Uint8Array;
+  readonly reportBytes: Uint8Array;
+  readonly modelHash: string;
+  readonly reportHash: string;
+}
 
 export interface BridgeExportLock {
   /** Releases the exclusive writer lock. A rejection means ownership is unknown. */
@@ -26,6 +36,10 @@ export interface BridgeExportFileSystem {
   readonly mkdtemp: (prefix: string) => Promise<string>;
   readonly writeFile: (path: string, data: Uint8Array) => Promise<void>;
   readonly readFile: (path: string) => Promise<Uint8Array>;
+  readonly readLink: (path: string) => Promise<string | null>;
+  readonly createSymlinkNoReplace: (target: string, path: string) => Promise<void>;
+  readonly removeOwnedLink: (path: string) => Promise<void>;
+  readonly listDirectory: (path: string) => Promise<readonly string[]>;
   /** Atomically replaces one pointer file; readers see either its old or new complete bytes. */
   readonly replaceFileAtomically: (from: string, to: string) => Promise<void>;
   /** Recursively removes only a directory returned by this adapter's mkdtemp call. */
@@ -38,11 +52,41 @@ export interface BridgeExportFileSystem {
 export interface ValidatedBridgeExportInput {
   readonly outputDirectory: string;
   readonly projectKey: string;
-  readonly ifcBytes: Uint8Array;
-  /** Must be the exact report returned by the package-internal executed-gate coordinator. */
-  readonly report: BridgeValidationReport;
+  /** Opaque exact-byte result returned by executeBridgeValidationForExport. */
+  readonly validation: ExecutedBridgeValidation;
   /** Host filesystem boundary; generated Node commands provide a thin adapter. */
   readonly fileSystem: BridgeExportFileSystem;
+}
+
+export interface ExecutedBridgeValidation {
+  readonly report: BridgeValidationReport;
+}
+
+export type BridgeProjectGateExecution =
+  | {
+      readonly status: 'pass' | 'fail';
+      readonly issues: readonly ValidationIssue[];
+      readonly evidence: readonly ValidationEvidenceReference[];
+    }
+  | {
+      readonly status: 'unavailable';
+      readonly unavailableReason: 'unsupported' | 'skipped' | 'missing' | 'crashed';
+      readonly issues: readonly ValidationIssue[];
+      readonly evidence: readonly ValidationEvidenceReference[];
+    };
+
+export interface BridgeProjectGateRunner {
+  readonly gateId: string;
+  readonly validator: ValidatorProvenance;
+  readonly run: (input: {
+    /** Isolated copy of the exact immutable IFC candidate bytes. */
+    readonly ifcBytes: Uint8Array;
+  }) => Promise<BridgeProjectGateExecution>;
+}
+
+export interface ExecuteBridgeValidationInput {
+  readonly ifcBytes: Uint8Array;
+  readonly runners: readonly BridgeProjectGateRunner[];
 }
 
 export type ValidatedBridgeExportResult =
@@ -64,6 +108,8 @@ export type ValidatedBridgeExportResult =
       readonly reportPath: string;
       /** Unknown means the pair committed, but releasing the writer lock rejected. */
       readonly lockStatus: 'released' | 'unknown';
+      /** At most current+previous generations remain when complete. */
+      readonly cleanupStatus: 'complete' | 'incomplete';
     };
 
 export interface ResolvedBridgeExport {
@@ -72,6 +118,7 @@ export interface ResolvedBridgeExport {
   readonly ifcPath: string;
   readonly reportPath: string;
   readonly modelHash: string;
+  readonly reportHash: string;
 }
 
 interface BridgeExportPointer {
@@ -79,35 +126,118 @@ interface BridgeExportPointer {
   readonly projectKey: string;
   readonly generation: string;
   readonly modelHash: string;
+  readonly reportHash: string;
 }
 
-/**
- * Records the exact bytes/report pair produced by the package-internal required-gate executor.
- *
- * @internal This is deliberately absent from the package root export. The public commit seam
- * rejects reports that have only been assembled through the public report-shape builder.
- */
-export async function authorizeExecutedBridgeValidationForExport(
-  ifcBytes: Uint8Array,
-  report: BridgeValidationReport
-): Promise<Result<void, BimError>> {
-  const canonical = rebuildCanonicalReport(report);
-  if (canonical === null) {
+/** Executes every required project gate against one exact IFC snapshot and mints an opaque result. */
+export async function executeBridgeValidationForExport(
+  input: ExecuteBridgeValidationInput
+): Promise<Result<ExecutedBridgeValidation, BimError>> {
+  try {
+    if (!(input.ifcBytes instanceof Uint8Array) || !Array.isArray(input.runners)) {
+      return err(specError('BRIDGE_EXPORT_VALIDATION_INPUT', 'Gate execution input is malformed'));
+    }
+    const required = BRIDGE_VALIDATION_GATES.filter((gate) => gate.required);
+    const runners = new Map<string, BridgeProjectGateRunner>();
+    const validators = new Map<string, ValidatorProvenance>();
+    const inputRunners: readonly BridgeProjectGateRunner[] = input.runners;
+    for (const runner of inputRunners) {
+      if (
+        runner === null ||
+        typeof runner !== 'object' ||
+        typeof runner.gateId !== 'string' ||
+        typeof runner.run !== 'function' ||
+        runner.validator === null ||
+        typeof runner.validator !== 'object' ||
+        typeof runner.validator.id !== 'string' ||
+        runner.validator.id.length === 0 ||
+        typeof runner.validator.name !== 'string' ||
+        runner.validator.name.length === 0 ||
+        typeof runner.validator.version !== 'string' ||
+        runner.validator.version.length === 0 ||
+        runners.has(runner.gateId)
+      ) {
+        return err(
+          specError(
+            'BRIDGE_EXPORT_VALIDATION_INPUT',
+            'Gate runner registry is malformed or duplicated'
+          )
+        );
+      }
+      runners.set(runner.gateId, runner);
+      const prior = validators.get(runner.validator.id);
+      if (prior !== undefined && JSON.stringify(prior) !== JSON.stringify(runner.validator)) {
+        return err(
+          specError('BRIDGE_EXPORT_VALIDATION_INPUT', 'Validator provenance is inconsistent')
+        );
+      }
+      validators.set(runner.validator.id, runner.validator);
+    }
+    if (
+      runners.size !== required.length ||
+      required.some((definition) => !runners.has(definition.id))
+    ) {
+      return err(
+        specError(
+          'BRIDGE_EXPORT_VALIDATION_INPUT',
+          'Exactly one runner is required for every required Bridge project gate'
+        )
+      );
+    }
+
+    const ifcBytes = Uint8Array.from(input.ifcBytes);
+    const gateResults: BridgeGateResultInput[] = [];
+    for (const definition of required) {
+      const runner = runners.get(definition.id);
+      if (runner === undefined) throw new Error(`Missing runner for ${definition.id}`);
+      let execution: BridgeProjectGateExecution;
+      try {
+        execution = await runner.run({ ifcBytes: Uint8Array.from(ifcBytes) });
+      } catch (cause) {
+        execution = {
+          status: 'unavailable',
+          unavailableReason: 'crashed',
+          issues: [
+            {
+              severity: 'error',
+              code: 'VALIDATOR_CRASHED',
+              message: `Required gate "${definition.id}" crashed: ${messageOf(cause)}`,
+            },
+          ],
+          evidence: [],
+        };
+      }
+      gateResults.push({
+        gateId: definition.id,
+        validatorId: runner.validator.id,
+        ...execution,
+      });
+    }
+    const modelHash = await sha256Hex(ifcBytes);
+    const reportResult = buildBridgeValidationReport({
+      ifcSchema: 'IFC4X3_ADD2',
+      ifcView: 'ReferenceView',
+      modelHash: { algorithm: 'sha256', value: modelHash },
+      validators: [...validators.values()],
+      gateResults,
+    });
+    if (!reportResult.ok) return reportResult;
+    const reportBytes = new TextEncoder().encode(
+      serializeBridgeValidationReport(reportResult.value)
+    );
+    const validation = Object.freeze({ report: reportResult.value });
+    executedValidations.set(validation, {
+      ifcBytes,
+      reportBytes,
+      modelHash,
+      reportHash: await sha256Hex(reportBytes),
+    });
+    return ok(validation);
+  } catch (cause) {
     return err(
-      specError('BRIDGE_EXPORT_VALIDATION_NOT_EXECUTED', 'Validation report is not canonical')
+      specError('BRIDGE_EXPORT_VALIDATION_INPUT', 'Could not execute required Bridge gates', cause)
     );
   }
-  const hash = await sha256Hex(Uint8Array.from(ifcBytes));
-  if (hash !== canonical.modelHash.value) {
-    return err(
-      ifcError(
-        'BRIDGE_EXPORT_MODEL_HASH_MISMATCH',
-        'Executed validation report model hash does not match the exact IFC bytes'
-      )
-    );
-  }
-  executedReports.set(report, hash);
-  return ok(undefined);
 }
 
 /** Commits one immutable matching pair by atomically replacing its single resolver pointer. */
@@ -139,32 +269,54 @@ export async function resolveCommittedBridgeExport(
         specError('BRIDGE_EXPORT_INPUT', 'Bridge export resolution requires a safe project key')
       );
     }
-    const pointerPath = fileSystem.join(outputDirectory, pointerName(projectKey));
-    if ((await fileSystem.kind(pointerPath)) !== 'file') {
+    const pointerPath = fileSystem.join(outputDirectory, pointerName());
+    const generation = await fileSystem.readLink(pointerPath);
+    if (generation === null) {
       return err(
         ifcError('BRIDGE_EXPORT_POINTER_MISSING', 'No committed Bridge export pointer exists')
       );
     }
-    const pointer = parsePointer(await fileSystem.readFile(pointerPath), projectKey);
+    if (!isGenerationName(generation)) {
+      return err(
+        ifcError('BRIDGE_EXPORT_POINTER_INVALID', 'Committed Bridge generation link is invalid')
+      );
+    }
+    const generationDirectory = fileSystem.join(outputDirectory, generation);
+    const pointer = parsePointer(
+      await fileSystem.readFile(fileSystem.join(generationDirectory, 'bundle-manifest.json')),
+      projectKey
+    );
     if (!pointer.ok) return pointer;
-    const generationDirectory = fileSystem.join(outputDirectory, pointer.value.generation);
-    const ifcPath = fileSystem.join(generationDirectory, `${projectKey}.ifc`);
-    const reportPath = fileSystem.join(generationDirectory, 'validation-report.json');
+    if (pointer.value.generation !== generation) {
+      return err(
+        ifcError(
+          'BRIDGE_EXPORT_POINTER_INVALID',
+          'Bundle manifest generation does not match the current link'
+        )
+      );
+    }
+    const generationIfcPath = fileSystem.join(generationDirectory, `${projectKey}.ifc`);
+    const generationReportPath = fileSystem.join(generationDirectory, 'validation-report.json');
     if (
-      (await fileSystem.kind(ifcPath)) !== 'file' ||
-      (await fileSystem.kind(reportPath)) !== 'file'
+      (await fileSystem.kind(generationIfcPath)) !== 'file' ||
+      (await fileSystem.kind(generationReportPath)) !== 'file'
     ) {
       return err(
         ifcError('BRIDGE_EXPORT_BUNDLE_INCOMPLETE', 'Committed Bridge export bundle is incomplete')
       );
     }
     const [ifcBytes, reportBytes] = await Promise.all([
-      fileSystem.readFile(ifcPath),
-      fileSystem.readFile(reportPath),
+      fileSystem.readFile(generationIfcPath),
+      fileSystem.readFile(generationReportPath),
     ]);
     const ifcHash = await sha256Hex(ifcBytes);
-    const reportHash = readReportModelHash(reportBytes);
-    if (ifcHash !== pointer.value.modelHash || reportHash !== pointer.value.modelHash) {
+    const reportHash = await sha256Hex(reportBytes);
+    const declaredModelHash = readReportModelHash(reportBytes);
+    if (
+      ifcHash !== pointer.value.modelHash ||
+      reportHash !== pointer.value.reportHash ||
+      declaredModelHash !== pointer.value.modelHash
+    ) {
       return err(
         ifcError(
           'BRIDGE_EXPORT_BUNDLE_MISMATCH',
@@ -175,9 +327,10 @@ export async function resolveCommittedBridgeExport(
     return ok({
       pointerPath,
       generationDirectory,
-      ifcPath,
-      reportPath,
+      ifcPath: fileSystem.join(outputDirectory, `${projectKey}.ifc`),
+      reportPath: fileSystem.join(outputDirectory, 'validation-report.json'),
       modelHash: pointer.value.modelHash,
+      reportHash: pointer.value.reportHash,
     });
   } catch (cause) {
     return err(
@@ -193,11 +346,7 @@ export async function resolveCommittedBridgeExport(
 async function commitValidatedBridgeExportTransaction(
   input: ValidatedBridgeExportInput
 ): Promise<Result<ValidatedBridgeExportResult, BimError>> {
-  if (
-    input.outputDirectory.length === 0 ||
-    !isProjectKey(input.projectKey) ||
-    !(input.ifcBytes instanceof Uint8Array)
-  ) {
+  if (input.outputDirectory.length === 0 || !isProjectKey(input.projectKey)) {
     return err(
       specError(
         'BRIDGE_EXPORT_INPUT',
@@ -207,27 +356,20 @@ async function commitValidatedBridgeExportTransaction(
   }
 
   const fileSystem = input.fileSystem;
-  const pointerPath = fileSystem.join(input.outputDirectory, pointerName(input.projectKey));
-  const ifcBytes = Uint8Array.from(input.ifcBytes);
-  const actualHash = await sha256Hex(ifcBytes);
-  if (executedReports.get(input.report) !== actualHash) {
+  const pointerPath = fileSystem.join(input.outputDirectory, pointerName());
+  const directIfcPath = fileSystem.join(input.outputDirectory, `${input.projectKey}.ifc`);
+  const directReportPath = fileSystem.join(input.outputDirectory, 'validation-report.json');
+  const executed = executedValidations.get(input.validation);
+  if (executed === undefined) {
     return err(
       specError(
         'BRIDGE_EXPORT_VALIDATION_NOT_EXECUTED',
-        'Bridge export requires the internal executed-gate result for these exact IFC bytes'
+        'Bridge export requires the opaque result returned by executeBridgeValidationForExport'
       )
     );
   }
-  const canonicalReport = rebuildCanonicalReport(input.report);
-  if (canonicalReport === null || canonicalReport.modelHash.value !== actualHash) {
-    return err(
-      specError(
-        'BRIDGE_EXPORT_VALIDATION_NOT_EXECUTED',
-        'Executed validation evidence is no longer canonical'
-      )
-    );
-  }
-  const exitClassification = classifyBridgeValidationExit(canonicalReport);
+  const { ifcBytes, reportBytes, modelHash, reportHash } = executed;
+  const exitClassification = classifyBridgeValidationExit(input.validation.report);
   if (exitClassification !== 0) {
     return ok({
       committed: false,
@@ -240,16 +382,37 @@ async function commitValidatedBridgeExportTransaction(
     });
   }
 
-  const reportBytes = new TextEncoder().encode(serializeBridgeValidationReport(canonicalReport));
   await fileSystem.mkdir(input.outputDirectory);
   const lock = await fileSystem.acquireExclusiveLock(
     fileSystem.join(input.outputDirectory, '.brepjs-export.lock')
   );
   let stagingDirectory: string | null = null;
   let committedResult: Extract<ValidatedBridgeExportResult, { committed: true }> | null = null;
+  let candidatePointer: BridgeExportPointer | null = null;
+  let candidateResult: Extract<ValidatedBridgeExportResult, { committed: true }> | null = null;
   let transactionError: BimError | null = null;
+  let preserveGeneration = false;
+  let stagedPointerPath: string | null = null;
+  const createdStableLinks: string[] = [];
+  let previousGeneration: string | null = null;
 
   try {
+    const ifcLinkTarget = fileSystem.join(pointerName(), `${input.projectKey}.ifc`);
+    const reportLinkTarget = fileSystem.join(pointerName(), 'validation-report.json');
+    if (await ensureStableLink(fileSystem, directIfcPath, ifcLinkTarget)) {
+      createdStableLinks.push(directIfcPath);
+    }
+    if (await ensureStableLink(fileSystem, directReportPath, reportLinkTarget)) {
+      createdStableLinks.push(directReportPath);
+    }
+    try {
+      previousGeneration = await fileSystem.readLink(pointerPath);
+    } catch (cause) {
+      throw new ExportPointerCollisionError(undefined, { cause });
+    }
+    if (previousGeneration !== null && !isGenerationName(previousGeneration)) {
+      throw new ExportPointerCollisionError();
+    }
     stagingDirectory = await fileSystem.mkdtemp(
       fileSystem.join(input.outputDirectory, GENERATION_PREFIX)
     );
@@ -261,36 +424,49 @@ async function commitValidatedBridgeExportTransaction(
     ) {
       throw new Error('Filesystem adapter returned an invalid generation basename');
     }
-    const ifcPath = fileSystem.join(stagingDirectory, `${input.projectKey}.ifc`);
-    const reportPath = fileSystem.join(stagingDirectory, 'validation-report.json');
-    const stagedPointerPath = fileSystem.join(stagingDirectory, '.commit-pointer.json');
-    await fileSystem.writeFile(ifcPath, ifcBytes);
-    await fileSystem.writeFile(reportPath, reportBytes);
-    await fileSystem.writeFile(
-      stagedPointerPath,
-      new TextEncoder().encode(
-        serializePointer({
-          schemaVersion: POINTER_SCHEMA_VERSION,
-          projectKey: input.projectKey,
-          generation,
-          modelHash: actualHash,
-        })
-      )
-    );
-    if ((await fileSystem.kind(pointerPath)) === 'other') {
-      throw new ExportPointerCollisionError();
-    }
-    await fileSystem.replaceFileAtomically(stagedPointerPath, pointerPath);
-    committedResult = {
+    const generationIfcPath = fileSystem.join(stagingDirectory, `${input.projectKey}.ifc`);
+    const generationReportPath = fileSystem.join(stagingDirectory, 'validation-report.json');
+    stagedPointerPath = fileSystem.join(input.outputDirectory, `.${generation}.current-link`);
+    await fileSystem.writeFile(generationIfcPath, ifcBytes);
+    await fileSystem.writeFile(generationReportPath, reportBytes);
+    candidatePointer = {
+      schemaVersion: POINTER_SCHEMA_VERSION,
+      projectKey: input.projectKey,
+      generation,
+      modelHash,
+      reportHash,
+    };
+    candidateResult = {
       committed: true,
       exitClassification: 0,
       pointerPath,
       generationDirectory: stagingDirectory,
-      ifcPath,
-      reportPath,
+      ifcPath: directIfcPath,
+      reportPath: directReportPath,
       lockStatus: 'released',
+      cleanupStatus: 'complete',
     };
+    await fileSystem.writeFile(
+      fileSystem.join(stagingDirectory, 'bundle-manifest.json'),
+      new TextEncoder().encode(serializePointer(candidatePointer))
+    );
+    await fileSystem.createSymlinkNoReplace(generation, stagedPointerPath);
+    await fileSystem.replaceFileAtomically(stagedPointerPath, pointerPath);
+    stagedPointerPath = null;
+    committedResult = candidateResult;
   } catch (cause) {
+    if (
+      !(cause instanceof ExportPointerCollisionError) &&
+      candidatePointer !== null &&
+      candidateResult !== null
+    ) {
+      const pointerState = await reconcilePointer(fileSystem, pointerPath, candidatePointer);
+      if (pointerState === 'committed') {
+        committedResult = candidateResult;
+        stagedPointerPath = null;
+      }
+      if (pointerState === 'unknown') preserveGeneration = true;
+    }
     transactionError =
       cause instanceof ExportPointerCollisionError
         ? ifcError(
@@ -302,6 +478,19 @@ async function commitValidatedBridgeExportTransaction(
             'Could not publish the complete Bridge export bundle',
             cause
           );
+  }
+
+  if (committedResult !== null && candidatePointer !== null) {
+    try {
+      await cleanupOldGenerations(
+        fileSystem,
+        input.outputDirectory,
+        candidatePointer.generation,
+        previousGeneration
+      );
+    } catch {
+      committedResult = { ...committedResult, cleanupStatus: 'incomplete' };
+    }
   }
 
   let releaseError: unknown;
@@ -319,11 +508,23 @@ async function commitValidatedBridgeExportTransaction(
   }
 
   let cleanupError: unknown;
-  if (stagingDirectory !== null) {
+  if (stagedPointerPath !== null) {
+    try {
+      await fileSystem.removeOwnedLink(stagedPointerPath);
+    } catch (cause) {
+      cleanupError = cause;
+    }
+  }
+  if (stagingDirectory !== null && !preserveGeneration) {
     try {
       await fileSystem.removeOwnedDirectory(stagingDirectory);
     } catch (cause) {
       cleanupError = cause;
+    }
+  }
+  if ((await fileSystem.readLink(pointerPath).catch(() => null)) === null) {
+    for (const path of createdStableLinks.reverse()) {
+      await fileSystem.removeOwnedLink(path).catch(() => undefined);
     }
   }
   return err(
@@ -356,36 +557,6 @@ function combineTransactionFailures(
   return ifcError(primary.code, details.join('; '), primary.cause);
 }
 
-function rebuildCanonicalReport(report: BridgeValidationReport): BridgeValidationReport | null {
-  try {
-    if (report.gates.length !== BRIDGE_VALIDATION_GATES.length) return null;
-    const gateResults = report.gates.map((gate) => ({
-      gateId: gate.id,
-      status: gate.status,
-      ...(gate.validatorId === null ? {} : { validatorId: gate.validatorId }),
-      ...(gate.status === 'unavailable' && gate.unavailableReason !== null
-        ? { unavailableReason: gate.unavailableReason }
-        : {}),
-      issues: gate.issues,
-      evidence: gate.evidence,
-    })) as BridgeGateResultInput[];
-    const rebuilt = buildBridgeValidationReport({
-      ifcSchema: report.ifc.schema,
-      ifcView: report.ifc.view,
-      modelHash: report.modelHash,
-      validators: report.validators,
-      gateResults,
-    });
-    if (!rebuilt.ok) return null;
-    return serializeBridgeValidationReport(rebuilt.value) ===
-      serializeBridgeValidationReport(report)
-      ? rebuilt.value
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 function parsePointer(
   bytes: Uint8Array,
   projectKey: string
@@ -416,7 +587,10 @@ function parsePointer(
     candidate.generation.includes('\\') ||
     !('modelHash' in candidate) ||
     typeof candidate.modelHash !== 'string' ||
-    !/^[0-9a-f]{64}$/.test(candidate.modelHash)
+    !/^[0-9a-f]{64}$/.test(candidate.modelHash) ||
+    !('reportHash' in candidate) ||
+    typeof candidate.reportHash !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(candidate.reportHash)
   ) {
     return err(
       ifcError(
@@ -430,7 +604,58 @@ function parsePointer(
     projectKey,
     generation: candidate.generation,
     modelHash: candidate.modelHash,
+    reportHash: candidate.reportHash,
   });
+}
+
+async function reconcilePointer(
+  fileSystem: BridgeExportFileSystem,
+  pointerPath: string,
+  candidate: BridgeExportPointer
+): Promise<'committed' | 'not-committed' | 'unknown'> {
+  try {
+    const generation = await fileSystem.readLink(pointerPath);
+    if (generation === null) return 'not-committed';
+    return generation === candidate.generation ? 'committed' : 'not-committed';
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function ensureStableLink(
+  fileSystem: BridgeExportFileSystem,
+  path: string,
+  target: string
+): Promise<boolean> {
+  const existing = await fileSystem.readLink(path);
+  if (existing === target) return false;
+  if (existing !== null) throw new ExportPointerCollisionError();
+  try {
+    await fileSystem.createSymlinkNoReplace(target, path);
+    return true;
+  } catch (cause) {
+    const raced = await fileSystem.readLink(path);
+    if (raced === target) return false;
+    throw new ExportPointerCollisionError(undefined, { cause });
+  }
+}
+
+async function cleanupOldGenerations(
+  fileSystem: BridgeExportFileSystem,
+  outputDirectory: string,
+  currentGeneration: string,
+  previousGeneration: string | null
+): Promise<void> {
+  const keep = new Set([
+    currentGeneration,
+    ...(previousGeneration === null ? [] : [previousGeneration]),
+  ]);
+  const entries = await fileSystem.listDirectory(outputDirectory);
+  for (const entry of entries) {
+    if (isGenerationName(entry) && !keep.has(entry)) {
+      await fileSystem.removeOwnedDirectory(fileSystem.join(outputDirectory, entry));
+    }
+  }
 }
 
 function readReportModelHash(bytes: Uint8Array): string | null {
@@ -459,8 +684,12 @@ function serializePointer(pointer: BridgeExportPointer): string {
   return `${JSON.stringify(pointer, null, 2)}\n`;
 }
 
-function pointerName(projectKey: string): string {
-  return `${projectKey}.bridge-export.json`;
+function pointerName(): string {
+  return '.brepjs-current';
+}
+
+function isGenerationName(value: string): boolean {
+  return value.startsWith(GENERATION_PREFIX) && !value.includes('/') && !value.includes('\\');
 }
 
 function isProjectKey(value: string): boolean {

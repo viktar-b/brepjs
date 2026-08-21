@@ -6,9 +6,12 @@ import {
   mkdtemp,
   open,
   readFile,
+  readlink,
   readdir,
   rename,
   rm,
+  symlink,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,13 +22,15 @@ import {
   BRIDGE_VALIDATION_GATES,
   buildBridgeValidationReport,
   commitValidatedBridgeExport,
+  executeBridgeValidationForExport,
   resolveCommittedBridgeExport,
   serializeBridgeValidationReport,
   type BridgeExportFileSystem,
   type BridgeGateResultInput,
+  type BridgeProjectGateRunner,
   type BridgeValidationReport,
+  type ExecutedBridgeValidation,
 } from '../src/index.js';
-import { authorizeExecutedBridgeValidationForExport } from '../src/validation/atomicBridgeExport.js';
 
 const NODE_FILE_SYSTEM: BridgeExportFileSystem = {
   join,
@@ -36,6 +41,24 @@ const NODE_FILE_SYSTEM: BridgeExportFileSystem = {
   mkdtemp,
   writeFile,
   readFile,
+  readLink: async (path) => {
+    try {
+      return await readlink(path);
+    } catch (cause) {
+      if (
+        cause !== null &&
+        typeof cause === 'object' &&
+        'code' in cause &&
+        cause.code === 'ENOENT'
+      ) {
+        return null;
+      }
+      throw cause;
+    }
+  },
+  createSymlinkNoReplace: (target, path) => symlink(target, path),
+  removeOwnedLink: unlink,
+  listDirectory: readdir,
   replaceFileAtomically: rename,
   removeOwnedDirectory: (path) => rm(path, { recursive: true, force: true }),
   kind: async (path) => {
@@ -143,27 +166,84 @@ function buildReportFor(
   );
 }
 
-async function executedReportFor(
+function requiredGateRunners(
+  status: 'pass' | 'fail' | 'unavailable' = 'pass',
+  onRun?: (gateId: string, ifcBytes: Uint8Array) => void
+): BridgeProjectGateRunner[] {
+  const firstRequiredGate = BRIDGE_VALIDATION_GATES.find((gate) => gate.required)?.id;
+  if (firstRequiredGate === undefined) throw new Error('required Bridge gate missing');
+  return BRIDGE_VALIDATION_GATES.filter((gate) => gate.required).map((gate) => ({
+    gateId: gate.id,
+    validator: { id: 'brepjs-bim', name: 'brepjs-bim validators', version: '1' },
+    run: (input) => {
+      onRun?.(gate.id, input.ifcBytes);
+      if (gate.id !== firstRequiredGate || status === 'pass') {
+        return Promise.resolve({
+          status: 'pass' as const,
+          issues: [],
+          evidence: [{ kind: 'model', value: gate.id }],
+        });
+      }
+      if (status === 'fail') {
+        return Promise.resolve({
+          status,
+          issues: [
+            { severity: 'error' as const, code: 'TEST_FAILURE', message: 'Deliberate failure' },
+          ],
+          evidence: [{ kind: 'model', value: gate.id }],
+        });
+      }
+      return Promise.resolve({
+        status,
+        unavailableReason: 'missing' as const,
+        issues: [
+          { severity: 'error' as const, code: 'TEST_UNAVAILABLE', message: 'Evidence missing' },
+        ],
+        evidence: [],
+      });
+    },
+  }));
+}
+
+async function executedValidationFor(
   ifcBytes: Uint8Array,
-  status: 'pass' | 'fail' | 'unavailable' = 'pass'
-): Promise<BridgeValidationReport> {
-  const report = buildReportFor(ifcBytes, status);
-  unwrap(await authorizeExecutedBridgeValidationForExport(ifcBytes, report));
-  return report;
+  status: 'pass' | 'fail' | 'unavailable' = 'pass',
+  onRun?: (gateId: string, ifcBytes: Uint8Array) => void
+): Promise<ExecutedBridgeValidation> {
+  return unwrap(
+    await executeBridgeValidationForExport({
+      ifcBytes,
+      runners: requiredGateRunners(status, onRun),
+    })
+  );
+}
+
+async function readDirectPairModelHash(outputDirectory: string): Promise<string> {
+  const [ifcBytes, reportText] = await Promise.all([
+    readFile(join(outputDirectory, 'test-bridge.ifc')),
+    readFile(join(outputDirectory, 'validation-report.json'), 'utf8'),
+  ]);
+  const ifcHash = createHash('sha256').update(ifcBytes).digest('hex');
+  const report = JSON.parse(reportText) as BridgeValidationReport;
+  expect(report.modelHash.value).toBe(ifcHash);
+  return ifcHash;
 }
 
 describe('atomic validated Bridge export', () => {
   it('publishes one immutable bundle through one atomically replaced pointer', async () => {
     const outputDirectory = await temporaryOutput();
     const ifcBytes = new TextEncoder().encode('IFC4X3_ADD2 deterministic bytes');
-    const report = await executedReportFor(ifcBytes);
+    const observedGates: string[] = [];
+    const validation = await executedValidationFor(ifcBytes, 'pass', (gateId, observedBytes) => {
+      observedGates.push(gateId);
+      expect(observedBytes).toEqual(ifcBytes);
+    });
 
     const result = unwrap(
       await commitValidatedBridgeExport({
         outputDirectory,
         projectKey: 'test-bridge',
-        ifcBytes,
-        report,
+        validation,
         fileSystem: NODE_FILE_SYSTEM,
       })
     );
@@ -171,10 +251,19 @@ describe('atomic validated Bridge export', () => {
     expect(result).toMatchObject({
       committed: true,
       exitClassification: 0,
-      pointerPath: join(outputDirectory, 'test-bridge.bridge-export.json'),
+      pointerPath: join(outputDirectory, '.brepjs-current'),
+      ifcPath: join(outputDirectory, 'test-bridge.ifc'),
+      reportPath: join(outputDirectory, 'validation-report.json'),
       lockStatus: 'released',
     });
+    expect(observedGates).toEqual(
+      BRIDGE_VALIDATION_GATES.filter((gate) => gate.required).map((gate) => gate.id)
+    );
     if (!result.committed) throw new Error('expected committed export');
+    expect(await readlink(result.ifcPath)).toBe(join('.brepjs-current', 'test-bridge.ifc'));
+    expect(await readlink(result.reportPath)).toBe(
+      join('.brepjs-current', 'validation-report.json')
+    );
     const resolved = unwrap(
       await resolveCommittedBridgeExport(outputDirectory, 'test-bridge', NODE_FILE_SYSTEM)
     );
@@ -182,11 +271,11 @@ describe('atomic validated Bridge export', () => {
       generationDirectory: result.generationDirectory,
       ifcPath: result.ifcPath,
       reportPath: result.reportPath,
-      modelHash: report.modelHash.value,
+      modelHash: validation.report.modelHash.value,
     });
     expect(new Uint8Array(await readFile(resolved.ifcPath))).toEqual(ifcBytes);
     expect(await readFile(resolved.reportPath, 'utf8')).toBe(
-      serializeBridgeValidationReport(report)
+      serializeBridgeValidationReport(validation.report)
     );
   });
 
@@ -203,8 +292,7 @@ describe('atomic validated Bridge export', () => {
         await commitValidatedBridgeExport({
           outputDirectory,
           projectKey: 'test-bridge',
-          ifcBytes,
-          report: await executedReportFor(ifcBytes, status),
+          validation: await executedValidationFor(ifcBytes, status),
           fileSystem: NODE_FILE_SYSTEM,
         })
       );
@@ -225,8 +313,7 @@ describe('atomic validated Bridge export', () => {
     const result = await commitValidatedBridgeExport({
       outputDirectory,
       projectKey: 'test-bridge',
-      ifcBytes,
-      report: buildReportFor(ifcBytes),
+      validation: { report: buildReportFor(ifcBytes) },
       fileSystem: NODE_FILE_SYSTEM,
     });
 
@@ -237,16 +324,15 @@ describe('atomic validated Bridge export', () => {
     await expect(access(outputDirectory)).rejects.toThrow();
   });
 
-  it('does not transfer executed-validation authority to a report clone', async () => {
+  it('does not transfer executed-validation authority to a capability clone', async () => {
     const outputDirectory = await temporaryOutput();
     const ifcBytes = new TextEncoder().encode('authorized report identity');
-    const report = await executedReportFor(ifcBytes);
+    const validation = await executedValidationFor(ifcBytes);
 
     const result = await commitValidatedBridgeExport({
       outputDirectory,
       projectKey: 'test-bridge',
-      ifcBytes,
-      report: { ...report },
+      validation: { ...validation },
       fileSystem: NODE_FILE_SYSTEM,
     });
 
@@ -256,21 +342,15 @@ describe('atomic validated Bridge export', () => {
     });
   });
 
-  it('rejects executed validation when the exact IFC bytes differ', async () => {
-    const outputDirectory = await temporaryOutput();
-    const reportedBytes = new TextEncoder().encode('reported IFC');
-
-    const result = await commitValidatedBridgeExport({
-      outputDirectory,
-      projectKey: 'test-bridge',
-      ifcBytes: new TextEncoder().encode('different IFC'),
-      report: await executedReportFor(reportedBytes),
-      fileSystem: NODE_FILE_SYSTEM,
+  it('refuses to mint a capability when any required project gate runner is missing', async () => {
+    const ifcBytes = new TextEncoder().encode('incomplete runner registry');
+    const result = await executeBridgeValidationForExport({
+      ifcBytes,
+      runners: requiredGateRunners().slice(1),
     });
-
     expect(result).toMatchObject({
       ok: false,
-      error: { code: 'BRIDGE_EXPORT_VALIDATION_NOT_EXECUTED' },
+      error: { code: 'BRIDGE_EXPORT_VALIDATION_INPUT' },
     });
   });
 
@@ -299,8 +379,7 @@ describe('atomic validated Bridge export', () => {
     const result = await commitValidatedBridgeExport({
       outputDirectory,
       projectKey: 'test-bridge',
-      ifcBytes,
-      report: await executedReportFor(ifcBytes),
+      validation: await executedValidationFor(ifcBytes),
       fileSystem: failingFileSystem,
     });
 
@@ -311,13 +390,12 @@ describe('atomic validated Bridge export', () => {
   it('leaves the old complete pair resolvable when the pointer commit fails', async () => {
     const outputDirectory = await temporaryOutput();
     const previousBytes = new TextEncoder().encode('previous committed pair');
-    const previousReport = await executedReportFor(previousBytes);
+    const previousValidation = await executedValidationFor(previousBytes);
     unwrap(
       await commitValidatedBridgeExport({
         outputDirectory,
         projectKey: 'test-bridge',
-        ifcBytes: previousBytes,
-        report: previousReport,
+        validation: previousValidation,
         fileSystem: NODE_FILE_SYSTEM,
       })
     );
@@ -333,8 +411,7 @@ describe('atomic validated Bridge export', () => {
     const result = await commitValidatedBridgeExport({
       outputDirectory,
       projectKey: 'test-bridge',
-      ifcBytes: candidateBytes,
-      report: await executedReportFor(candidateBytes),
+      validation: await executedValidationFor(candidateBytes),
       fileSystem: failingFileSystem,
     });
 
@@ -346,6 +423,60 @@ describe('atomic validated Bridge export', () => {
     expect(new Uint8Array(await readFile(after.ifcPath))).toEqual(previousBytes);
   });
 
+  it('reconciles a pointer replacement that commits and then rejects', async () => {
+    const outputDirectory = await temporaryOutput();
+    const ifcBytes = new TextEncoder().encode('rename then throw pair');
+    const uncertainFileSystem: BridgeExportFileSystem = {
+      ...NODE_FILE_SYSTEM,
+      replaceFileAtomically: async (from, to) => {
+        await NODE_FILE_SYSTEM.replaceFileAtomically(from, to);
+        throw new Error('rename completed before adapter rejection');
+      },
+    };
+
+    const result = unwrap(
+      await commitValidatedBridgeExport({
+        outputDirectory,
+        projectKey: 'test-bridge',
+        validation: await executedValidationFor(ifcBytes),
+        fileSystem: uncertainFileSystem,
+      })
+    );
+
+    expect(result).toMatchObject({ committed: true, lockStatus: 'released' });
+    expect(await readDirectPairModelHash(outputDirectory)).toBe(
+      createHash('sha256').update(ifcBytes).digest('hex')
+    );
+  });
+
+  it('rejects a committed bundle whose exact validation-report bytes were altered', async () => {
+    const outputDirectory = await temporaryOutput();
+    const ifcBytes = new TextEncoder().encode('report digest candidate');
+    const committed = unwrap(
+      await commitValidatedBridgeExport({
+        outputDirectory,
+        projectKey: 'test-bridge',
+        validation: await executedValidationFor(ifcBytes),
+        fileSystem: NODE_FILE_SYSTEM,
+      })
+    );
+    if (!committed.committed) throw new Error('expected committed export');
+    await writeFile(
+      join(committed.generationDirectory, 'validation-report.json'),
+      JSON.stringify({ modelHash: { algorithm: 'sha256', value: committedResultHash(ifcBytes) } })
+    );
+
+    const resolved = await resolveCommittedBridgeExport(
+      outputDirectory,
+      'test-bridge',
+      NODE_FILE_SYSTEM
+    );
+    expect(resolved).toMatchObject({
+      ok: false,
+      error: { code: 'BRIDGE_EXPORT_BUNDLE_MISMATCH' },
+    });
+  });
+
   it('lets an interleaving reader resolve only the complete old or complete new pair', async () => {
     const outputDirectory = await temporaryOutput();
     const previousBytes = new TextEncoder().encode('reader old pair');
@@ -353,8 +484,7 @@ describe('atomic validated Bridge export', () => {
       await commitValidatedBridgeExport({
         outputDirectory,
         projectKey: 'test-bridge',
-        ifcBytes: previousBytes,
-        report: await executedReportFor(previousBytes),
+        validation: await executedValidationFor(previousBytes),
         fileSystem: NODE_FILE_SYSTEM,
       })
     );
@@ -363,17 +493,9 @@ describe('atomic validated Bridge export', () => {
     const observingFileSystem: BridgeExportFileSystem = {
       ...NODE_FILE_SYSTEM,
       replaceFileAtomically: async (from, to) => {
-        observed.push(
-          unwrap(
-            await resolveCommittedBridgeExport(outputDirectory, 'test-bridge', NODE_FILE_SYSTEM)
-          ).modelHash
-        );
+        observed.push(await readDirectPairModelHash(outputDirectory));
         await NODE_FILE_SYSTEM.replaceFileAtomically(from, to);
-        observed.push(
-          unwrap(
-            await resolveCommittedBridgeExport(outputDirectory, 'test-bridge', NODE_FILE_SYSTEM)
-          ).modelHash
-        );
+        observed.push(await readDirectPairModelHash(outputDirectory));
       },
     };
 
@@ -381,8 +503,7 @@ describe('atomic validated Bridge export', () => {
       await commitValidatedBridgeExport({
         outputDirectory,
         projectKey: 'test-bridge',
-        ifcBytes: candidateBytes,
-        report: await executedReportFor(candidateBytes),
+        validation: await executedValidationFor(candidateBytes),
         fileSystem: observingFileSystem,
       })
     );
@@ -412,16 +533,14 @@ describe('atomic validated Bridge export', () => {
     const first = commitValidatedBridgeExport({
       outputDirectory,
       projectKey: 'test-bridge',
-      ifcBytes: firstBytes,
-      report: await executedReportFor(firstBytes),
+      validation: await executedValidationFor(firstBytes),
       fileSystem: delayedFileSystem,
     });
     await firstPointer;
     const second = commitValidatedBridgeExport({
       outputDirectory: relative(process.cwd(), outputDirectory),
       projectKey: 'test-bridge',
-      ifcBytes: secondBytes,
-      report: await executedReportFor(secondBytes),
+      validation: await executedValidationFor(secondBytes),
       fileSystem: NODE_FILE_SYSTEM,
     });
 
@@ -435,7 +554,7 @@ describe('atomic validated Bridge export', () => {
 
   it('refuses an artifact-shaped pointer without deleting its contents', async () => {
     const outputDirectory = await temporaryOutput();
-    const pointerDirectory = join(outputDirectory, 'test-bridge.bridge-export.json');
+    const pointerDirectory = join(outputDirectory, '.brepjs-current');
     const sentinelPath = join(pointerDirectory, 'user-data.txt');
     await mkdir(pointerDirectory, { recursive: true });
     await writeFile(sentinelPath, 'must survive');
@@ -444,8 +563,7 @@ describe('atomic validated Bridge export', () => {
     const result = await commitValidatedBridgeExport({
       outputDirectory,
       projectKey: 'test-bridge',
-      ifcBytes,
-      report: await executedReportFor(ifcBytes),
+      validation: await executedValidationFor(ifcBytes),
       fileSystem: NODE_FILE_SYSTEM,
     });
 
@@ -474,8 +592,7 @@ describe('atomic validated Bridge export', () => {
                 await commitValidatedBridgeExport({
                   outputDirectory,
                   projectKey: 'test-bridge',
-                  ifcBytes: newerBytes,
-                  report: await executedReportFor(newerBytes),
+                  validation: await executedValidationFor(newerBytes),
                   fileSystem: NODE_FILE_SYSTEM,
                 })
               );
@@ -490,8 +607,7 @@ describe('atomic validated Bridge export', () => {
       await commitValidatedBridgeExport({
         outputDirectory,
         projectKey: 'test-bridge',
-        ifcBytes: firstBytes,
-        report: await executedReportFor(firstBytes),
+        validation: await executedValidationFor(firstBytes),
         fileSystem: uncertainFileSystem,
       })
     );
@@ -532,8 +648,7 @@ describe('atomic validated Bridge export', () => {
     const first = await commitValidatedBridgeExport({
       outputDirectory,
       projectKey: 'test-bridge',
-      ifcBytes,
-      report: await executedReportFor(ifcBytes),
+      validation: await executedValidationFor(ifcBytes),
       fileSystem: stagingFailureFileSystem,
     });
     expect(first).toMatchObject({ ok: false });
@@ -543,8 +658,7 @@ describe('atomic validated Bridge export', () => {
       await commitValidatedBridgeExport({
         outputDirectory,
         projectKey: 'test-bridge',
-        ifcBytes,
-        report: await executedReportFor(ifcBytes),
+        validation: await executedValidationFor(ifcBytes),
         fileSystem: stagingFailureFileSystem,
       })
     );
@@ -555,7 +669,7 @@ describe('atomic validated Bridge export', () => {
     const outputDirectory = await temporaryOutput();
     const ifcBytes = new TextEncoder().encode('immutable candidate snapshot');
     const expectedBytes = Uint8Array.from(ifcBytes);
-    const report = await executedReportFor(ifcBytes);
+    const validation = await executedValidationFor(ifcBytes);
     const mutatingFileSystem: BridgeExportFileSystem = {
       ...NODE_FILE_SYSTEM,
       mkdir: async (path) => {
@@ -568,8 +682,7 @@ describe('atomic validated Bridge export', () => {
       await commitValidatedBridgeExport({
         outputDirectory,
         projectKey: 'test-bridge',
-        ifcBytes,
-        report,
+        validation,
         fileSystem: mutatingFileSystem,
       })
     );
@@ -577,4 +690,27 @@ describe('atomic validated Bridge export', () => {
 
     expect(new Uint8Array(await readFile(result.ifcPath))).toEqual(expectedBytes);
   });
+
+  it('bounds owned generation retention to the current and immediately previous pair', async () => {
+    const outputDirectory = await temporaryOutput();
+    for (let index = 0; index < 4; index += 1) {
+      const ifcBytes = new TextEncoder().encode(`bounded generation ${index}`);
+      const result = unwrap(
+        await commitValidatedBridgeExport({
+          outputDirectory,
+          projectKey: 'test-bridge',
+          validation: await executedValidationFor(ifcBytes),
+          fileSystem: NODE_FILE_SYSTEM,
+        })
+      );
+      expect(result).toMatchObject({ committed: true, cleanupStatus: 'complete' });
+    }
+    expect(
+      (await readdir(outputDirectory)).filter((entry) => entry.startsWith('.brepjs-export-'))
+    ).toHaveLength(2);
+  });
 });
+
+function committedResultHash(bytes: Uint8Array): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
