@@ -62,6 +62,13 @@ export {
   classifyBridgeValidationExit,
   serializeBridgeValidationReport,
 } from './validation/bridgeValidationContract.js';
+export {
+  BRIDGE_BASELINE_IDS_XML,
+  BRIDGE_BASELINE_IDS_SHA256,
+  BRIDGE_IDS_VALIDATOR,
+  evaluateBridgeIds,
+} from './validation/bridgeIds.js';
+export type { BridgeIdsEvaluationInput, BridgeIdsEvaluation } from './validation/bridgeIds.js';
 export { checkGeometryValidity } from './validation/geometryValidity.js';
 export { checkGherkinRules } from './validation/gherkinChecks.js';
 export { issue, emptyReport, hasErrors, countBySeverity } from './validation/severity.js';

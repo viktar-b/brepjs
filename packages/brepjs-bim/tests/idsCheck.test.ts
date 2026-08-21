@@ -1,10 +1,19 @@
 import { unwrap } from 'brepjs';
+import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { initOCCT } from '../../../tests/setup.js';
 import { BimModel } from '../src/model/bimModel.js';
 import { toIfc } from '../src/serialize/toIfc.js';
 import { parseIdsXml } from '../src/ids/idsParser.js';
 import { checkIdsData } from '../src/ids/idsEngine.js';
+import {
+  BRIDGE_BASELINE_IDS_SHA256,
+  BRIDGE_BASELINE_IDS_XML,
+  BRIDGE_VALIDATION_GATES,
+  buildBridgeValidationReport,
+  evaluateBridgeIds,
+  type BridgeGateResultInput,
+} from '../src/index.js';
 
 beforeAll(async () => {
   await initOCCT();
@@ -71,6 +80,28 @@ const WALL_PARTOF_IDS = `<?xml version="1.0" encoding="UTF-8"?>
   </specifications>
 </ids>`;
 
+const PROJECT_BRIDGE_NAME_IDS = `<?xml version="1.0" encoding="UTF-8"?>
+<ids xmlns="http://standards.buildingsmart.org/IDS">
+  <info>
+    <title>Project Bridge naming requirement</title>
+  </info>
+  <specifications>
+    <specification name="Bridge uses the project-approved name" ifcVersion="IFC4X3_ADD2">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBRIDGE</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements>
+        <attribute cardinality="required">
+          <name><simpleValue>Name</simpleValue></name>
+          <value><simpleValue>Accepted Bridge</simpleValue></value>
+        </attribute>
+      </requirements>
+    </specification>
+  </specifications>
+</ids>`;
+
 /** Builds a minimal spatial tree plus one wall, optionally marking it external. */
 function buildWallModel(withIsExternal: boolean): BimModel {
   const model = new BimModel();
@@ -100,6 +131,45 @@ function buildWallModel(withIsExternal: boolean): BimModel {
   model.placeIn(wall.value, storeyId);
 
   return model;
+}
+
+async function buildBridgeIfc(bridgeName = 'Accepted Bridge'): Promise<Uint8Array> {
+  const model = new BimModel();
+  const project = unwrap(
+    model.init({ name: 'Bridge IDS Project', projectId: 'bridge-ids-project' })
+  );
+  const site = unwrap(model.addSite({ name: 'Bridge Site', compositionType: 'COMPLEX' }));
+  const bridge = unwrap(
+    model.addBridge({
+      name: bridgeName,
+      origin: [0, 0, 0],
+      axisX: [1, 0, 0],
+      axisZ: [0, 0, 1],
+      compositionType: 'ELEMENT',
+      predefinedType: 'GIRDER',
+    })
+  );
+  const part = unwrap(
+    model.addBridgePart({
+      name: 'Bridge Deck',
+      origin: [0, 0, 0],
+      axisX: [1, 0, 0],
+      axisZ: [0, 0, 1],
+      compositionType: 'ELEMENT',
+      usageType: 'LATERAL',
+      predefinedType: 'DECK',
+    })
+  );
+  model.aggregate(project, site);
+  model.aggregate(site, bridge);
+  model.aggregate(bridge, part);
+  return unwrap(
+    await toIfc(model, {
+      ...META,
+      ifcSchema: 'IFC4X3_ADD2',
+      ifcLengthUnit: 'MILLIMETRE',
+    })
+  );
 }
 
 describe('IDS check — Pset_WallCommon.IsExternal requirement', () => {
@@ -171,5 +241,132 @@ describe('IDS check — Pset_WallCommon.IsExternal requirement', () => {
   it('rejects an audit-invalid document (unknown entity class)', () => {
     const parsed = parseIdsXml(WALL_IS_EXTERNAL_IDS.replace(/IFCWALL/g, 'IFCWALDO'));
     expect(parsed.ok).toBe(false);
+  });
+});
+
+describe('bim/bridge/v1 baseline and project IDS', () => {
+  it('evaluates the immutable baseline and stronger project IDS as separate ordered gates', async () => {
+    const ifcBytes = await buildBridgeIfc();
+    const evaluation = unwrap(
+      await evaluateBridgeIds({
+        ifcBytes,
+        baselineIdsXml: BRIDGE_BASELINE_IDS_XML,
+        projectIdsXml: PROJECT_BRIDGE_NAME_IDS,
+      })
+    );
+
+    expect(BRIDGE_BASELINE_IDS_SHA256).toBe(
+      createHash('sha256').update(BRIDGE_BASELINE_IDS_XML).digest('hex')
+    );
+    expect(evaluation.validator).toEqual({
+      id: 'brepjs-bim.ids',
+      name: 'brepjs-bim IDS 1.0 checker',
+      version: '1',
+    });
+    expect(evaluation.gateResults.map((gate) => gate.gateId)).toEqual([
+      'ids.baseline',
+      'ids.project',
+    ]);
+    expect(evaluation.gateResults.map((gate) => gate.status)).toEqual(['pass', 'pass']);
+    expect(evaluation.gateResults[0]?.evidence).toContainEqual({
+      kind: 'ids-document',
+      value: 'requirements/bim-bridge-v1.ids',
+      checksum: BRIDGE_BASELINE_IDS_SHA256,
+    });
+    expect(evaluation.gateResults[1]?.evidence[0]?.checksum).toMatch(/^[0-9a-f]{64}$/);
+
+    const idsByGate = new Map(evaluation.gateResults.map((gate) => [gate.gateId, gate]));
+    const reportResults: BridgeGateResultInput[] = BRIDGE_VALIDATION_GATES.filter(
+      (gate) => gate.required
+    ).map(
+      (gate) =>
+        idsByGate.get(gate.id) ?? {
+          gateId: gate.id,
+          status: 'pass',
+          validatorId: 'brepjs-bim.ids',
+          issues: [],
+          evidence: [{ kind: 'model', value: gate.id }],
+        }
+    );
+    const report = unwrap(
+      buildBridgeValidationReport({
+        ifcSchema: 'IFC4X3_ADD2',
+        ifcView: 'ReferenceView',
+        modelHash: { algorithm: 'sha256', value: 'a'.repeat(64) },
+        validators: [evaluation.validator],
+        gateResults: reportResults,
+      })
+    );
+    expect(report.gates.filter((gate) => gate.id.startsWith('ids.'))).toMatchObject([
+      { id: 'ids.baseline', required: true, status: 'pass' },
+      { id: 'ids.project', required: true, status: 'pass' },
+    ]);
+  });
+
+  it('fails a modified baseline while still evaluating the separate project requirements', async () => {
+    const ifcBytes = await buildBridgeIfc();
+    const evaluation = unwrap(
+      await evaluateBridgeIds({
+        ifcBytes,
+        baselineIdsXml: BRIDGE_BASELINE_IDS_XML.replace('At least one Site', 'A modified Site'),
+        projectIdsXml: PROJECT_BRIDGE_NAME_IDS,
+      })
+    );
+
+    expect(evaluation.gateResults[0]).toMatchObject({
+      gateId: 'ids.baseline',
+      status: 'fail',
+      validatorId: 'brepjs-bim.ids',
+      issues: [{ code: 'BRIDGE_BASELINE_IDS_CHECKSUM_MISMATCH' }],
+    });
+    expect(evaluation.gateResults[1]).toMatchObject({
+      gateId: 'ids.project',
+      status: 'pass',
+    });
+  });
+
+  it('keeps a stronger failing project IDS separate from the passing baseline', async () => {
+    const ifcBytes = await buildBridgeIfc('Unapproved Bridge');
+    const evaluation = unwrap(
+      await evaluateBridgeIds({
+        ifcBytes,
+        baselineIdsXml: BRIDGE_BASELINE_IDS_XML,
+        projectIdsXml: PROJECT_BRIDGE_NAME_IDS,
+      })
+    );
+
+    expect(evaluation.gateResults[0]?.status).toBe('pass');
+    expect(evaluation.gateResults[1]).toMatchObject({
+      gateId: 'ids.project',
+      status: 'fail',
+      issues: [{ code: 'IDS_REQUIREMENT_FAILED' }],
+    });
+  });
+
+  it('reports missing or crashed required IDS evidence as unavailable, never pass', async () => {
+    const ifcBytes = await buildBridgeIfc();
+    const missing = unwrap(
+      await evaluateBridgeIds({
+        ifcBytes,
+        baselineIdsXml: null,
+        projectIdsXml: null,
+      })
+    );
+    expect(missing.gateResults).toMatchObject([
+      { gateId: 'ids.baseline', status: 'unavailable', unavailableReason: 'missing' },
+      { gateId: 'ids.project', status: 'unavailable', unavailableReason: 'missing' },
+    ]);
+
+    const crashed = unwrap(
+      await evaluateBridgeIds({
+        ifcBytes: new Uint8Array([1, 2, 3]),
+        baselineIdsXml: BRIDGE_BASELINE_IDS_XML,
+        projectIdsXml: PROJECT_BRIDGE_NAME_IDS,
+      })
+    );
+    expect(crashed.gateResults).toMatchObject([
+      { gateId: 'ids.baseline', status: 'unavailable', unavailableReason: 'crashed' },
+      { gateId: 'ids.project', status: 'unavailable', unavailableReason: 'crashed' },
+    ]);
   });
 });

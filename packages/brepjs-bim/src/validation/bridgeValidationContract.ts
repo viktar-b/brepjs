@@ -45,6 +45,8 @@ export const BRIDGE_VALIDATION_GATES: readonly BridgeValidationGateDefinition[] 
   requiredProjectGate('ifc.referential-integrity'),
   requiredProjectGate('ifc.geometry'),
   requiredProjectGate('ifc.normative-rules'),
+  requiredProjectGate('ids.baseline'),
+  requiredProjectGate('ids.project'),
   requiredProjectGate('ifc.project-units'),
   requiredProjectGate('ifc.map-units'),
   requiredProjectGate('ifc.crs-map-conversion'),

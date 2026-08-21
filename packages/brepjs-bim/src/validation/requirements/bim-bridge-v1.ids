@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ids xmlns="http://standards.buildingsmart.org/IDS">
+  <info>
+    <title>brepjs bim/bridge/v1 baseline requirements</title>
+    <description>
+      Immutable minimum spatial requirements for the brepjs IFC4X3_ADD2 Bridge capability profile.
+      Project-owned requirements are evaluated separately and may only add constraints.
+    </description>
+  </info>
+  <specifications>
+    <specification name="A Bridge project is present" ifcVersion="IFC4X3_ADD2">
+      <applicability minOccurs="1" maxOccurs="1">
+        <entity>
+          <name><simpleValue>IFCPROJECT</simpleValue></name>
+        </entity>
+      </applicability>
+    </specification>
+    <specification name="At least one Site is present" ifcVersion="IFC4X3_ADD2">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCSITE</simpleValue></name>
+        </entity>
+      </applicability>
+    </specification>
+    <specification name="Bridge Facilities declare a predefined type" ifcVersion="IFC4X3_ADD2">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBRIDGE</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements>
+        <attribute cardinality="required">
+          <name><simpleValue>PredefinedType</simpleValue></name>
+        </attribute>
+      </requirements>
+    </specification>
+    <specification name="Bridge Spatial Parts declare usage and belong to a Bridge" ifcVersion="IFC4X3_ADD2">
+      <applicability minOccurs="1" maxOccurs="unbounded">
+        <entity>
+          <name><simpleValue>IFCBRIDGEPART</simpleValue></name>
+        </entity>
+      </applicability>
+      <requirements>
+        <attribute cardinality="required">
+          <name><simpleValue>UsageType</simpleValue></name>
+        </attribute>
+        <partOf relation="IFCRELAGGREGATES" cardinality="required">
+          <entity>
+            <name><simpleValue>IFCBRIDGE</simpleValue></name>
+          </entity>
+        </partOf>
+      </requirements>
+    </specification>
+  </specifications>
+</ids>
