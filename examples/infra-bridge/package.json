@@ -2,22 +2,58 @@
   "name": "@brepjs/infra-bridge-example",
   "version": "0.0.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "npm@11.6.1",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "scripts": {
-    "check": "npm run typecheck && npm run lint && npm run test",
-    "typecheck": "tsgo --noEmit -p tsconfig.typecheck.json",
-    "lint": "eslint src tests",
+    "audit:releases": "node scripts-tbd-upstream/audit-registry-releases.mjs",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "npm run check:boundary && npm run verify:vendor && npm run typecheck && npm run lint && npm run format:check && npm run test && npm run build",
+    "check:boundary": "node scripts-tbd-upstream/check-standalone-boundary.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "lint": "eslint src tests scripts-tbd-upstream",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lock:refresh": "node scripts-tbd-upstream/refresh-package-lock.mjs",
     "test": "vitest run",
-    "preview": "tsx src/preview.ts",
-    "export:ifc": "tsx src/exportIfc.ts",
-    "reference:compare": "npm -C ../../reference/infra-bridge run compare:model --"
+    "preview": "node --import tsx src/preview.ts",
+    "export:ifc": "node --import tsx src/exportIfc.ts",
+    "verify:ifc": "node scripts-tbd-upstream/verify-ifc.mjs",
+    "verify:standalone": "node scripts-tbd-upstream/verify-standalone.mjs",
+    "verify:vendor": "node scripts-tbd-upstream/verify-vendored-platform.mjs",
+    "vendor:refresh": "node scripts-tbd-upstream/refresh-vendored-platform.mjs"
+  },
+  "dependencies": {
+    "brepjs": "file:vendor/brepjs-18.150.1-workspace-snapshot-4dcae681023b.tgz",
+    "brepjs-bim": "file:vendor/brepjs-bim-0.16.1-workspace-snapshot-4dcae681023b.tgz",
+    "brepjs-families": "file:vendor/brepjs-families-0.7.0-workspace-snapshot-4dcae681023b.tgz",
+    "occt-wasm": "4.2.0",
+    "web-ifc": "0.0.77",
+    "zod": "4.4.3"
   },
   "devDependencies": {
-    "brepjs": "*",
-    "brepjs-bim": "*",
-    "brepjs-families": "*",
-    "zod": "^4.4.3",
-    "typescript": "*",
-    "vitest": "^4.1.10"
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.2.0",
+    "eslint": "10.8.1",
+    "prettier": "3.9.6",
+    "tsx": "4.23.11",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.66.0",
+    "vitest": "4.1.10"
   }
 }

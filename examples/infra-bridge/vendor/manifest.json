@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "freeze": {
+    "status": "frozen",
+    "capturedAt": "2026-08-21T14:17:50.628Z",
+    "policy": "Compatibility snapshots are immutable and are not automatically replaced by registry latest."
+  },
+  "source": {
+    "repository": "https://github.com/andymai/brepjs",
+    "commit": "4dcae681023b5434cd5e9788c8100d20b2b95710"
+  },
+  "packages": [
+    {
+      "name": "brepjs",
+      "artifactKind": "workspace-snapshot",
+      "sourcePackageVersion": "18.150.1",
+      "file": "brepjs-18.150.1-workspace-snapshot-4dcae681023b.tgz",
+      "sha256": "f7f6be4d09399f475a366d8abda085b6e422c28c538c7c2da01892e4d571c294",
+      "registryAtFreeze": {
+        "latest": {
+          "version": "18.151.0",
+          "publishedAt": "2026-08-21T04:21:51.916Z",
+          "gitHead": "b1a83bbd4c06b83ed262d294415ab372bfc79d55",
+          "integrity": "sha512-xO0Nvht5M9zSo+7N75/czyPYUbk4wR+hpLL88wugUE3YflT0qf2047GzNbnxiNHdHqq97cp5YpDdcnopq9GKAg=="
+        },
+        "sameVersionRelease": {
+          "version": "18.150.1",
+          "publishedAt": "2026-08-19T20:51:32.540Z",
+          "gitHead": "4bf4a6a8abad07f64869bfc04191a9f916febcc5",
+          "integrity": "sha512-bgcANK5HWUMR7jZaAsKx6XOdH8t95tskU2y7ZnQZxk6skl8/3spRU8HaDr88H/ygg8QeDKCDwDHrdpJ1UcHYcA==",
+          "sha256": "01c898bc211d701f73098199b0d1fb7fa3495e2277e7ea9be0ef4e0368edeeb1",
+          "matchesSnapshot": false
+        }
+      }
+    },
+    {
+      "name": "brepjs-families",
+      "artifactKind": "workspace-snapshot",
+      "sourcePackageVersion": "0.7.0",
+      "file": "brepjs-families-0.7.0-workspace-snapshot-4dcae681023b.tgz",
+      "sha256": "cca3b4fc0915d447443367e884dc02548eccb669f9023bf29a3eb87b2b9b40da",
+      "registryAtFreeze": {
+        "latest": {
+          "version": "0.7.1",
+          "publishedAt": "2026-08-21T03:01:12.065Z",
+          "gitHead": "b6c89fbabf14f174c5e91ae5d5f5c32582e1787b",
+          "integrity": "sha512-Xx1z8v1f5rHxv6U/pHXQYeQiioyi0T9fFMvLbLnmE/0CsvCwDkFZBhlVLNt3no42OPdYMwvMJC0naUCsa5FZlg=="
+        },
+        "sameVersionRelease": {
+          "version": "0.7.0",
+          "publishedAt": "2026-08-18T04:29:18.768Z",
+          "gitHead": "bc55bde9eba0fae2008fc8e601d75389482d7b5a",
+          "integrity": "sha512-i156hGhhRnXD+9kEriHdf1ry/92MsxUb83rG9DwEKJs6XQ2XjliEaTkIKhZ5cVvL6jxhI9nDOKY5jWgShSxmEA==",
+          "sha256": "f4c6e643a030e186495257af2f0964e0c61d5f82fbf764f9e142a5fcb44e7dfb",
+          "matchesSnapshot": false
+        }
+      }
+    },
+    {
+      "name": "brepjs-bim",
+      "artifactKind": "workspace-snapshot",
+      "sourcePackageVersion": "0.16.1",
+      "file": "brepjs-bim-0.16.1-workspace-snapshot-4dcae681023b.tgz",
+      "sha256": "62cc9b7800c6b93fe95ebfe71521d645f525664ba02874f91f76a2dee3ae93c4",
+      "registryAtFreeze": {
+        "latest": {
+          "version": "0.17.0",
+          "publishedAt": "2026-08-21T04:23:42.637Z",
+          "gitHead": "6ae00b414c40736900c97351aa63d6bb4c621d3a",
+          "integrity": "sha512-aQFfZSYil3W0jqe58MQtLQOZkwoHVV+9WFYtrWG2J4kqFn65mfyVPd4ubBcXXLHddaCczSrRm06kIzG4h7gQLw=="
+        },
+        "sameVersionRelease": {
+          "version": "0.16.1",
+          "publishedAt": "2026-08-18T17:38:53.126Z",
+          "gitHead": "32f9b183ab851d366a6b420a48b737e79cdbde67",
+          "integrity": "sha512-fF2W8tm6Gw95vCWkkLy9djYJtnxLeHtQOd5VLrX8T/jM5Rzvt+aaIlT8mV5yQDbo3dmsZu5tZbF4iGQREv1jgA==",
+          "sha256": "67adb11cc9f3c18fe75bc85b260fe583d2bff0049bba52d003e572fba6d82177",
+          "matchesSnapshot": false
+        }
+      }
+    }
+  ]
+}

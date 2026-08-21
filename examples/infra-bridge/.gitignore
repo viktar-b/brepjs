@@ -1,0 +1,9 @@
+node_modules/
+dist/
+lib/
+coverage/
+.cache/
+*.tsbuildinfo
+
+# Frozen platform snapshots are source inputs despite the parent repo's archive ignore.
+!vendor/*.tgz

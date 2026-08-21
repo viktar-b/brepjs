@@ -48,6 +48,12 @@ const productKinds = new Set([
   'railing',
 ]);
 
+const spatialComposition = {
+  collection: 'COMPLEX',
+  element: 'ELEMENT',
+  partial: 'PARTIAL',
+} as const;
+
 /**
  * Project the authored bridge through the example-owned direct BIM adapter.
  * The adapter remains necessary because familiesToBim cannot yet aggregate a
@@ -82,7 +88,11 @@ export function projectInfraBridge(
     let added: Result<LocalId, BimError>;
     if (kind === 'site') {
       added = model.addSite(
-        { name: semanticName(element), ...placement(element.localFrame) },
+        {
+          name: semanticName(element),
+          ...placement(element.localFrame),
+          compositionType: projectedComposition(semantics),
+        },
         { stableKey: element.keyPath }
       );
     } else if (kind === 'bridge') {
@@ -90,6 +100,7 @@ export function projectInfraBridge(
         name: semanticName(element),
         ...placement(element.localFrame),
         predefinedType: semantics.role === 'arched' ? 'ARCHED' : 'GIRDER',
+        compositionType: projectedComposition(semantics),
       });
       if (!parsed.ok) return parsed;
       added = model.addBridge(parsed.value, { stableKey: element.keyPath });
@@ -99,6 +110,7 @@ export function projectInfraBridge(
         ...placement(element.localFrame),
         predefinedType: bridgePartType(semantics.role),
         usageType: facilityUsage(semantics),
+        compositionType: projectedComposition(semantics),
       });
       if (!parsed.ok) return parsed;
       added = model.addBridgePart(parsed.value, { stableKey: element.keyPath });
@@ -148,6 +160,13 @@ function validateHierarchy(
           `Invalid semantic hierarchy at '${keyPath}': '${kind}' under '${parent}'`
         )
       );
+}
+
+function projectedComposition(semantics: EngineeringSemantics) {
+  const composition = 'composition' in semantics ? semantics.composition : undefined;
+  return typeof composition === 'string' && Object.hasOwn(spatialComposition, composition)
+    ? spatialComposition[composition]
+    : 'ELEMENT';
 }
 
 function addProduct(
