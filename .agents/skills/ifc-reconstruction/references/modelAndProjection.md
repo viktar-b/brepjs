@@ -11,6 +11,8 @@ Complete the [Assembly authoring](assemblyAuthoring.md) and [set-out ownership](
 
 Reconcile authored and source hierarchies before export. Nested civil spatial aggregation is an independent capability gate, not a geometry detail.
 
+After the model exports, run the [authored-cleanliness pass](authoredCleanliness.md). Projection-visible materials and relationships are not dead merely because they leave the B-Rep unchanged.
+
 ## Project through the public seam
 
 Prefer:

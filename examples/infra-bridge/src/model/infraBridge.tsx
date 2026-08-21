@@ -7,7 +7,7 @@ import { RoadSite } from '../assemblies/roadSite.js';
 import { yawFrame } from '../frames.js';
 import { RAIL_BRIDGE_SET_OUTS, ROAD_SITE_SET_OUT } from '../setout.js';
 
-const emptyProps = z.object({ label: z.string().optional() });
+const emptyProps = z.object({});
 type EmptyProps = z.output<typeof emptyProps>;
 type EmptyInput = z.input<typeof emptyProps>;
 

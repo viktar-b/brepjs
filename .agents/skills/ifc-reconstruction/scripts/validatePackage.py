@@ -15,6 +15,7 @@ REQUIRED_REFERENCES = {
     "targetsAndTracer.md",
     "leafFamily.md",
     "assemblyAuthoring.md",
+    "authoredCleanliness.md",
     "setoutAndDimensions.md",
     "modelAndProjection.md",
     "verificationAndHandoff.md",

@@ -32,13 +32,19 @@ export type DefinitionKind = 'Model' | 'Assembly' | 'Family';
 export type ElementChild = Element | readonly ElementChild[] | null | undefined | false;
 
 type ChildrenInvocation<I> = I extends object
-  ? 'children' extends keyof I
+  ? I extends Record<string, never>
+    ? { readonly children?: never }
+    : 'children' extends keyof I
     ? { readonly children?: ElementChild }
     : { readonly children?: never }
   : never;
 
+type DeclaredInvocationProps<I> = I extends Record<string, never>
+  ? Record<never, never>
+  : Omit<I, 'children' | 'key' | 'frame' | 'semantics'>;
+
 export type DefinitionInvocation<I> = I extends object
-  ? Omit<I, 'children' | 'key' | 'frame' | 'semantics'> & ChildrenInvocation<I> & WithKey
+  ? DeclaredInvocationProps<I> & ChildrenInvocation<I> & WithKey
   : never;
 
 /**

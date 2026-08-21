@@ -23,6 +23,7 @@ Treat the Reference IFC as evidence, never as runtime product input. Build an un
 | Component-local targets and tracer project                                                    | [targets and tracer](references/targetsAndTracer.md)             | Local target and scene Frame are separate; one leaf proves the complete seam.              |
 | One leaf Family or leaf repair                                                                | [leaf Family](references/leafFamily.md)                          | One typed TSX Family passes focused, semantic, cleanliness, and applicable fidelity gates. |
 | Assembly authoring, set-out, complete Model, Projection, export                               | [Assembly authoring](references/assemblyAuthoring.md), [set-out and dimensions](references/setoutAndDimensions.md), then [model and projection](references/modelAndProjection.md) | Repeated meaning has one source; stable keys/Frames compose; IFC validates and reimports. |
+| Post-authoring residue cleanup                                                                 | [authored cleanliness](references/authoredCleanliness.md)        | Every retained definition has a witnessed effect or an explicit authored-intent obligation. |
 | Independent gates, document classification, gap analysis, handoff                             | [verification and handoff](references/verificationAndHandoff.md) | All gates have evidence; the replacement claim does not exceed document fidelity.          |
 
 Use the [readiness matrix](references/readinessMatrix.md) for final package and reconstruction acceptance.
@@ -33,6 +34,7 @@ Use the [readiness matrix](references/readinessMatrix.md) for final package and 
 - Decode a complete representation item; never promote a coordinate list to geometry by itself. Preserve the strongest tessellated, parametric, or analytic B-Rep evidence lane.
 - Keep component-local geometry separate from scene/world placement.
 - Keep authored source free of donor identity, GlobalIds, Express IDs, meshes, vertices, raw matrices, inventory dumps, absolute donor paths, and Reference Harness imports.
+- Do not preserve donor residue or placeholder authoring fields. Trace suspicious code through validation, resolved semantics, B-Rep, and IFC Projection; remove it only when all four lanes prove no effect and no authored-intent obligation remains.
 - Give every reusable Family or Assembly one primary TSX file. Use typed named dimensions, a documented Datum, definition-owned Engineering Semantics, nested rigid Frames, and stable Semantic Keys.
 - Prefer `brepjs-families → CSG IR → familiesToBim → IFC`. Use direct `BimModel` APIs only for a demonstrated adapter gap, and record the fallback and owning layer.
 - Never weaken thresholds, alter the target, or embed source evidence to make a gate pass. Repair the smallest responsible Family, Assembly, Projection, or decoder layer.

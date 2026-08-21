@@ -1,4 +1,4 @@
-import { csg, err, ok, type Result, type ShapeMesh } from 'brepjs';
+import { err, ok, type Result, type ShapeMesh } from 'brepjs';
 import {
   BimModel,
   parseBeamSpec,
@@ -18,15 +18,11 @@ import {
   type ProductBody,
 } from 'brepjs-bim';
 import {
-  evaluateModel,
   type EngineeringSemantics,
   type EvaluatedModel,
   type Frame,
   type ResolvedElement,
 } from 'brepjs-families';
-
-export const NESTED_BRIDGE_PART_FALLBACK =
-  'familiesToBim rejects nested BridgePart aggregation; this adapter uses public BimModel APIs until that hierarchy is supported.';
 
 export interface InfraBridgeProjection {
   readonly model: BimModel;
@@ -52,10 +48,14 @@ const productKinds = new Set([
   'railing',
 ]);
 
-/** Project the authored bridge with one isolated fallback for nested infrastructure parts. */
+/**
+ * Project the authored bridge through the example-owned direct BIM adapter.
+ * The adapter remains necessary because familiesToBim cannot yet aggregate a
+ * bridge part beneath another bridge part.
+ */
 export function projectInfraBridge(
   root: ResolvedElement,
-  evaluatedModel?: EvaluatedModel
+  evaluated: EvaluatedModel
 ): Result<InfraBridgeProjection, BimError> {
   if (root.semantics?.kind !== 'project') {
     return err(specError('INFRA_ROOT_KIND', 'Infra bridge root must declare project semantics'));
@@ -67,8 +67,6 @@ export function projectInfraBridge(
   );
   if (!initialized.ok) return initialized;
   const idByKeyPath = new Map<string, LocalId>([[root.keyPath, initialized.value]]);
-  const evaluated = evaluatedModel ?? evaluateRoot(root);
-
   const walk = (element: ResolvedElement, parent: ProjectionParent): Result<void, BimError> => {
     const semantics = element.semantics;
     if (semantics === undefined) {
@@ -132,11 +130,6 @@ export function projectInfraBridge(
   return ok({ model, idByKeyPath });
 }
 
-function evaluateRoot(root: ResolvedElement): EvaluatedModel {
-  using evaluator = new csg.Evaluator();
-  return evaluateModel(root, evaluator);
-}
-
 function validateHierarchy(
   kind: string,
   parent: ParentKind,
@@ -163,7 +156,8 @@ function addProduct(
   semantics: EngineeringSemantics,
   evaluated: EvaluatedModel
 ): Result<LocalId, BimError> {
-  if (typeof semantics.material !== 'string' || semantics.material.trim().length === 0) {
+  const material = 'material' in semantics ? semantics.material : undefined;
+  if (typeof material !== 'string' || material.trim().length === 0) {
     return err(specError('INFRA_MISSING_MATERIAL', `Missing material at '${element.keyPath}'`));
   }
   const dimensions = semanticDimensions(semantics, element.keyPath);
@@ -173,7 +167,7 @@ function addProduct(
   const common = {
     name: semanticName(element),
     ...placement(element.localFrame),
-    materialName: semantics.material,
+    materialName: material,
   };
   const options = { stableKey: element.keyPath, productBody: body.value };
   const { length, width, height } = dimensions.value;

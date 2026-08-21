@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { MATERIALS } from '../src/materials.js';
 
 const forbidden = [
   /Infra-Bridge\.ifc/,
@@ -42,6 +43,23 @@ describe('authored-source cleanliness', () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  it('keeps every material catalog entry attached to authored source', async () => {
+    const sourceRoot = new URL('../src/', import.meta.url);
+    const materialsPath = new URL('../src/materials.ts', import.meta.url).pathname;
+    const authoredSource = (
+      await Promise.all(
+        (await sourceFiles(sourceRoot.pathname))
+          .filter((path) => path !== materialsPath)
+          .map((path) => readFile(path, 'utf8'))
+      )
+    ).join('\n');
+
+    const unusedMaterials = Object.keys(MATERIALS).filter(
+      (name) => !authoredSource.includes(`MATERIALS.${name}`)
+    );
+    expect(unusedMaterials).toEqual([]);
   });
 });
 

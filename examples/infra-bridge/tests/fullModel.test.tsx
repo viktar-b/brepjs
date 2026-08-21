@@ -75,9 +75,13 @@ describe('complete declarative infrastructure bridge model', () => {
         (relationship) =>
           relationship.kind === 'ASSOCIATES_MATERIAL' && relationship.relatedObjects.includes(id)
       );
+      const materialName =
+        node.semantics !== undefined && 'material' in node.semantics
+          ? node.semantics.material
+          : undefined;
       expect(material, node.keyPath).toMatchObject({
         kind: 'ASSOCIATES_MATERIAL',
-        materialName: node.semantics?.material,
+        materialName,
       });
 
       const parentPath = node.keyPath.slice(0, node.keyPath.lastIndexOf('/'));

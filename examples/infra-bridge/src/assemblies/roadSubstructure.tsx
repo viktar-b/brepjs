@@ -7,7 +7,7 @@ import { MATERIALS } from '../materials.js';
 import { ROAD_BRIDGE_SET_OUT } from '../setout.js';
 import { RoadPier } from './roadPier.js';
 
-const emptyProps = z.object({ label: z.string().optional() });
+const emptyProps = z.object({});
 type EmptyProps = z.output<typeof emptyProps>;
 type EmptyInput = z.input<typeof emptyProps>;
 

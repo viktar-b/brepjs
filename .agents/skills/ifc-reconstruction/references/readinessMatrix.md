@@ -11,6 +11,7 @@ Use this matrix at final review. The linked playbook is authoritative; this page
 | Typed dimensions, Datum, semantics, clean TSX            | [Leaf](leafFamily.md)                                         | Focused Family test and donor-cleanliness audit                       |
 | Calibrated numbers have one engineering owner            | [Set-out](setoutAndDimensions.md)                              | Reconciled number ledger and dimension-propagation tests              |
 | Shared placement controls form a reviewable set-out seam | [Set-out](setoutAndDimensions.md)                              | Named controls and resolved Assembly Frame tests                      |
+| Donor residue and no-effect authoring code are removed    | [Cleanliness](authoredCleanliness.md)                           | Completed effect ledger plus deterministic IFC comparison             |
 | Repeated Occurrences share one explicit child template   | [Assembly](assemblyAuthoring.md)                               | Exhausted sibling-template audit and resolved-tree tests              |
 | Output-preserving refactors prove deterministic identity | [Assembly](assemblyAuthoring.md)                               | Equal byte length, empty `cmp`, and matching cryptographic hashes     |
 | One definition/file, explicit occurrences, stable keys   | [Model](modelAndProjection.md)                                | Layout, hierarchy, key, count, and Frame tests                        |

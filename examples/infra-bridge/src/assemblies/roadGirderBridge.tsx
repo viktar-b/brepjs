@@ -9,7 +9,7 @@ import { RoadDeck } from './roadDeck.js';
 import { RoadSubstructure } from './roadSubstructure.js';
 import { RoadSuperstructure } from './roadSuperstructure.js';
 
-const emptyProps = z.object({ label: z.string().optional() });
+const emptyProps = z.object({});
 type EmptyProps = z.output<typeof emptyProps>;
 type EmptyInput = z.input<typeof emptyProps>;
 

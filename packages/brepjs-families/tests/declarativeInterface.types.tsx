@@ -9,6 +9,7 @@ import {
   type Element,
   type EngineeringSemantics,
 } from 'brepjs-families';
+import { z } from 'zod';
 
 interface ChildrenProps {
   readonly children: readonly Element[];
@@ -36,6 +37,22 @@ const EngineeringModel = model<ChildrenProps>(
   ({ children }) => el('Group', {}, children),
   { semantics: { kind: 'engineering-model' } }
 );
+
+const emptyProps = z.object({});
+type EmptyProps = z.output<typeof emptyProps>;
+type EmptyInput = z.input<typeof emptyProps>;
+const EmptyAssembly = assembly<EmptyProps, EmptyInput>(
+  'EmptyAssembly',
+  () => el('Group', {}),
+  { props: emptyProps }
+);
+
+const validEmptyAssembly = <EmptyAssembly key="empty" />;
+void validEmptyAssembly;
+
+// @ts-expect-error Empty definitions expose no placeholder occurrence props.
+const invalidEmptyAssemblyProp = <EmptyAssembly key="empty-with-residue" label="unused" />;
+void invalidEmptyAssemblyProp;
 
 const validTree = (
   <EngineeringModel key="model">
