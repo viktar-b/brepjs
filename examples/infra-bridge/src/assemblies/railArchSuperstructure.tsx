@@ -61,87 +61,94 @@ export const RailArchSuperstructure = assembly<
       halfWidth,
       material: MATERIALS.graniteMasonry,
     } as const;
+    const fillProps = {
+      halfSpan,
+      halfWidth,
+      crownRise: outerRise,
+      material: MATERIALS.genericSoil,
+    } as const;
+    const signProps = {
+      text: 'BREPJS',
+      width: 1_600,
+      height: 400,
+      plateDepth: 30,
+      reliefDepth: 20,
+      material: MATERIALS.copper,
+      name: 'Road rail bridge - name sign',
+    } as const;
+    const wallProps = {
+      length: halfSpan * 4,
+      thickness: wallThickness,
+      height: outerRise + 400,
+      bayCount: 2,
+      openingRun: innerRun,
+      openingRise: innerRise,
+      material: MATERIALS.graniteMasonry,
+    } as const;
+    const fillOccurrences = [
+      { key: 'filler-01', origin: [-halfSpan, 0, baseElevation] as const },
+      { key: 'filler-02', origin: [halfSpan, 0, baseElevation] as const },
+    ] as const;
+    const archOccurrences = [
+      {
+        key: 'arch-segment-01',
+        origin: [-halfSpan - archBandThickness, 0, baseElevation] as const,
+        bearingDegrees: 180,
+      },
+      {
+        key: 'arch-segment-02',
+        origin: [-innerRun, 0, baseElevation] as const,
+        bearingDegrees: 0,
+      },
+      {
+        key: 'arch-segment-03',
+        origin: [innerRun, 0, baseElevation] as const,
+        bearingDegrees: 180,
+      },
+      {
+        key: 'arch-segment-04',
+        origin: [halfSpan + archBandThickness, 0, baseElevation] as const,
+        bearingDegrees: 0,
+      },
+    ] as const;
+    const signOccurrences = [
+      {
+        key: 'name-sign-01',
+        origin: [0, -wallOffset, signElevation] as const,
+        bearingDegrees: 0,
+      },
+      {
+        key: 'name-sign-02',
+        origin: [0, wallOffset, signElevation] as const,
+        bearingDegrees: 180,
+      },
+    ] as const;
+    const wallOccurrences = [
+      {
+        key: 'spandrel-wall-01',
+        origin: [-halfSpan * 2, -wallOffset, baseElevation] as const,
+        bearingDegrees: 0,
+      },
+      {
+        key: 'spandrel-wall-02',
+        origin: [halfSpan * 2, wallOffset, baseElevation] as const,
+        bearingDegrees: 180,
+      },
+    ] as const;
+
     return el('Group', {}, [
-      <EarthFill
-        key="filler-01"
-        frame={yawFrame([-halfSpan, 0, baseElevation])}
-        halfSpan={halfSpan}
-        halfWidth={halfWidth}
-        crownRise={outerRise}
-        material={MATERIALS.genericSoil}
-      />,
-      <EarthFill
-        key="filler-02"
-        frame={yawFrame([halfSpan, 0, baseElevation])}
-        halfSpan={halfSpan}
-        halfWidth={halfWidth}
-        crownRise={outerRise}
-        material={MATERIALS.genericSoil}
-      />,
-      <ArchSegment
-        key="arch-segment-01"
-        frame={yawFrame([-halfSpan - archBandThickness, 0, baseElevation], 180)}
-        {...archProps}
-      />,
-      <ArchSegment
-        key="arch-segment-02"
-        frame={yawFrame([-innerRun, 0, baseElevation])}
-        {...archProps}
-      />,
-      <ArchSegment
-        key="arch-segment-03"
-        frame={yawFrame([innerRun, 0, baseElevation], 180)}
-        {...archProps}
-      />,
-      <ArchSegment
-        key="arch-segment-04"
-        frame={yawFrame([halfSpan + archBandThickness, 0, baseElevation])}
-        {...archProps}
-      />,
-      <BridgeNameSign
-        key="name-sign-01"
-        frame={yawFrame([0, -wallOffset, signElevation])}
-        text="BREPJS"
-        width={1_600}
-        height={400}
-        plateDepth={30}
-        reliefDepth={20}
-        material={MATERIALS.copper}
-        name="Road rail bridge - name sign"
-      />,
-      <BridgeNameSign
-        key="name-sign-02"
-        frame={yawFrame([0, wallOffset, signElevation], 180)}
-        text="BREPJS"
-        width={1_600}
-        height={400}
-        plateDepth={30}
-        reliefDepth={20}
-        material={MATERIALS.copper}
-        name="Road rail bridge - name sign"
-      />,
-      <SpandrelWall
-        key="spandrel-wall-01"
-        frame={yawFrame([-halfSpan * 2, -wallOffset, baseElevation])}
-        length={halfSpan * 4}
-        thickness={wallThickness}
-        height={outerRise + 400}
-        bayCount={2}
-        openingRun={innerRun}
-        openingRise={innerRise}
-        material={MATERIALS.graniteMasonry}
-      />,
-      <SpandrelWall
-        key="spandrel-wall-02"
-        frame={yawFrame([halfSpan * 2, wallOffset, baseElevation], 180)}
-        length={halfSpan * 4}
-        thickness={wallThickness}
-        height={outerRise + 400}
-        bayCount={2}
-        openingRun={innerRun}
-        openingRise={innerRise}
-        material={MATERIALS.graniteMasonry}
-      />,
+      ...fillOccurrences.map(({ key, origin }) => (
+        <EarthFill key={key} frame={yawFrame(origin)} {...fillProps} />
+      )),
+      ...archOccurrences.map(({ key, origin, bearingDegrees }) => (
+        <ArchSegment key={key} frame={yawFrame(origin, bearingDegrees)} {...archProps} />
+      )),
+      ...signOccurrences.map(({ key, origin, bearingDegrees }) => (
+        <BridgeNameSign key={key} frame={yawFrame(origin, bearingDegrees)} {...signProps} />
+      )),
+      ...wallOccurrences.map(({ key, origin, bearingDegrees }) => (
+        <SpandrelWall key={key} frame={yawFrame(origin, bearingDegrees)} {...wallProps} />
+      )),
     ]);
   },
   { props: railArchSuperstructureProps, semantics }

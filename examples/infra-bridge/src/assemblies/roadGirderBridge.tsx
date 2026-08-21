@@ -19,6 +19,11 @@ const semantics: EngineeringSemantics = {
   properties: { name: 'Road river bridge' },
 };
 
+const approachOccurrences = [
+  { key: 'approach-01', side: 'start', setOut: ROAD_BRIDGE_SET_OUT.approaches.start },
+  { key: 'approach-02', side: 'end', setOut: ROAD_BRIDGE_SET_OUT.approaches.end },
+] as const;
+
 /** Complete keyed road-girder bridge hierarchy around one civil set-out Datum. */
 export const RoadGirderBridge = assembly<EmptyProps, EmptyInput>(
   'RoadGirderBridge',
@@ -27,22 +32,13 @@ export const RoadGirderBridge = assembly<EmptyProps, EmptyInput>(
       <RoadSubstructure key="substructure" />,
       <RoadSuperstructure key="superstructure" />,
       <RoadDeck key="deck" />,
-      <RoadApproach
-        key="approach-01"
-        frame={yawFrame(
-          ROAD_BRIDGE_SET_OUT.approaches.start.origin,
-          ROAD_BRIDGE_SET_OUT.approaches.start.bearingDegrees
-        )}
-        side="start"
-      />,
-      <RoadApproach
-        key="approach-02"
-        frame={yawFrame(
-          ROAD_BRIDGE_SET_OUT.approaches.end.origin,
-          ROAD_BRIDGE_SET_OUT.approaches.end.bearingDegrees
-        )}
-        side="end"
-      />,
+      ...approachOccurrences.map(({ key, side, setOut }) => (
+        <RoadApproach
+          key={key}
+          frame={yawFrame(setOut.origin, setOut.bearingDegrees)}
+          side={side}
+        />
+      )),
     ]),
   { props: emptyProps, semantics }
 );

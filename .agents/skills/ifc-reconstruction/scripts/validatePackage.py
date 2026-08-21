@@ -14,6 +14,7 @@ REQUIRED_REFERENCES = {
     "intakeAndEvidence.md",
     "targetsAndTracer.md",
     "leafFamily.md",
+    "assemblyAuthoring.md",
     "setoutAndDimensions.md",
     "modelAndProjection.md",
     "verificationAndHandoff.md",
@@ -77,6 +78,7 @@ def validate_markdown_links(skill_root: Path) -> None:
         skill_root / "SKILL.md",
         *sorted((skill_root / "references").glob("*.md")),
         skill_root.parent / "reconstruct-infra-family" / "SKILL.md",
+        skill_root.parent / "reconstruct-assembly" / "SKILL.md",
     ]
     for path in markdown_files:
         text = read(path)
@@ -120,6 +122,7 @@ def validate_root(skill_root: Path, root_text: str) -> None:
 def validate_content(skill_root: Path) -> None:
     """Validate genericity, document-fidelity coverage, eval scenarios, and compatibility."""
     compatibility_path = skill_root.parent / "reconstruct-infra-family" / "SKILL.md"
+    assembly_router_path = skill_root.parent / "reconstruct-assembly" / "SKILL.md"
     package_files = [
         *sorted(
             path
@@ -127,6 +130,7 @@ def validate_content(skill_root: Path) -> None:
             if path.is_file() and path.suffix in {".json", ".md", ".py", ".yaml"}
         ),
         compatibility_path,
+        assembly_router_path,
     ]
     content = "\n".join(read(path) for path in package_files)
     lowered = content.lower()
@@ -171,6 +175,12 @@ def validate_content(skill_root: Path) -> None:
         fail("legacy leaf skill is not a thin router to the authoritative playbook")
     if len(compatibility.splitlines()) > 45:
         fail("legacy leaf compatibility router duplicates too much workflow")
+
+    assembly_router = read(assembly_router_path)
+    if "../ifc-reconstruction/references/assemblyAuthoring.md" not in assembly_router:
+        fail("Assembly skill is not a thin router to the authoritative playbook")
+    if len(assembly_router.splitlines()) > 45:
+        fail("Assembly router duplicates too much workflow")
 
     metadata = read(skill_root / "agents" / "openai.yaml")
     for field in ("display_name:", "short_description:", "default_prompt:"):

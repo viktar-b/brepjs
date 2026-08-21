@@ -33,6 +33,7 @@ export const RoadApproach = assembly<RoadApproachProps, RoadApproachInput>(
   'RoadApproach',
   ({ side, slopeDegrees, slabLength, slabWidth, slabThickness }) => {
     const sign = side === 'start' ? 1 : -1;
+    const structuralSide = side === 'start' ? 'negative' : 'positive';
     const radians = (sign * slopeDegrees * Math.PI) / 180;
     const { slab, abutment } = ROAD_BRIDGE_SET_OUT.approaches;
     const slabFrame = frame({
@@ -47,7 +48,7 @@ export const RoadApproach = assembly<RoadApproachProps, RoadApproachInput>(
         length={slabLength}
         width={slabWidth}
         thickness={slabThickness}
-        longitudinalSide={side === 'start' ? 'negative' : 'positive'}
+        longitudinalSide={structuralSide}
         transverseSide="negative"
         material={MATERIALS.prefabricatedConcrete}
         name="Road bridge - approach slab"
@@ -55,7 +56,7 @@ export const RoadApproach = assembly<RoadApproachProps, RoadApproachInput>(
       <RoadAbutment
         key="abutment"
         frame={yawFrame([abutment.xOffset, sign * abutment.runFromDeckEnd, abutment.elevation])}
-        transverseSide={side === 'start' ? 'negative' : 'positive'}
+        transverseSide={structuralSide}
         material={MATERIALS.reinforcedConcrete}
       />,
     ]);

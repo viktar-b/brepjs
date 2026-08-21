@@ -26,16 +26,22 @@ function semantics(props: RailSubstructureProps): EngineeringSemantics {
 /** Two explicit rail-pier BridgeParts around one substructure frame. */
 export const RailSubstructure = assembly<RailSubstructureProps, RailSubstructureInput>(
   'RailSubstructure',
-  ({ pierLongitudinalSetout, pierTransverseSetout, pierBaseElevation }) =>
-    el('Group', {}, [
-      <RailPier
-        key="pier-01"
-        frame={yawFrame([-pierLongitudinalSetout, pierTransverseSetout, pierBaseElevation])}
-      />,
-      <RailPier
-        key="pier-02"
-        frame={yawFrame([pierLongitudinalSetout, pierTransverseSetout, pierBaseElevation])}
-      />,
-    ]),
+  ({ pierLongitudinalSetout, pierTransverseSetout, pierBaseElevation }) => {
+    const pierOccurrences = [
+      { key: 'pier-01', longitudinalSetOut: -pierLongitudinalSetout },
+      { key: 'pier-02', longitudinalSetOut: pierLongitudinalSetout },
+    ] as const;
+
+    return el(
+      'Group',
+      {},
+      pierOccurrences.map(({ key, longitudinalSetOut }) => (
+        <RailPier
+          key={key}
+          frame={yawFrame([longitudinalSetOut, pierTransverseSetout, pierBaseElevation])}
+        />
+      ))
+    );
+  },
   { props: railSubstructureProps, semantics }
 );

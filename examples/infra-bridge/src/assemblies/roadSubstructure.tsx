@@ -17,44 +17,46 @@ const semantics: EngineeringSemantics = {
   properties: { name: 'Road bridge substructure', usage: 'region' },
 };
 
+const roadPierOccurrences = [
+  {
+    key: 'pier-01',
+    setOut: ROAD_BRIDGE_SET_OUT.piers.start,
+    crossGirderSide: 'negative',
+  },
+  {
+    key: 'pier-02',
+    setOut: ROAD_BRIDGE_SET_OUT.piers.centre,
+    crossGirderSide: 'positive',
+  },
+  {
+    key: 'pier-03',
+    setOut: ROAD_BRIDGE_SET_OUT.piers.end,
+    crossGirderSide: 'negative',
+  },
+] as const;
+
 /** Three keyed road piers; outer cross-girders face inward toward the deck. */
 export const RoadSubstructure = assembly<EmptyProps, EmptyInput>(
   'RoadSubstructure',
-  () =>
-    el('Group', {}, [
-      <RoadPier
-        key="pier-01"
-        frame={yawFrame(
-          ROAD_BRIDGE_SET_OUT.piers.start.origin,
-          ROAD_BRIDGE_SET_OUT.piers.start.bearingDegrees
-        )}
-        concreteMaterial={MATERIALS.reinforcedConcrete}
-        stemMaterial={MATERIALS.graniteMasonry}
-        girderMaterial={MATERIALS.bridgeTimber}
-        crossGirderSide="negative"
-      />,
-      <RoadPier
-        key="pier-02"
-        frame={yawFrame(
-          ROAD_BRIDGE_SET_OUT.piers.centre.origin,
-          ROAD_BRIDGE_SET_OUT.piers.centre.bearingDegrees
-        )}
-        concreteMaterial={MATERIALS.reinforcedConcrete}
-        stemMaterial={MATERIALS.graniteMasonry}
-        girderMaterial={MATERIALS.bridgeTimber}
-        crossGirderSide="positive"
-      />,
-      <RoadPier
-        key="pier-03"
-        frame={yawFrame(
-          ROAD_BRIDGE_SET_OUT.piers.end.origin,
-          ROAD_BRIDGE_SET_OUT.piers.end.bearingDegrees
-        )}
-        concreteMaterial={MATERIALS.reinforcedConcrete}
-        stemMaterial={MATERIALS.graniteMasonry}
-        girderMaterial={MATERIALS.bridgeTimber}
-        crossGirderSide="negative"
-      />,
-    ]),
+  () => {
+    const pierMaterials = {
+      concreteMaterial: MATERIALS.reinforcedConcrete,
+      stemMaterial: MATERIALS.graniteMasonry,
+      girderMaterial: MATERIALS.bridgeTimber,
+    } as const;
+
+    return el(
+      'Group',
+      {},
+      roadPierOccurrences.map(({ key, setOut, crossGirderSide }) => (
+        <RoadPier
+          key={key}
+          frame={yawFrame(setOut.origin, setOut.bearingDegrees)}
+          crossGirderSide={crossGirderSide}
+          {...pierMaterials}
+        />
+      ))
+    );
+  },
   { props: emptyProps, semantics }
 );

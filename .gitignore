@@ -69,6 +69,8 @@ docs/images/examples/
 .agents/skills/*
 !.agents/skills/reconstruct-infra-family/
 !.agents/skills/reconstruct-infra-family/**
+!.agents/skills/reconstruct-assembly/
+!.agents/skills/reconstruct-assembly/**
 !.agents/skills/ifc-reconstruction/
 !.agents/skills/ifc-reconstruction/**
 .claude/skills/langfuse

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reconstruct Assembly"
+  short_description: "Author clean declarative brepjs Assemblies"
+  default_prompt: "Use $reconstruct-assembly to reconstruct or refactor this Assembly with stable keyed occurrences and verified Frames."

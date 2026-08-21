@@ -27,16 +27,18 @@ function semantics(props: RailArchBridgeProps): EngineeringSemantics {
 /** One parameterized rail-arch Bridge definition, intended for repeated instantiation. */
 export const RailArchBridge = assembly<RailArchBridgeProps, RailArchBridgeInput>(
   'RailArchBridge',
-  ({ pierLongitudinalSetout, pierTransverseSetout, pierBaseElevation }) =>
-    el('Group', {}, [
-      <RailArchSuperstructure key="superstructure" frame={yawFrame([0, 0, 0], -90)} />,
+  ({ pierLongitudinalSetout, pierTransverseSetout, pierBaseElevation }) => {
+    const componentFrame = yawFrame([0, 0, 0], -90);
+    return el('Group', {}, [
+      <RailArchSuperstructure key="superstructure" frame={componentFrame} />,
       <RailSubstructure
         key="substructure"
-        frame={yawFrame([0, 0, 0], -90)}
+        frame={componentFrame}
         pierLongitudinalSetout={pierLongitudinalSetout}
         pierTransverseSetout={pierTransverseSetout}
         pierBaseElevation={pierBaseElevation}
       />,
-    ]),
+    ]);
+  },
   { props: railArchBridgeProps, semantics }
 );

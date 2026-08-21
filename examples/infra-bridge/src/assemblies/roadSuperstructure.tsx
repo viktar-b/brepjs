@@ -25,47 +25,44 @@ function semantics({ name }: RoadSuperstructureProps): EngineeringSemantics {
   };
 }
 
+const mainGirderOccurrences = [
+  {
+    key: 'main-girder-01',
+    setOut: ROAD_BRIDGE_SET_OUT.mainGirders.positiveEdge,
+  },
+  {
+    key: 'main-girder-02',
+    setOut: ROAD_BRIDGE_SET_OUT.mainGirders.centre,
+  },
+  {
+    key: 'main-girder-03',
+    setOut: ROAD_BRIDGE_SET_OUT.mainGirders.negativeEdge,
+  },
+] as const;
+
 /** Three explicit longitudinal girder Occurrences at reviewable transverse set-outs. */
 export const RoadSuperstructure = assembly<RoadSuperstructureProps, RoadSuperstructureInput>(
   'RoadSuperstructure',
-  ({ girderLength, girderWidth, girderDepth }) =>
-    el('Group', {}, [
-      <MainGirder
-        key="main-girder-01"
-        frame={yawFrame(
-          ROAD_BRIDGE_SET_OUT.mainGirders.positiveEdge.origin,
-          ROAD_BRIDGE_SET_OUT.mainGirders.positiveEdge.bearingDegrees
-        )}
-        length={girderLength}
-        width={girderWidth}
-        depth={girderDepth}
-        material={MATERIALS.bridgeTimber}
-        name="Road river bridge - main girder"
-      />,
-      <MainGirder
-        key="main-girder-02"
-        frame={yawFrame(
-          ROAD_BRIDGE_SET_OUT.mainGirders.centre.origin,
-          ROAD_BRIDGE_SET_OUT.mainGirders.centre.bearingDegrees
-        )}
-        length={girderLength}
-        width={girderWidth}
-        depth={girderDepth}
-        material={MATERIALS.bridgeTimber}
-        name="Road river bridge - main girder"
-      />,
-      <MainGirder
-        key="main-girder-03"
-        frame={yawFrame(
-          ROAD_BRIDGE_SET_OUT.mainGirders.negativeEdge.origin,
-          ROAD_BRIDGE_SET_OUT.mainGirders.negativeEdge.bearingDegrees
-        )}
-        length={girderLength}
-        width={girderWidth}
-        depth={girderDepth}
-        material={MATERIALS.bridgeTimber}
-        name="Road river bridge - main girder"
-      />,
-    ]),
+  ({ girderLength, girderWidth, girderDepth }) => {
+    const girderProps = {
+      length: girderLength,
+      width: girderWidth,
+      depth: girderDepth,
+      material: MATERIALS.bridgeTimber,
+      name: 'Road river bridge - main girder',
+    } as const;
+
+    return el(
+      'Group',
+      {},
+      mainGirderOccurrences.map(({ key, setOut }) => (
+        <MainGirder
+          key={key}
+          frame={yawFrame(setOut.origin, setOut.bearingDegrees)}
+          {...girderProps}
+        />
+      ))
+    );
+  },
   { props: roadSuperstructureProps, semantics }
 );

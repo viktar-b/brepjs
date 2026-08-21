@@ -51,6 +51,32 @@ export const RoadDeck = assembly<RoadDeckProps, RoadDeckInput>(
     postRunOut,
   }) => {
     const setOut = roadDeckSetOut({ length, width, slabThickness, setoutInset });
+    const railingProps = {
+      length,
+      setoutInset,
+      railWidth,
+      railHeight,
+      lowerRailBase: -slabThickness,
+      upperRailBase,
+      postPitch,
+      postThickness,
+      postRunIn,
+      postRunOut,
+      material: MATERIALS.bridgeTimber,
+    } as const;
+    const railingOccurrences = [
+      {
+        key: 'railing-01',
+        setOut: setOut.positiveEdgeRailing,
+        longitudinalSide: 'negative',
+      },
+      {
+        key: 'railing-02',
+        setOut: setOut.negativeEdgeRailing,
+        longitudinalSide: 'positive',
+      },
+    ] as const;
+
     return el('Group', {}, [
       <BridgeDeck
         key="bridge-deck"
@@ -62,44 +88,14 @@ export const RoadDeck = assembly<RoadDeckProps, RoadDeckInput>(
         material={MATERIALS.bridgeTimber}
         name="Road river bridge - bridge deck"
       />,
-      <RoadRailing
-        key="railing-01"
-        frame={yawFrame(
-          setOut.positiveEdgeRailing.origin,
-          setOut.positiveEdgeRailing.bearingDegrees
-        )}
-        length={length}
-        setoutInset={setoutInset}
-        longitudinalSide="negative"
-        railWidth={railWidth}
-        railHeight={railHeight}
-        lowerRailBase={-slabThickness}
-        upperRailBase={upperRailBase}
-        postPitch={postPitch}
-        postThickness={postThickness}
-        postRunIn={postRunIn}
-        postRunOut={postRunOut}
-        material={MATERIALS.bridgeTimber}
-      />,
-      <RoadRailing
-        key="railing-02"
-        frame={yawFrame(
-          setOut.negativeEdgeRailing.origin,
-          setOut.negativeEdgeRailing.bearingDegrees
-        )}
-        length={length}
-        setoutInset={setoutInset}
-        longitudinalSide="positive"
-        railWidth={railWidth}
-        railHeight={railHeight}
-        lowerRailBase={-slabThickness}
-        upperRailBase={upperRailBase}
-        postPitch={postPitch}
-        postThickness={postThickness}
-        postRunIn={postRunIn}
-        postRunOut={postRunOut}
-        material={MATERIALS.bridgeTimber}
-      />,
+      ...railingOccurrences.map(({ key, setOut: railingSetOut, longitudinalSide }) => (
+        <RoadRailing
+          key={key}
+          frame={yawFrame(railingSetOut.origin, railingSetOut.bearingDegrees)}
+          longitudinalSide={longitudinalSide}
+          {...railingProps}
+        />
+      )),
     ]);
   },
   { props: roadDeckProps, semantics }
