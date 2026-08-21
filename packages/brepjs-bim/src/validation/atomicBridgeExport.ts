@@ -2,7 +2,7 @@ import { err, ok, type Result } from 'brepjs';
 import type { BimError } from '../errors/bimError.js';
 import { ifcError, specError } from '../errors/bimError.js';
 import {
-  classifyBridgeValidationExit,
+  BRIDGE_VALIDATION_GATES,
   serializeBridgeValidationReport,
   type BridgeValidationExitClassification,
   type BridgeValidationReport,
@@ -14,8 +14,10 @@ export interface BridgeExportFileSystem {
   readonly mkdtemp: (prefix: string) => Promise<string>;
   readonly writeFile: (path: string, data: Uint8Array) => Promise<void>;
   readonly rename: (from: string, to: string) => Promise<void>;
-  readonly remove: (path: string) => Promise<void>;
-  readonly exists: (path: string) => Promise<boolean>;
+  readonly unlinkFile: (path: string) => Promise<void>;
+  /** Recursively removes only a directory returned by this adapter's mkdtemp call. */
+  readonly removeOwnedDirectory: (path: string) => Promise<void>;
+  readonly kind: (path: string) => Promise<'missing' | 'file' | 'other'>;
 }
 
 export interface ValidatedBridgeExportInput {
@@ -67,79 +69,95 @@ async function commitValidatedBridgeExportTransaction(
     );
   }
 
+  const ifcBytes = Uint8Array.from(input.ifcBytes);
+  const expectedModelHash = input.report.modelHash.value;
+  const reportBytes = new TextEncoder().encode(serializeBridgeValidationReport(input.report));
   const ifcPath = input.fileSystem.join(input.outputDirectory, `${input.projectKey}.ifc`);
   const reportPath = input.fileSystem.join(input.outputDirectory, 'validation-report.json');
-  const exitClassification = classifyBridgeValidationExit(input.report);
+  const exitClassification = classifyCompleteBridgeReport(input.report);
   const result = { committed: false, exitClassification, ifcPath, reportPath } as const;
   if (exitClassification !== 0) return ok(result);
 
-  const actualHash = await sha256Hex(input.ifcBytes);
-  if (actualHash !== input.report.modelHash.value) {
-    return err(
-      ifcError(
-        'BRIDGE_EXPORT_MODEL_HASH_MISMATCH',
-        'Validation report model hash does not match the IFC bytes'
-      )
-    );
-  }
-
-  const fileSystem = input.fileSystem;
-  await fileSystem.mkdir(input.outputDirectory);
-  const stagingDirectory = await fileSystem.mkdtemp(
-    fileSystem.join(input.outputDirectory, '.brepjs-export-')
-  );
-  const stagedIfcPath = fileSystem.join(stagingDirectory, `${input.projectKey}.ifc`);
-  const stagedReportPath = fileSystem.join(stagingDirectory, 'validation-report.json');
-  const previousIfcPath = fileSystem.join(stagingDirectory, 'previous.ifc');
-  const previousReportPath = fileSystem.join(stagingDirectory, 'previous-validation-report.json');
-  let backedUpIfc = false;
-  let backedUpReport = false;
-  let installedIfc = false;
-  let installedReport = false;
-
-  try {
-    await fileSystem.writeFile(stagedIfcPath, input.ifcBytes);
-    await fileSystem.writeFile(
-      stagedReportPath,
-      new TextEncoder().encode(serializeBridgeValidationReport(input.report))
-    );
-    if (await fileSystem.exists(ifcPath)) {
-      await fileSystem.rename(ifcPath, previousIfcPath);
-      backedUpIfc = true;
+  return withDestinationLock(reportPath, async () => {
+    const actualHash = await sha256Hex(ifcBytes);
+    if (actualHash !== expectedModelHash) {
+      return err(
+        ifcError(
+          'BRIDGE_EXPORT_MODEL_HASH_MISMATCH',
+          'Validation report model hash does not match the IFC bytes'
+        )
+      );
     }
-    if (await fileSystem.exists(reportPath)) {
-      await fileSystem.rename(reportPath, previousReportPath);
-      backedUpReport = true;
+
+    const fileSystem = input.fileSystem;
+    const ifcTargetKind = await fileSystem.kind(ifcPath);
+    const reportTargetKind = await fileSystem.kind(reportPath);
+    if (ifcTargetKind === 'other' || reportTargetKind === 'other') {
+      return err(
+        ifcError(
+          'BRIDGE_EXPORT_TARGET_NOT_FILE',
+          'Bridge export targets may be absent or regular files, but not directories or special files'
+        )
+      );
     }
-    await fileSystem.rename(stagedIfcPath, ifcPath);
-    installedIfc = true;
-    await fileSystem.rename(stagedReportPath, reportPath);
-    installedReport = true;
-    return ok({ committed: true, exitClassification: 0, ifcPath, reportPath });
-  } catch (cause) {
-    const rollbackFailures = await rollback({
-      fileSystem,
-      ifcPath,
-      reportPath,
-      previousIfcPath,
-      previousReportPath,
-      backedUpIfc,
-      backedUpReport,
-      installedIfc,
-      installedReport,
-    });
-    return err(
-      ifcError(
-        'BRIDGE_EXPORT_COMMIT_FAILED',
-        rollbackFailures.length === 0
-          ? 'Could not atomically commit the validated IFC/report pair; prior output was restored'
-          : `Could not commit or fully restore the IFC/report pair: ${rollbackFailures.join('; ')}`,
-        cause
-      )
+    await fileSystem.mkdir(input.outputDirectory);
+    const stagingDirectory = await fileSystem.mkdtemp(
+      fileSystem.join(input.outputDirectory, '.brepjs-export-')
     );
-  } finally {
-    await fileSystem.remove(stagingDirectory).catch(() => undefined);
-  }
+    const stagedIfcPath = fileSystem.join(stagingDirectory, `${input.projectKey}.ifc`);
+    const stagedReportPath = fileSystem.join(stagingDirectory, 'validation-report.json');
+    const previousIfcPath = fileSystem.join(stagingDirectory, 'previous.ifc');
+    const previousReportPath = fileSystem.join(stagingDirectory, 'previous-validation-report.json');
+    let backedUpIfc = false;
+    let backedUpReport = false;
+    let installedIfc = false;
+    let installedReport = false;
+    let preserveStaging = false;
+
+    try {
+      await fileSystem.writeFile(stagedIfcPath, ifcBytes);
+      await fileSystem.writeFile(stagedReportPath, reportBytes);
+      if (ifcTargetKind === 'file') {
+        await fileSystem.rename(ifcPath, previousIfcPath);
+        backedUpIfc = true;
+      }
+      if (reportTargetKind === 'file') {
+        await fileSystem.rename(reportPath, previousReportPath);
+        backedUpReport = true;
+      }
+      await fileSystem.rename(stagedIfcPath, ifcPath);
+      installedIfc = true;
+      await fileSystem.rename(stagedReportPath, reportPath);
+      installedReport = true;
+      return ok({ committed: true, exitClassification: 0, ifcPath, reportPath });
+    } catch (cause) {
+      const rollbackFailures = await rollback({
+        fileSystem,
+        ifcPath,
+        reportPath,
+        previousIfcPath,
+        previousReportPath,
+        backedUpIfc,
+        backedUpReport,
+        installedIfc,
+        installedReport,
+      });
+      preserveStaging = rollbackFailures.length > 0;
+      return err(
+        ifcError(
+          'BRIDGE_EXPORT_COMMIT_FAILED',
+          rollbackFailures.length === 0
+            ? 'Could not atomically commit the validated IFC/report pair; prior output was restored'
+            : `Could not commit or fully restore the IFC/report pair: ${rollbackFailures.join('; ')}. Recovery files were preserved at ${stagingDirectory}`,
+          cause
+        )
+      );
+    } finally {
+      if (!preserveStaging) {
+        await fileSystem.removeOwnedDirectory(stagingDirectory).catch(() => undefined);
+      }
+    }
+  });
 }
 
 interface RollbackInput {
@@ -157,8 +175,8 @@ interface RollbackInput {
 async function rollback(input: RollbackInput): Promise<string[]> {
   const failures: string[] = [];
   if (input.installedReport)
-    await attempt(() => input.fileSystem.remove(input.reportPath), failures);
-  if (input.installedIfc) await attempt(() => input.fileSystem.remove(input.ifcPath), failures);
+    await attempt(() => input.fileSystem.unlinkFile(input.reportPath), failures);
+  if (input.installedIfc) await attempt(() => input.fileSystem.unlinkFile(input.ifcPath), failures);
   if (input.backedUpIfc) {
     await attempt(() => input.fileSystem.rename(input.previousIfcPath, input.ifcPath), failures);
   }
@@ -184,4 +202,45 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   digestBytes.set(bytes);
   const digest = await globalThis.crypto.subtle.digest('SHA-256', digestBytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function classifyCompleteBridgeReport(
+  report: Pick<BridgeValidationReport, 'gates'>
+): BridgeValidationExitClassification {
+  if (report.gates.length !== BRIDGE_VALIDATION_GATES.length) return 2;
+  let unavailable = false;
+  for (const [index, definition] of BRIDGE_VALIDATION_GATES.entries()) {
+    const gate = report.gates[index];
+    if (
+      gate === undefined ||
+      gate.id !== definition.id ||
+      gate.evidenceLayer !== definition.evidenceLayer ||
+      gate.required !== definition.required
+    ) {
+      return 2;
+    }
+    if (!definition.required) continue;
+    if (gate.status === 'fail') return 1;
+    if (gate.status !== 'pass') unavailable = true;
+  }
+  return unavailable ? 2 : 0;
+}
+
+const destinationLocks = new Map<string, Promise<void>>();
+
+async function withDestinationLock<T>(key: string, action: () => Promise<T>): Promise<T> {
+  const previous = destinationLocks.get(key) ?? Promise.resolve();
+  let release: (() => void) | undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  destinationLocks.set(key, tail);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release?.();
+    if (destinationLocks.get(key) === tail) destinationLocks.delete(key);
+  }
 }
