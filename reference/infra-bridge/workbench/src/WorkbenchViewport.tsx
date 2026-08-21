@@ -14,6 +14,7 @@ import type {
   WorkbenchDiagnosticError,
 } from '../shared/protocol.js';
 import { mergeMeshData, surfaceToMeshData } from './mesh.js';
+import type { WorkbenchTheme } from './theme.js';
 import type {
   CameraPreset,
   SectionAxis,
@@ -27,6 +28,7 @@ export interface WorkbenchViewportProps {
   readonly diagnostic: ComparisonDiagnostic | undefined;
   readonly error: WorkbenchDiagnosticError | undefined;
   readonly busy: boolean;
+  readonly theme: WorkbenchTheme;
   readonly ui: WorkbenchUiState;
   readonly dispatch: Dispatch<WorkbenchUiAction>;
   readonly onRetry: (() => void) | undefined;
@@ -42,6 +44,7 @@ export function WorkbenchViewport({
   diagnostic,
   error,
   busy,
+  theme,
   ui,
   dispatch,
   onRetry,
@@ -54,7 +57,7 @@ export function WorkbenchViewport({
         ) : diagnostic === undefined ? (
           <ViewportLoading />
         ) : (
-          <DiagnosticCanvas diagnostic={diagnostic} ui={ui} />
+          <DiagnosticCanvas diagnostic={diagnostic} theme={theme} ui={ui} />
         )}
         {busy && diagnostic !== undefined && (
           <div className="recompute-scrim" role="status" aria-live="polite">
@@ -199,22 +202,32 @@ function ViewportControls({
 
 function DiagnosticCanvas({
   diagnostic,
+  theme,
   ui,
 }: {
   diagnostic: ComparisonDiagnostic;
+  theme: WorkbenchTheme;
   ui: WorkbenchUiState;
 }) {
   const referenceCache = useRef(new Map<string, MeshData>());
   const referenceData = useMemo(() => {
-    const cached = referenceCache.current.get(diagnostic.semanticKey);
+    const cacheKey = `${diagnostic.semanticKey}|${theme}`;
+    const cached = referenceCache.current.get(cacheKey);
     if (cached !== undefined) return cached;
-    const hydrated = surfaceToMeshData(diagnostic.surfaces.reference, REFERENCE_COLOR);
-    referenceCache.current.set(diagnostic.semanticKey, hydrated);
+    const hydrated = surfaceToMeshData(
+      diagnostic.surfaces.reference,
+      theme === 'light' ? '#1687a3' : REFERENCE_COLOR
+    );
+    referenceCache.current.set(cacheKey, hydrated);
     return hydrated;
-  }, [diagnostic.semanticKey, diagnostic.surfaces.reference]);
+  }, [diagnostic.semanticKey, diagnostic.surfaces.reference, theme]);
   const candidateData = useMemo(
-    () => surfaceToMeshData(diagnostic.surfaces.candidate, CANDIDATE_COLOR),
-    [diagnostic.surfaces.candidate]
+    () =>
+      surfaceToMeshData(
+        diagnostic.surfaces.candidate,
+        theme === 'light' ? '#c16b1b' : CANDIDATE_COLOR
+      ),
+    [diagnostic.surfaces.candidate, theme]
   );
   const framingCache = useRef<
     | {
@@ -278,6 +291,7 @@ function DiagnosticCanvas({
       </div>
       <ViewerCanvas
         data={framingData}
+        colorScheme={theme}
         view={ui.camera.preset}
         fitSignal={fitSignal}
         projection={ui.camera.projection}
@@ -300,8 +314,8 @@ function DiagnosticCanvas({
             sectionSize={grid.sectionSize}
             cellThickness={0.45}
             sectionThickness={0.9}
-            cellColor="#26303a"
-            sectionColor="#41505f"
+            cellColor={theme === 'light' ? '#aebdc3' : '#26303a'}
+            sectionColor={theme === 'light' ? '#7f939b' : '#41505f'}
             fadeDistance={grid.fadeDistance}
             fadeStrength={1.4}
             infiniteGrid

@@ -46,6 +46,7 @@ describe('comparison viewport controls', () => {
           diagnostic: undefined,
           error: undefined,
           busy: false,
+          theme: 'dark',
           ui,
           dispatch: vi.fn(),
           onRetry: undefined,

@@ -210,6 +210,7 @@ async function verifyBrowser(
       );
     }
     await verifyRequiredEvidenceAndControls(page);
+    await verifyLightThemeAndEvidenceScroll(page, monitor);
 
     await verifyEveryBrowserSelection(page, monitor, productKeys);
 
@@ -353,6 +354,69 @@ async function verifyRequiredEvidenceAndControls(page: Page): Promise<void> {
   ]) {
     if (!evidence.includes(label)) throw new Error(`Missing browser evidence: ${label}`);
   }
+}
+
+async function verifyLightThemeAndEvidenceScroll(
+  page: Page,
+  monitor: BrowserErrorMonitor
+): Promise<void> {
+  await page.evaluate(() => {
+    const lightMode = document.querySelector<HTMLButtonElement>('button[aria-label="Light mode"]');
+    if (lightMode === null) throw new Error('Light mode control is missing');
+    if (lightMode.getAttribute('aria-pressed') !== 'true') lightMode.click();
+  });
+  await raceBrowserFailure(
+    monitor,
+    page.waitForFunction(() => document.documentElement.dataset['theme'] === 'light', {
+      timeout: 5_000,
+    })
+  );
+
+  const colors = await page.evaluate(() => {
+    const selectedMode = document.querySelector<HTMLButtonElement>(
+      '.mode-switcher .control-button[aria-pressed="true"]'
+    );
+    const coordinateBadge = document.querySelector<HTMLElement>('.coordinate-badge');
+    if (selectedMode === null || coordinateBadge === null) {
+      throw new Error('Light mode visual controls are missing');
+    }
+    const selected = getComputedStyle(selectedMode);
+    const badge = getComputedStyle(coordinateBadge);
+    return {
+      selectedBackground: selected.backgroundColor,
+      selectedColor: selected.color,
+      badgeBackground: badge.backgroundColor,
+      badgeColor: badge.color,
+    };
+  });
+  if (
+    colors.selectedBackground !== 'rgb(8, 127, 121)' ||
+    colors.selectedColor !== 'rgb(255, 255, 255)' ||
+    colors.badgeBackground !== 'rgba(255, 255, 255, 0.86)' ||
+    colors.badgeColor !== 'rgb(52, 69, 76)'
+  ) {
+    throw new Error(`Light mode controls are not legible: ${JSON.stringify(colors)}`);
+  }
+
+  const dimensions = await page.$eval('.evidence-scroll', (element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  if (dimensions.scrollHeight <= dimensions.clientHeight) {
+    throw new Error(`Evidence ledger is not constrained: ${JSON.stringify(dimensions)}`);
+  }
+  await page.hover('.evidence-scroll');
+  await page.mouse.wheel({ deltaY: 600 });
+  await raceBrowserFailure(
+    monitor,
+    page.waitForFunction(
+      () => (document.querySelector<HTMLElement>('.evidence-scroll')?.scrollTop ?? 0) > 0,
+      { timeout: 5_000 }
+    )
+  );
+  await page.$eval('.evidence-scroll', (element) => {
+    element.scrollTop = 0;
+  });
 }
 
 async function exerciseControls(page: Page, monitor: BrowserErrorMonitor): Promise<void> {

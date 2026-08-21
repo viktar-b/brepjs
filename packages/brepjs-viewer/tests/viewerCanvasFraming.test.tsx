@@ -13,12 +13,14 @@ interface ControlsHandle {
 
 interface MockSceneSetupProps {
   readonly controlsRef?: RefObject<ControlsHandle | null> | undefined;
+  readonly colorScheme?: 'dark' | 'light' | undefined;
 }
 
 const mockState = vi.hoisted(() => ({
   activateOrthographicCamera: undefined as (() => void) | undefined,
   camera: undefined as THREE.Camera | undefined,
   controls: undefined as ControlsHandle | undefined,
+  colorScheme: undefined as 'dark' | 'light' | undefined,
   gl: { localClippingEnabled: false },
   invalidate: vi.fn(),
 }));
@@ -51,7 +53,8 @@ vi.mock('@react-three/drei', () => ({
 vi.mock('@/SceneSetup.js', async () => {
   const React = await import('react');
   return {
-    default: function MockSceneSetup({ controlsRef }: MockSceneSetupProps) {
+    default: function MockSceneSetup({ colorScheme, controlsRef }: MockSceneSetupProps) {
+      mockState.colorScheme = colorScheme;
       React.useLayoutEffect(() => {
         if (controlsRef === undefined) return;
         controlsRef.current = mockState.controls ?? null;
@@ -77,6 +80,7 @@ beforeEach(() => {
     mockState.controls = { target: new THREE.Vector3(), update: vi.fn() };
   };
   mockState.invalidate.mockClear();
+  mockState.colorScheme = undefined;
 });
 
 afterEach(() => {
@@ -106,6 +110,14 @@ describe('ViewerCanvas framing', () => {
 
     renderViewer({ data: meshAt(30), view: 'right', fitSignal: 1, projection: 'orthographic' });
     expectControlsTarget(orthographicControls, [32, 2, 2], 2);
+  });
+
+  it('passes the selected color scheme into the WebGL scene', () => {
+    act(() => {
+      root.render(<ViewerCanvas data={meshAt(10)} colorScheme="light" />);
+    });
+
+    expect(mockState.colorScheme).toBe('light');
   });
 });
 

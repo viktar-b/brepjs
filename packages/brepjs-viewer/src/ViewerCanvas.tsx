@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import SceneSetup, { type OrbitControlsHandle } from './SceneSetup.js';
 import { ViewerErrorBoundary } from './ErrorBoundary.js';
 import { buildGeometry } from './geometry.js';
-import type { MeshData, Projection, ViewName } from './types.js';
+import type { MeshData, Projection, ViewerColorScheme, ViewName } from './types.js';
 
 export interface ViewerCanvasProps {
   data: MeshData;
@@ -13,6 +13,8 @@ export interface ViewerCanvasProps {
   /** Bump to re-frame the model on demand (e.g. a "Fit" button). */
   fitSignal?: number;
   autoRotate?: boolean;
+  /** Selects scene background and fill-light colors. */
+  colorScheme?: ViewerColorScheme;
   gridVisible?: boolean;
   projection?: Projection;
   onFirstFrame?: () => void;
@@ -132,6 +134,7 @@ export function ViewerCanvas({
   view = 'iso',
   fitSignal,
   autoRotate = false,
+  colorScheme = 'dark',
   gridVisible = true,
   projection = 'perspective',
   onFirstFrame,
@@ -150,7 +153,12 @@ export function ViewerCanvas({
       <Canvas frameloop={autoRotate ? 'always' : 'demand'} gl={{ preserveDrawingBuffer: true }}>
         <LocalClipping />
         {projection === 'orthographic' && <OrthoCamera />}
-        <SceneSetup autoRotate={autoRotate} gridVisible={gridVisible} controlsRef={controlsRef} />
+        <SceneSetup
+          autoRotate={autoRotate}
+          colorScheme={colorScheme}
+          gridVisible={gridVisible}
+          controlsRef={controlsRef}
+        />
         <Framing
           data={data}
           view={view}

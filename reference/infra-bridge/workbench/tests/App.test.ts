@@ -9,6 +9,7 @@ import type {
   WorkbenchResult,
 } from '../shared/protocol.js';
 import { App } from '../src/App.js';
+import { WORKBENCH_THEME_STORAGE_KEY } from '../src/theme.js';
 
 vi.mock('brepjs-viewer', () => ({
   ViewerCanvas: ({
@@ -17,12 +18,14 @@ vi.mock('brepjs-viewer', () => ({
     view,
     projection,
     fitSignal,
+    colorScheme,
   }: {
     readonly children?: ReactNode;
     readonly data: { readonly position: Float32Array };
     readonly view?: string;
     readonly projection?: string;
     readonly fitSignal?: number;
+    readonly colorScheme?: string;
   }) =>
     createElement(
       'div',
@@ -32,6 +35,7 @@ vi.mock('brepjs-viewer', () => ({
         'data-view': view,
         'data-projection': projection,
         'data-fit-signal': fitSignal?.toString(),
+        'data-color-scheme': colorScheme,
       },
       children
     ),
@@ -71,6 +75,9 @@ describe('Survey Bench application', () => {
 
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    window.localStorage.clear();
+    delete document.documentElement.dataset['theme'];
+    vi.stubGlobal('matchMedia', matchMediaStub(false));
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
@@ -82,6 +89,58 @@ describe('Survey Bench application', () => {
     });
     host.remove();
     vi.unstubAllGlobals();
+  });
+
+  it('uses the saved theme ahead of the OS preference and persists a light-mode choice', async () => {
+    window.localStorage.setItem(WORKBENCH_THEME_STORAGE_KEY, 'dark');
+    vi.stubGlobal('matchMedia', matchMediaStub(true));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) =>
+        Promise.resolve(
+          jsonResponse(
+            requestUrl(input) === '/api/workbench' ? success(catalog()) : success(diagnostic())
+          )
+        )
+      )
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.querySelector('[data-testid="shared-r3f-canvas"]') !== null);
+
+    const lightMode = button('Light mode');
+    expect(host.querySelector('.workbench-shell')?.getAttribute('data-theme')).toBe('dark');
+    expect(document.documentElement.dataset['theme']).toBe('dark');
+    expect(lightMode?.getAttribute('aria-pressed')).toBe('false');
+
+    act(() => lightMode?.click());
+
+    expect(host.querySelector('.workbench-shell')?.getAttribute('data-theme')).toBe('light');
+    expect(document.documentElement.dataset['theme']).toBe('light');
+    expect(button('Light mode')?.getAttribute('aria-pressed')).toBe('true');
+    expect(window.localStorage.getItem(WORKBENCH_THEME_STORAGE_KEY)).toBe('light');
+    expect(host.querySelector('[data-layer-color="#1687a3"]')).not.toBeNull();
+    expect(host.querySelector('[data-layer-color="#c16b1b"]')).not.toBeNull();
+    expect(
+      host.querySelector('[data-testid="shared-r3f-canvas"]')?.getAttribute('data-color-scheme')
+    ).toBe('light');
+  });
+
+  it('starts in light mode when the OS prefers a light color scheme', () => {
+    vi.stubGlobal('matchMedia', matchMediaStub(true));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => undefined))
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+
+    expect(host.querySelector('.workbench-shell')?.getAttribute('data-theme')).toBe('light');
+    expect(button('Light mode')?.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('presents every diagnostic control and all Fidelity evidence around one shared canvas', async () => {
@@ -618,6 +677,19 @@ function gate(
   unit: ComparisonDiagnostic['gates'][number]['unit']
 ): ComparisonDiagnostic['gates'][number] {
   return { id, value, threshold, relation, unit, status: 'pass' };
+}
+
+function matchMediaStub(matches: boolean) {
+  return vi.fn((): MediaQueryList => ({
+    matches,
+    media: '(prefers-color-scheme: light)',
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(() => true),
+  }));
 }
 
 function success<T>(value: T): WorkbenchResult<T> {

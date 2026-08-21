@@ -4,6 +4,7 @@ import type { Vector3Tuple } from 'three';
 import GradientBackground from './GradientBackground.js';
 import InfiniteGrid from './InfiniteGrid.js';
 import SceneLighting from './SceneLighting.js';
+import type { ViewerColorScheme } from './types.js';
 
 export type OrbitControlsHandle = ComponentRef<typeof OrbitControls>;
 
@@ -29,6 +30,7 @@ interface GridProps {
 
 interface SceneSetupProps {
   autoRotate?: boolean;
+  colorScheme?: ViewerColorScheme;
   target?: Vector3Tuple;
   gridVisible?: boolean;
   gridProps?: GridProps;
@@ -39,6 +41,7 @@ interface SceneSetupProps {
 
 export default function SceneSetup({
   autoRotate = false,
+  colorScheme = 'dark',
   target,
   gridVisible = true,
   gridProps,
@@ -53,8 +56,11 @@ export default function SceneSetup({
   };
   return (
     <>
-      <SceneLighting />
-      <GradientBackground />
+      <SceneLighting colorScheme={colorScheme} />
+      <GradientBackground
+        colorTop={colorScheme === 'light' ? '#f9fbfc' : '#2a2a3e'}
+        colorBottom={colorScheme === 'light' ? '#dce5e8' : '#2a2a3e'}
+      />
       <OrbitControls
         makeDefault
         autoRotate={autoRotate}

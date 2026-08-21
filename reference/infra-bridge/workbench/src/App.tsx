@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import {
   SOURCE_INVALIDATED_EVENT,
   type SourceInvalidatedPayload,
@@ -8,6 +16,11 @@ import {
 } from '../shared/protocol.js';
 import { EvidenceLedger } from './EvidenceLedger.js';
 import { ProductRail } from './ProductRail.js';
+import {
+  persistWorkbenchTheme,
+  resolveInitialWorkbenchTheme,
+  type WorkbenchTheme,
+} from './theme.js';
 import { WorkbenchViewport, surfaceRange } from './WorkbenchViewport.js';
 import { createInitialWorkbenchUiState, workbenchUiReducer, type SectionAxis } from './uiState.js';
 import { createWorkbenchClient } from './workbenchClient.js';
@@ -28,6 +41,7 @@ interface SourceInvalidationChannel {
 
 export function App() {
   const client = useMemo(() => createWorkbenchClient(), []);
+  const [theme, setTheme] = useState<WorkbenchTheme>(resolveInitialWorkbenchTheme);
   const [catalog, setCatalog] = useState<WorkbenchCatalog>();
   const [catalogError, setCatalogError] = useState<WorkbenchDiagnosticError>();
   const [diagnostic, setDiagnostic] = useState<ComparisonDiagnostic>();
@@ -43,6 +57,21 @@ export function App() {
   diagnosticRef.current = diagnostic;
   const selectedKeyRef = useRef<string | null>(ui.selectedSemanticKey);
   selectedKeyRef.current = ui.selectedSemanticKey;
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset['theme'] = theme;
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', theme === 'light' ? '#f3f6f7' : '#0b0d10');
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((current) => {
+      const next = current === 'dark' ? 'light' : 'dark';
+      persistWorkbenchTheme(next);
+      return next;
+    });
+  };
 
   const loadCatalog = useCallback(async () => {
     setPhase('catalog');
@@ -132,13 +161,15 @@ export function App() {
 
   if (catalog === undefined) {
     return (
-      <main className="workbench-shell workbench-shell--initial">
+      <main className="workbench-shell workbench-shell--initial" data-theme={theme}>
         <CommandBar
           catalog={undefined}
           phase={phase}
           referenceVerification={referenceVerification(undefined, catalogError)}
+          theme={theme}
           watcherState={watcherState}
           onRecompute={undefined}
+          onToggleTheme={toggleTheme}
         />
         {catalogError === undefined ? (
           <InitialLoading />
@@ -164,17 +195,19 @@ export function App() {
       : undefined;
 
   return (
-    <main className="workbench-shell">
+    <main className="workbench-shell" data-theme={theme}>
       <CommandBar
         catalog={catalog}
         phase={phase}
         referenceVerification={referenceVerification(selectedDiagnostic, comparisonError)}
+        theme={theme}
         watcherState={watcherState}
         onRecompute={
           selectedKey.length === 0 || busy
             ? undefined
             : () => void requestComparison(selectedKey, 'refresh')
         }
+        onToggleTheme={toggleTheme}
       />
 
       <div className="survey-workspace">
@@ -190,6 +223,7 @@ export function App() {
           diagnostic={selectedDiagnostic}
           error={comparisonError}
           busy={busy}
+          theme={theme}
           ui={ui}
           dispatch={dispatch}
           onRetry={retrySelected}
@@ -241,14 +275,18 @@ function CommandBar({
   catalog,
   phase,
   referenceVerification,
+  theme,
   watcherState,
   onRecompute,
+  onToggleTheme,
 }: {
   catalog: WorkbenchCatalog | undefined;
   phase: RequestPhase;
   referenceVerification: ReferenceVerification;
+  theme: WorkbenchTheme;
   watcherState: 'watching' | 'changed';
   onRecompute: (() => void) | undefined;
+  onToggleTheme: () => void;
 }) {
   return (
     <header className="command-bar">
@@ -284,6 +322,17 @@ function CommandBar({
         </span>
         <button
           type="button"
+          className="theme-action"
+          aria-label="Light mode"
+          aria-pressed={theme === 'light'}
+          title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+          onClick={onToggleTheme}
+        >
+          <ThemeIcon theme={theme} />
+          <span>{theme === 'light' ? 'Light' : 'Dark'}</span>
+        </button>
+        <button
+          type="button"
           className="primary-action"
           disabled={onRecompute === undefined}
           onClick={onRecompute}
@@ -294,6 +343,19 @@ function CommandBar({
         </button>
       </div>
     </header>
+  );
+}
+
+function ThemeIcon({ theme }: { theme: WorkbenchTheme }) {
+  return theme === 'light' ? (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="2.5" />
+      <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.89 11.89l1.06 1.06M12.95 3.05l-1.06 1.06M4.11 11.89l-1.06 1.06" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M13.3 10.25A5.6 5.6 0 0 1 5.75 2.7 5.6 5.6 0 1 0 13.3 10.25Z" />
+    </svg>
   );
 }
 
