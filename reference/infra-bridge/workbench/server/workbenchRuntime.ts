@@ -13,6 +13,7 @@ import type {
 } from '../../node/compareEvaluatedOccurrence.js';
 import type {
   ComparisonDiagnostic,
+  OverallDiagnostic,
   WorkbenchCatalog,
   WorkbenchDiagnosticError,
   WorkbenchProduct,
@@ -43,12 +44,21 @@ export interface WorkbenchRuntimeDependencies {
   readonly loadReference: () => Promise<BackendResult<ReferenceSnapshot>>;
   readonly evaluateAuthored: () => Promise<BackendResult<AuthoredSnapshot>>;
   readonly compare: (request: CompareEvaluatedOccurrenceRequest) => ComparisonCaseResult;
+  readonly assembleOverall: (request: {
+    readonly semanticKeys: readonly string[];
+    readonly targets: ReferenceSnapshot['targets'];
+    readonly referenceScenes: ReferenceSnapshot['referenceScenes'];
+    readonly resolvedNodes: AuthoredSnapshot['resolvedNodes'];
+    readonly evaluatedNodes: AuthoredSnapshot['evaluatedNodes'];
+  }) => BackendResult<Omit<OverallDiagnostic, 'revision' | 'durationMs' | 'computedAt'>>;
   readonly now: () => number;
   readonly isoNow: () => string;
 }
 
 export interface WorkbenchRuntime {
   catalog(): Promise<WorkbenchResult<WorkbenchCatalog>>;
+  overall(): Promise<WorkbenchResult<OverallDiagnostic>>;
+  refreshOverall(): Promise<WorkbenchResult<OverallDiagnostic>>;
   comparison(semanticKey: string): Promise<WorkbenchResult<ComparisonDiagnostic>>;
   refresh(semanticKey: string): Promise<WorkbenchResult<ComparisonDiagnostic>>;
   invalidateSource(): number;
@@ -60,6 +70,13 @@ export function createWorkbenchRuntime(
   dependencies: WorkbenchRuntimeDependencies
 ): WorkbenchRuntime {
   let referencePromise: Promise<BackendResult<ReferenceSnapshot>> | undefined;
+  let overallResult: WorkbenchResult<OverallDiagnostic> | undefined;
+  let activeOverall:
+    | {
+        readonly revision: number;
+        readonly result: Promise<WorkbenchResult<OverallDiagnostic>>;
+      }
+    | undefined;
   const comparisons = new Map<string, WorkbenchResult<ComparisonDiagnostic>>();
   const activeComparisons = new Map<
     string,
@@ -110,6 +127,57 @@ export function createWorkbenchRuntime(
         sourceRevision: authoredSnapshots.revision(),
       },
     });
+
+  function overall(): Promise<WorkbenchResult<OverallDiagnostic>> {
+    const requestedRevision = authoredSnapshots.revision();
+    if (overallResult?.revision === requestedRevision) return Promise.resolve(overallResult);
+    if (activeOverall?.revision === requestedRevision) return activeOverall.result;
+
+    const computed = computeOverall(requestedRevision);
+    const result = computed.finally(() => {
+      if (activeOverall?.result === result) activeOverall = undefined;
+    });
+    activeOverall = { revision: requestedRevision, result };
+    return result;
+  }
+
+  async function computeOverall(
+    requestedRevision: number
+  ): Promise<WorkbenchResult<OverallDiagnostic>> {
+    const startedAt = dependencies.now();
+    const [reference, candidate] = await Promise.all([getReference(), authoredSnapshots.current()]);
+    const revision = candidate.revision;
+    if (revision !== requestedRevision || revision !== authoredSnapshots.revision()) {
+      return overall();
+    }
+    if (overallResult?.revision === revision) return overallResult;
+    if (!reference.ok) return failure(revision, reference.error);
+    if (!candidate.ok) return failure(revision, candidate.error);
+
+    const assembled = dependencies.assembleOverall({
+      semanticKeys: config.manifest.mappings.map(({ semanticKey }) => semanticKey),
+      targets: reference.value.targets,
+      referenceScenes: reference.value.referenceScenes,
+      resolvedNodes: candidate.value.resolvedNodes,
+      evaluatedNodes: candidate.value.evaluatedNodes,
+    });
+    const result: WorkbenchResult<OverallDiagnostic> = assembled.ok
+      ? {
+          ok: true,
+          revision,
+          value: {
+            ...assembled.value,
+            revision,
+            durationMs: Math.max(0, dependencies.now() - startedAt),
+            computedAt: dependencies.isoNow(),
+          },
+        }
+      : failure(revision, assembled.error);
+    if ((result.ok || !result.error.retryable) && revision === authoredSnapshots.revision()) {
+      overallResult = result;
+    }
+    return revision === authoredSnapshots.revision() ? result : overall();
+  }
 
   function comparison(semanticKey: string): Promise<WorkbenchResult<ComparisonDiagnostic>> {
     const requestedRevision = authoredSnapshots.revision();
@@ -177,12 +245,18 @@ export function createWorkbenchRuntime(
   }
 
   const invalidateSource = (): number => {
+    overallResult = undefined;
     comparisons.clear();
     return authoredSnapshots.invalidate();
   };
 
   return {
     catalog,
+    overall,
+    async refreshOverall() {
+      invalidateSource();
+      return overall();
+    },
     comparison,
     async refresh(semanticKey) {
       if (!knownKeys.has(semanticKey)) return unknownKeyFailure(semanticKey);

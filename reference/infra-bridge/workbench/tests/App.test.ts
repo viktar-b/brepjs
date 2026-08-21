@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ComparisonDiagnostic,
+  OverallDiagnostic,
   WorkbenchCatalog,
   WorkbenchResult,
 } from '../shared/protocol.js';
@@ -91,6 +92,107 @@ describe('Survey Bench application', () => {
     vi.unstubAllGlobals();
   });
 
+  it('opens the two complete models first and switches to Manifest products from a fixed rail', async () => {
+    const requests: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = requestUrl(input);
+        requests.push(url);
+        const value =
+          url === '/api/workbench'
+            ? catalog()
+            : url === '/api/workbench/overall'
+              ? overallDiagnostic()
+              : diagnostic();
+        return Promise.resolve(jsonResponse(success(value)));
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.textContent.includes('Reference model'));
+
+    expect(requests.slice(0, 2)).toEqual(['/api/workbench', '/api/workbench/overall']);
+    expect(button('Overall comparison')?.getAttribute('aria-pressed')).toBe('true');
+    expect(button('Manifest products')?.getAttribute('aria-pressed')).toBe('false');
+    expect(host.querySelectorAll('.mode-rail__button')).toHaveLength(2);
+    expect(labelledControl('Search Semantic Keys')).toBeNull();
+    expect(host.textContent).toContain('Candidate model');
+    expect(host.querySelectorAll('[data-testid="shared-r3f-canvas"]')).toHaveLength(2);
+
+    act(() => button('Front')?.click());
+    expect(
+      [...host.querySelectorAll('[data-testid="shared-r3f-canvas"]')].map((canvas) =>
+        canvas.getAttribute('data-view')
+      )
+    ).toEqual(['front', 'front']);
+
+    act(() => button('Fit overall models')?.click());
+    expect(
+      [...host.querySelectorAll('[data-testid="shared-r3f-canvas"]')].map((canvas) =>
+        canvas.getAttribute('data-fit-signal')
+      )
+    ).toEqual(['1', '1']);
+
+    act(() => button('Manifest products')?.click());
+    await waitFor(() => labelledControl('Search Semantic Keys') !== null);
+
+    expect(requests[2]).toContain('/api/workbench/comparison?semanticKey=');
+    expect(button('Overall comparison')?.getAttribute('aria-pressed')).toBe('false');
+    expect(button('Manifest products')?.getAttribute('aria-pressed')).toBe('true');
+    expect(host.textContent).toContain('Fidelity evidence');
+  });
+
+  it('keeps the complete models visible and exposes an actionable refresh failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        if (init?.method === 'POST') {
+          return Promise.resolve(
+            jsonResponse({
+              ok: false,
+              revision: 8,
+              error: {
+                stage: 'authored-evaluation',
+                code: 'CANDIDATE_EVALUATION_FAILED',
+                message: 'The complete authored Model did not evaluate.',
+                context: { semanticKey: FIRST },
+                retryable: true,
+                action: 'Repair the Candidate Family, then recompute.',
+              },
+            })
+          );
+        }
+        return Promise.resolve(jsonResponse(success(overallDiagnostic())));
+      })
+    );
+
+    act(() => {
+      root.render(createElement(App));
+    });
+    await waitFor(() => host.textContent.includes('Reference model'));
+    act(() => button('Recompute')?.click());
+    await waitFor(() => host.querySelector('.overall-error-banner') !== null);
+
+    expect(host.querySelectorAll('[data-testid="shared-r3f-canvas"]')).toHaveLength(2);
+    expect(host.querySelector('.overall-error-banner')?.textContent).toContain(
+      'The complete authored Model did not evaluate.'
+    );
+    expect(host.querySelector('.overall-error-banner')?.textContent).toContain(
+      'Repair the Candidate Family, then recompute.'
+    );
+    expect(host.querySelector('.overall-error-banner')?.textContent).toContain(
+      'Authored evaluation'
+    );
+    expect(host.querySelector('.overall-error-banner')?.textContent).toContain('semanticKey');
+    expect(host.querySelector('.overall-error-banner')?.textContent).toContain(FIRST);
+    expect(button('Retry overall model')).not.toBeNull();
+  });
+
   it('uses the saved theme ahead of the OS preference and persists a light-mode choice', async () => {
     window.localStorage.setItem(WORKBENCH_THEME_STORAGE_KEY, 'dark');
     vi.stubGlobal('matchMedia', matchMediaStub(true));
@@ -99,7 +201,9 @@ describe('Survey Bench application', () => {
       vi.fn((input: string | URL | Request) =>
         Promise.resolve(
           jsonResponse(
-            requestUrl(input) === '/api/workbench' ? success(catalog()) : success(diagnostic())
+            requestUrl(input) === '/api/workbench'
+              ? success(catalog())
+              : success(overallDiagnostic())
           )
         )
       )
@@ -150,19 +254,25 @@ describe('Survey Bench application', () => {
       vi.fn((input: string | URL | Request) => {
         const url = requestUrl(input);
         requests.push(url);
-        return Promise.resolve(
-          jsonResponse(url.includes('/comparison') ? success(diagnostic()) : success(catalog()))
-        );
+        const value =
+          url === '/api/workbench'
+            ? catalog()
+            : url === '/api/workbench/overall'
+              ? overallDiagnostic()
+              : diagnostic();
+        return Promise.resolve(jsonResponse(success(value)));
       })
     );
 
     act(() => {
       root.render(createElement(App));
     });
+    await openManifestProducts();
     await waitFor(() => host.querySelector('[data-testid="shared-r3f-canvas"]') !== null);
 
     expect(requests[0]).toBe('/api/workbench');
-    expect(requests[1]).toContain(`semanticKey=${encodeURIComponent(FIRST)}`);
+    expect(requests[1]).toBe('/api/workbench/overall');
+    expect(requests[2]).toContain(`semanticKey=${encodeURIComponent(FIRST)}`);
     expect(host.querySelectorAll('[data-testid="shared-r3f-canvas"]')).toHaveLength(1);
     expect(labelledControl('Search Semantic Keys')).not.toBeNull();
     expect(button('Reference')?.hasAttribute('aria-pressed')).toBe(true);
@@ -286,9 +396,10 @@ describe('Survey Bench application', () => {
     expect(status?.classList.contains('reference-status--pending')).toBe(true);
     expect(status?.textContent).toContain('verification pending');
     expect(status?.textContent).not.toContain('checksum verified');
+    expect(host.querySelector('.footer-ledger')?.textContent).toContain('Awaiting models');
 
     await act(async () => {
-      pendingComparison.resolve(jsonResponse(success(diagnostic())));
+      pendingComparison.resolve(jsonResponse(success(overallDiagnostic())));
       await Promise.resolve();
     });
     await waitFor(
@@ -308,6 +419,9 @@ describe('Survey Bench application', () => {
       vi.fn((input: string | URL | Request, init?: RequestInit) => {
         const url = requestUrl(input);
         if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        if (url === '/api/workbench/overall') {
+          return Promise.resolve(jsonResponse(success(overallDiagnostic())));
+        }
         comparisonCalls += 1;
         if (init?.method === 'POST') return pendingRefresh.promise;
         return Promise.resolve(jsonResponse(success(diagnostic())));
@@ -317,6 +431,7 @@ describe('Survey Bench application', () => {
     act(() => {
       root.render(createElement(App));
     });
+    await openManifestProducts();
     await waitFor(() => host.textContent.includes('Surface P95'));
 
     const search = labelledControl('Search Semantic Keys') as HTMLInputElement;
@@ -348,32 +463,36 @@ describe('Survey Bench application', () => {
   it('turns structured failures into an actionable alert with retry', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((input: string | URL | Request) =>
-        Promise.resolve(
+      vi.fn((input: string | URL | Request) => {
+        const url = requestUrl(input);
+        return Promise.resolve(
           jsonResponse(
-            requestUrl(input) === '/api/workbench'
+            url === '/api/workbench'
               ? success(catalog())
-              : {
-                  ok: false,
-                  revision: 7,
-                  error: {
-                    stage: 'checksum',
-                    code: 'CHECKSUM_MISMATCH',
-                    message: 'Configured reference does not match its manifest.',
-                    context: { expected: 'abc', actual: 'def' },
-                    retryable: true,
-                    action: 'Choose the checksummed Infra-Bridge.ifc and retry.',
-                  },
-                }
+              : url === '/api/workbench/overall'
+                ? success(overallDiagnostic())
+                : {
+                    ok: false,
+                    revision: 7,
+                    error: {
+                      stage: 'checksum',
+                      code: 'CHECKSUM_MISMATCH',
+                      message: 'Configured reference does not match its manifest.',
+                      context: { expected: 'abc', actual: 'def' },
+                      retryable: true,
+                      action: 'Choose the checksummed Infra-Bridge.ifc and retry.',
+                    },
+                  }
           )
-        )
-      )
+        );
+      })
     );
 
     act(() => {
       root.render(createElement(App));
     });
-    await waitFor(() => host.querySelector('[role="alert"]') !== null);
+    await openManifestProducts();
+    await waitFor(() => host.querySelector('.diagnostic-error') !== null);
 
     const alert = host.querySelector('.diagnostic-error');
     expect(alert?.textContent).toContain('Checksum');
@@ -402,6 +521,9 @@ describe('Survey Bench application', () => {
       vi.fn((input: string | URL | Request) => {
         const url = requestUrl(input);
         if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        if (url === '/api/workbench/overall') {
+          return Promise.resolve(jsonResponse(success(overallDiagnostic())));
+        }
         comparisonCalls += 1;
         return Promise.resolve(
           jsonResponse(
@@ -418,6 +540,7 @@ describe('Survey Bench application', () => {
     act(() => {
       root.render(createElement(App));
     });
+    await openManifestProducts();
     await waitFor(() => framingMaximum() === 110);
 
     act(() => button('Recompute')?.click());
@@ -443,6 +566,9 @@ describe('Survey Bench application', () => {
       vi.fn((input: string | URL | Request, init?: RequestInit) => {
         const url = requestUrl(input);
         if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        if (url === '/api/workbench/overall') {
+          return Promise.resolve(jsonResponse(success(overallDiagnostic())));
+        }
         comparisonMethods.push(init?.method ?? 'GET');
         if (init?.method === 'POST') {
           return Promise.resolve(
@@ -467,6 +593,7 @@ describe('Survey Bench application', () => {
     act(() => {
       root.render(createElement(App));
     });
+    await openManifestProducts();
     await waitFor(() => host.textContent.includes('Surface P95'));
     act(() => button('Recompute')?.click());
     await waitFor(() => host.textContent.includes('FAMILY_EVALUATION_FAILED'));
@@ -490,6 +617,9 @@ describe('Survey Bench application', () => {
       vi.fn((input: string | URL | Request) => {
         const url = requestUrl(input);
         if (url === '/api/workbench') return Promise.resolve(jsonResponse(success(catalog())));
+        if (url === '/api/workbench/overall') {
+          return Promise.resolve(jsonResponse(success(overallDiagnostic({ revision: 8 }))));
+        }
         comparisonCalls += 1;
         return Promise.resolve(
           jsonResponse(success(diagnostic({ revision: comparisonCalls === 1 ? 8 : 7 })))
@@ -500,6 +630,7 @@ describe('Survey Bench application', () => {
     act(() => {
       root.render(createElement(App));
     });
+    await openManifestProducts();
     await waitFor(() => host.textContent.includes('Revision 8'));
 
     act(() => button('Recompute')?.click());
@@ -533,7 +664,11 @@ describe('Survey Bench application', () => {
       vi.fn((input: string | URL | Request) =>
         Promise.resolve(
           jsonResponse(
-            requestUrl(input) === '/api/workbench' ? success(catalog()) : success(failed)
+            requestUrl(input) === '/api/workbench'
+              ? success(catalog())
+              : requestUrl(input) === '/api/workbench/overall'
+                ? success(overallDiagnostic())
+                : success(failed)
           )
         )
       )
@@ -542,6 +677,7 @@ describe('Survey Bench application', () => {
     act(() => {
       root.render(createElement(App));
     });
+    await openManifestProducts();
     await waitFor(() => host.querySelector('.outcome-badge--fail') !== null);
 
     expect(host.querySelector('.metric-status--fail')?.textContent).toContain('Fail');
@@ -566,6 +702,12 @@ describe('Survey Bench application', () => {
 
   function labelledControl(label: string): HTMLElement | null {
     return host.querySelector(`[aria-label="${label}"]`);
+  }
+
+  async function openManifestProducts(): Promise<void> {
+    await waitFor(() => button('Manifest products') !== null);
+    act(() => button('Manifest products')?.click());
+    await waitFor(() => labelledControl('Search Semantic Keys') !== null);
   }
 
   function framingMaximum(): number {
@@ -666,6 +808,24 @@ function diagnostic(
       gate('volume-relative-error', 0.001, 0.02, 'at-most', 'ratio'),
     ],
     pass: true,
+  };
+}
+
+function overallDiagnostic(options: { readonly revision?: number } = {}): OverallDiagnostic {
+  const surface = diagnostic().surfaces.reference;
+  return {
+    revision: options.revision ?? 7,
+    durationMs: 318,
+    computedAt: '2026-08-20T08:00:00.000Z',
+    coordinateSpace: 'world',
+    productCount: 2,
+    surfaces: {
+      reference: surface,
+      candidate: {
+        ...surface,
+        vertices: surface.vertices.map(([x, y, z]) => [x + 40, y, z] as const),
+      },
+    },
   };
 }
 

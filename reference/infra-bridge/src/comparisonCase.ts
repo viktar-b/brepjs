@@ -243,10 +243,11 @@ function invalidFrameName(request: CompareReconstructionCaseRequest): InvalidFra
     [{ source: 'candidate', frame: 'Candidate Local Frame' }, request.candidate.localFrame],
     [{ source: 'candidate', frame: 'Candidate world Frame' }, request.candidate.worldFrame],
   ];
-  return frames.find(([, frame]) => !isRigidFrame(frame))?.[0] ?? null;
+  return frames.find(([, frame]) => !isRigidObservedFrame(frame))?.[0] ?? null;
 }
 
-function isRigidFrame(frame: ObservedFrame): boolean {
+/** Return whether a source-neutral observed Frame is a finite orthonormal X/Z placement. */
+export function isRigidObservedFrame(frame: ObservedFrame): boolean {
   if (![...frame.origin, ...frame.xAxis, ...frame.zAxis].every(Number.isFinite)) return false;
   const xLength = length(frame.xAxis);
   const zLength = length(frame.zAxis);

@@ -2,6 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 describe('workbench interaction styles', () => {
+  it('keeps the overall coordinate badges compact instead of stretching across the canvas', async () => {
+    const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+    expect(styles).toMatch(/\.viewport-badges\.overall-badges\s*\{[^}]*top:\s*auto;/su);
+  });
+
   it('keeps the compact Semantic Key selector focus indicator visible', async () => {
     const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
     const compactSelect = styles.match(/\.compact-product-select select\s*\{(?<rules>[^}]*)\}/u);

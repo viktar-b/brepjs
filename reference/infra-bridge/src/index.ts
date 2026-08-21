@@ -42,6 +42,7 @@ export {
 export { scoreCandidate, type CandidateScore, type EnvelopeDeltas } from './scoring.js';
 export {
   compareReconstructionCase,
+  isRigidObservedFrame,
   type CandidateOccurrenceObservation,
   type CompareReconstructionCaseRequest,
   type FidelityGateId,

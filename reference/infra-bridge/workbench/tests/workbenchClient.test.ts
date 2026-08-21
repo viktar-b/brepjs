@@ -1,26 +1,44 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
   ComparisonDiagnostic,
+  OverallDiagnostic,
   WorkbenchCatalog,
   WorkbenchResult,
 } from '../shared/protocol.js';
 import { createWorkbenchClient } from '../src/workbenchClient.js';
 
 describe('workbench browser client', () => {
-  it('calls the catalog, comparison, and refresh routes with JSON requests', async () => {
+  it('calls the catalog, overall, comparison, and refresh routes with JSON requests', async () => {
     const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(catalogResult(2))));
     const client = createWorkbenchClient({ fetch: fetchMock, baseUrl: 'http://localhost:4173' });
 
     await client.loadCatalog();
+    await client.loadOverall();
+    await client.refreshOverall();
     await client.loadComparison('infra-bridge/rail 01');
     await client.refreshComparison('infra-bridge/rail 01');
 
     expect(fetchMock.mock.calls.map(([input, init]) => [requestUrl(input), init?.method])).toEqual([
       ['http://localhost:4173/api/workbench', 'GET'],
+      ['http://localhost:4173/api/workbench/overall', 'GET'],
+      ['http://localhost:4173/api/workbench/overall/refresh', 'POST'],
       ['http://localhost:4173/api/workbench/comparison?semanticKey=infra-bridge%2Frail+01', 'GET'],
       ['http://localhost:4173/api/workbench/refresh?semanticKey=infra-bridge%2Frail+01', 'POST'],
     ]);
     expect(fetchMock.mock.calls[2]?.[1]?.headers).toEqual({ Accept: 'application/json' });
+  });
+
+  it('accepts a finite whole-model diagnostic whose payload matches its envelope revision', async () => {
+    const fetchMock = vi.fn<typeof fetch>(() => Promise.resolve(jsonResponse(overallResult(6))));
+    const client = createWorkbenchClient({ fetch: fetchMock });
+
+    const result = await client.loadOverall();
+
+    expect(result).toMatchObject({
+      ok: true,
+      revision: 6,
+      value: { coordinateSpace: 'world', productCount: 47, revision: 6 },
+    });
   });
 
   it('aborts the prior request and discards its late response', async () => {
@@ -404,6 +422,23 @@ function jsonResponse(value: unknown): Response {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function overallResult(
+  revision: number
+): Extract<WorkbenchResult<OverallDiagnostic>, { readonly ok: true }> {
+  return {
+    ok: true,
+    revision,
+    value: {
+      revision,
+      durationMs: 1,
+      computedAt: '2026-08-20T00:00:00.000Z',
+      coordinateSpace: 'world',
+      productCount: 47,
+      surfaces: { reference: surface(), candidate: surface() },
+    },
+  };
 }
 
 function requestUrl(input: RequestInfo | URL): string {

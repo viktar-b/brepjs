@@ -194,9 +194,15 @@ async function verifyBrowser(
     if (response?.ok() !== true) {
       throw new Error(`Workbench navigation returned HTTP ${String(response?.status())}`);
     }
-    smokeProgress('browser', 'waiting for the initial comparison');
+    smokeProgress('browser', 'waiting for the complete-model overview');
     await waitForReady(page, monitor);
-    smokeProgress('browser', 'initial comparison ready');
+    await verifyOverallMode(page, monitor);
+    smokeProgress('browser', 'complete-model overview ready');
+
+    await clickControl(page, monitor, 'Manifest products', 'true');
+    await raceBrowserFailure(monitor, page.waitForSelector('.product-option', { timeout: 10_000 }));
+    await waitForReady(page, monitor);
+    smokeProgress('browser', 'Manifest products mode ready');
 
     const productKeys = await page.$$eval('.product-option', (elements) =>
       elements.map((element) =>
@@ -311,8 +317,142 @@ async function verifyEveryBrowserSelection(
   smokeProgress('browser', 'text-bearing comparison ready');
 }
 
+async function verifyOverallMode(page: Page, monitor: BrowserErrorMonitor): Promise<void> {
+  await page.evaluate(() => {
+    const lightMode = document.querySelector<HTMLButtonElement>('button[aria-label="Light mode"]');
+    if (lightMode === null) throw new Error('Light mode control is missing');
+    if (lightMode.getAttribute('aria-pressed') !== 'true') lightMode.click();
+  });
+  await raceBrowserFailure(
+    monitor,
+    page.waitForFunction(() => document.documentElement.dataset['theme'] === 'light', {
+      timeout: 5_000,
+    })
+  );
+  await delay(120);
+
+  const state = await page.evaluate(() => {
+    const canvases: Array<{
+      width: number;
+      height: number;
+      background: number;
+      accentSamples: number;
+    }> = [];
+    let index = 0;
+    for (const canvas of document.querySelectorAll<HTMLCanvasElement>('canvas')) {
+      const bounds = canvas.getBoundingClientRect();
+      const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+      if (gl === null) {
+        canvases.push({
+          width: bounds.width,
+          height: bounds.height,
+          background: -1,
+          accentSamples: 0,
+        });
+        index += 1;
+        continue;
+      }
+      const pixel = new Uint8Array(4);
+      const cornerCoordinates = [
+        [2, 2],
+        [Math.max(2, gl.drawingBufferWidth - 3), 2],
+        [2, Math.max(2, gl.drawingBufferHeight - 3)],
+      ] as const;
+      let background = 0;
+      for (const [x, y] of cornerCoordinates) {
+        gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+        background += ((pixel[0] ?? 0) + (pixel[1] ?? 0) + (pixel[2] ?? 0)) / 3;
+      }
+      background /= cornerCoordinates.length;
+      let accentSamples = 0;
+      for (let row = 0; row < 24; row += 1) {
+        for (let column = 0; column < 36; column += 1) {
+          const x = Math.min(
+            gl.drawingBufferWidth - 1,
+            Math.floor(((column + 0.5) / 36) * gl.drawingBufferWidth)
+          );
+          const y = Math.min(
+            gl.drawingBufferHeight - 1,
+            Math.floor(((row + 0.5) / 24) * gl.drawingBufferHeight)
+          );
+          gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+          const [red = 0, green = 0, blue = 0] = pixel;
+          const referenceColor = blue > red + 28 && green > red + 20;
+          const candidateColor = red > green + 28 && red > blue + 50;
+          if (index === 0 ? referenceColor : candidateColor) accentSamples += 1;
+        }
+      }
+      canvases.push({ width: bounds.width, height: bounds.height, background, accentSamples });
+      index += 1;
+    }
+    return {
+      railButtons: document.querySelectorAll('.mode-rail__button').length,
+      overallPressed: document
+        .querySelector<HTMLButtonElement>('button[aria-label="Overall comparison"]')
+        ?.getAttribute('aria-pressed'),
+      productsPressed: document
+        .querySelector<HTMLButtonElement>('button[aria-label="Manifest products"]')
+        ?.getAttribute('aria-pressed'),
+      referenceLabel: document.querySelector('.overall-model-label--reference')?.textContent.trim(),
+      candidateLabel: document.querySelector('.overall-model-label--candidate')?.textContent.trim(),
+      productCount: document.querySelector('.overall-toolbar__title small')?.textContent.trim(),
+      productRail: document.querySelector('.product-pane') !== null,
+      theme: document.documentElement.dataset['theme'],
+      canvases,
+    };
+  });
+  const [referenceCanvas, candidateCanvas] = state.canvases;
+  if (
+    state.railButtons !== 2 ||
+    state.overallPressed !== 'true' ||
+    state.productsPressed !== 'false' ||
+    state.referenceLabel?.includes('Reference model') !== true ||
+    state.candidateLabel?.includes('Candidate model') !== true ||
+    state.productCount?.includes('47 products per side') !== true ||
+    state.productRail ||
+    state.theme !== 'light' ||
+    state.canvases.length !== 2 ||
+    referenceCanvas === undefined ||
+    candidateCanvas === undefined ||
+    referenceCanvas.width < 320 ||
+    referenceCanvas.height < 320 ||
+    Math.abs(referenceCanvas.width - candidateCanvas.width) > 2 ||
+    Math.abs(referenceCanvas.height - candidateCanvas.height) > 2 ||
+    referenceCanvas.background < 170 ||
+    candidateCanvas.background < 170 ||
+    referenceCanvas.accentSamples < 3 ||
+    candidateCanvas.accentSamples < 3
+  ) {
+    throw new Error(`Overall mode is incomplete: ${JSON.stringify(state)}`);
+  }
+
+  const revisionBefore = await revision(page);
+  const canvasesBefore = await page.$$('canvas');
+  if (canvasesBefore.length !== 2) {
+    throw new Error(`Overall mode mounted ${String(canvasesBefore.length)} canvases instead of 2`);
+  }
+  const [referenceBefore, candidateBefore] = canvasesBefore;
+  if (referenceBefore === undefined || candidateBefore === undefined) {
+    throw new Error('Overall mode canvas handles were unavailable');
+  }
+  await page.click('.primary-action');
+  await waitForReady(page, monitor, { minimumRevision: revisionBefore + 1 });
+  const canvasesStayedMounted = await page.evaluate(
+    (beforeReference, beforeCandidate) => {
+      const [referenceAfter, candidateAfter] = document.querySelectorAll('canvas');
+      return beforeReference === referenceAfter && beforeCandidate === candidateAfter;
+    },
+    referenceBefore,
+    candidateBefore
+  );
+  await Promise.all(canvasesBefore.map(async (canvas) => canvas.dispose()));
+  if (!canvasesStayedMounted) throw new Error('Overall recompute replaced a model canvas');
+}
+
 async function verifyRequiredEvidenceAndControls(page: Page): Promise<void> {
   const requiredControls = [
+    'Overall comparison',
+    'Manifest products',
     'Reference',
     'Candidate',
     'Overlay',

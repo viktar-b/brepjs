@@ -2,6 +2,8 @@ import {
   WORKBENCH_API,
   type ComparisonDiagnostic,
   type DiagnosticContextValue,
+  type DiagnosticSurface,
+  type OverallDiagnostic,
   type WorkbenchCatalog,
   type WorkbenchDiagnosticError,
   type WorkbenchErrorStage,
@@ -20,6 +22,8 @@ export interface WorkbenchClientRequestState {
 
 export interface WorkbenchClient {
   loadCatalog(): Promise<WorkbenchResult<WorkbenchCatalog> | undefined>;
+  loadOverall(): Promise<WorkbenchResult<OverallDiagnostic> | undefined>;
+  refreshOverall(): Promise<WorkbenchResult<OverallDiagnostic> | undefined>;
   loadComparison(semanticKey: string): Promise<WorkbenchResult<ComparisonDiagnostic> | undefined>;
   refreshComparison(
     semanticKey: string
@@ -148,6 +152,8 @@ export function createWorkbenchClient(options: WorkbenchClientOptions = {}): Wor
 
   return {
     loadCatalog: () => request(WORKBENCH_API.catalog, 'GET', readWorkbenchCatalog),
+    loadOverall: () => request(WORKBENCH_API.overall, 'GET', readOverallDiagnostic),
+    refreshOverall: () => request(WORKBENCH_API.overallRefresh, 'POST', readOverallDiagnostic),
     loadComparison: (semanticKey) =>
       request(
         withSemanticKey(WORKBENCH_API.comparison, semanticKey),
@@ -169,6 +175,37 @@ export function createWorkbenchClient(options: WorkbenchClientOptions = {}): Wor
     },
     getRequestState: () => ({ latestRequestId, acceptedRevision }),
   };
+}
+
+function readOverallDiagnostic(
+  value: unknown,
+  envelopeRevision: number
+): OverallDiagnostic | undefined {
+  if (
+    !isRecord(value) ||
+    value['revision'] !== envelopeRevision ||
+    !isRevision(value['revision']) ||
+    !isFiniteNumber(value['durationMs']) ||
+    typeof value['computedAt'] !== 'string' ||
+    value['coordinateSpace'] !== 'world' ||
+    !isRevision(value['productCount']) ||
+    !isRecord(value['surfaces'])
+  ) {
+    return undefined;
+  }
+  const surfaces = value['surfaces'];
+  const reference = surfaces['reference'];
+  const candidate = surfaces['candidate'];
+  return isDiagnosticSurface(reference) && isDiagnosticSurface(candidate)
+    ? {
+        revision: value['revision'],
+        durationMs: value['durationMs'],
+        computedAt: value['computedAt'],
+        coordinateSpace: 'world',
+        productCount: value['productCount'],
+        surfaces: { reference, candidate },
+      }
+    : undefined;
 }
 
 function resolveUrl(baseUrl: string, route: string): string {
@@ -413,7 +450,7 @@ function isDiagnosticFrame(value: unknown): boolean {
   );
 }
 
-function isDiagnosticSurface(value: unknown): boolean {
+function isDiagnosticSurface(value: unknown): value is DiagnosticSurface {
   if (!isRecord(value) || value['unit'] !== 'millimetre' || typeof value['closed'] !== 'boolean') {
     return false;
   }

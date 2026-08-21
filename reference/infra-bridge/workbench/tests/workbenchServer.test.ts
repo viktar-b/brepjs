@@ -5,6 +5,7 @@ import {
   SOURCE_INVALIDATED_EVENT,
   WORKBENCH_API,
   type ComparisonDiagnostic,
+  type OverallDiagnostic,
   type SourceInvalidatedPayload,
   type WorkbenchCatalog,
   type WorkbenchDiagnosticError,
@@ -68,13 +69,31 @@ describe('programmatic workbench server', () => {
         value: { products: [{ semanticKey: KEY }] },
       });
 
+      const overall = await fetch(new URL(WORKBENCH_API.overall, started.url));
+      expect(overall.status).toBe(200);
+      await expect(overall.json()).resolves.toMatchObject({
+        ok: true,
+        revision: 4,
+        value: { coordinateSpace: 'world', productCount: 1 },
+      });
+
+      const overallRefresh = await fetch(new URL(WORKBENCH_API.overallRefresh, started.url), {
+        method: 'POST',
+      });
+      expect(overallRefresh.status).toBe(200);
+      await expect(overallRefresh.json()).resolves.toMatchObject({
+        ok: true,
+        revision: 5,
+        value: { coordinateSpace: 'world', productCount: 1 },
+      });
+
       const comparison = await fetch(
         new URL(`${WORKBENCH_API.comparison}?semanticKey=${encodeURIComponent(KEY)}`, started.url)
       );
       expect(comparison.status).toBe(200);
       await expect(comparison.json()).resolves.toMatchObject({
         ok: true,
-        revision: 4,
+        revision: 5,
         value: { semanticKey: KEY },
       });
 
@@ -85,11 +104,11 @@ describe('programmatic workbench server', () => {
       expect(refresh.status).toBe(200);
       await expect(refresh.json()).resolves.toMatchObject({
         ok: true,
-        revision: 5,
+        revision: 6,
         value: { semanticKey: KEY },
       });
       expect(harness.refreshes).toEqual([KEY]);
-      expect(invalidateGraph).toHaveBeenCalledOnce();
+      expect(invalidateGraph).toHaveBeenCalledTimes(2);
 
       const firstClose = started.close();
       const concurrentClose = started.close();
@@ -479,6 +498,13 @@ function runtimeHarness(): {
       }
       return Promise.resolve(comparisonResult(semanticKey, revision));
     },
+    overall() {
+      return Promise.resolve(overallResult(revision));
+    },
+    refreshOverall() {
+      revision += 1;
+      return Promise.resolve(overallResult(revision));
+    },
     refresh(semanticKey) {
       refreshes.push(semanticKey);
       revision += 1;
@@ -495,6 +521,31 @@ function runtimeHarness(): {
     refreshes,
     invalidations: () => invalidations,
     comparisonFailures,
+  };
+}
+
+function overallResult(revision: number): WorkbenchResult<OverallDiagnostic> {
+  const surface = {
+    unit: 'millimetre' as const,
+    vertices: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ] as const,
+    triangles: [[0, 1, 2]] as const,
+    closed: false,
+  };
+  return {
+    ok: true,
+    revision,
+    value: {
+      revision,
+      durationMs: 8,
+      computedAt: '2026-08-20T08:00:00.000Z',
+      coordinateSpace: 'world',
+      productCount: 1,
+      surfaces: { reference: surface, candidate: surface },
+    },
   };
 }
 

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { ReferenceManifest } from '../../src/index.js';
 import { compareEvaluatedOccurrence } from '../../node/compareEvaluatedOccurrence.js';
 import { loadReferenceSnapshot } from './referenceLoader.js';
+import { assembleOverallDiagnostic } from './overallDiagnostic.js';
 import {
   createWorkbenchRuntime,
   type AuthoredSnapshot,
@@ -27,6 +28,7 @@ export async function createConfiguredRuntime(
       loadReference: () => loadReferenceSnapshot({ ifcPath: options.ifcPath, manifest }),
       evaluateAuthored: options.evaluateAuthored,
       compare: compareEvaluatedOccurrence,
+      assembleOverall: assembleOverallDiagnostic,
       now: () => performance.now(),
       isoNow: () => new Date().toISOString(),
     }

@@ -113,6 +113,27 @@ async function handleApiRequest(
     return;
   }
 
+  if (url.pathname === WORKBENCH_API.overall) {
+    if (request.method !== 'GET') {
+      await writeMethodNotAllowed(runtime, response, 'GET');
+      return;
+    }
+    const result = await runtime.overall();
+    writeJson(response, statusFor(result), result);
+    return;
+  }
+
+  if (url.pathname === WORKBENCH_API.overallRefresh) {
+    if (request.method !== 'POST') {
+      await writeMethodNotAllowed(runtime, response, 'POST');
+      return;
+    }
+    invalidateSsrAuthoredModules(server);
+    const result = await runtime.refreshOverall();
+    writeJson(response, statusFor(result), result);
+    return;
+  }
+
   if (url.pathname === WORKBENCH_API.comparison) {
     if (request.method !== 'GET') {
       await writeMethodNotAllowed(runtime, response, 'GET');
@@ -148,7 +169,7 @@ async function handleApiRequest(
       message: 'The requested workbench API route does not exist',
       context: { path: url.pathname },
       retryable: false,
-      action: 'Use the catalog, comparison, or refresh workbench route',
+      action: 'Use the catalog, overall, comparison, or refresh workbench route',
     })
   );
 }

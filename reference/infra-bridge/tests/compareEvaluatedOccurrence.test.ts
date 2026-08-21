@@ -121,6 +121,22 @@ describe('evaluated authored Occurrence comparison adapter', () => {
       error: { stage: 'evaluation', code: 'INVALID_CANDIDATE_MESH' },
     });
   });
+
+  it('rejects negative Candidate triangle indices before scoring or aggregation', () => {
+    const malformed = { ...shapeMesh(), triangles: new Uint32Array([-1, 1, 2]) };
+    expect(
+      compareEvaluatedOccurrence({
+        semanticKey: KEY,
+        targets: targets(),
+        referenceScenes: scenes(),
+        resolvedNodes: resolved(),
+        evaluatedNodes: new Map([[KEY, { mesh: { ok: true, value: malformed } }]]),
+      })
+    ).toMatchObject({
+      ok: false,
+      error: { stage: 'evaluation', code: 'INVALID_CANDIDATE_MESH' },
+    });
+  });
 });
 
 function targets() {

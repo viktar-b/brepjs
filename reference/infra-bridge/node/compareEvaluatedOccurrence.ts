@@ -101,7 +101,7 @@ export function compareEvaluatedOccurrence(
       },
     };
   }
-  const surface = surfaceFromShapeMesh(evaluated.mesh.value);
+  const surface = shapeMeshToSurfaceObservation(evaluated.mesh.value);
   if (surface === null) {
     return {
       ok: false,
@@ -134,14 +134,31 @@ export function compareEvaluatedOccurrence(
   });
 }
 
-function surfaceFromShapeMesh(mesh: ShapeMesh): SurfaceObservation | null {
-  if (mesh.vertices.length % 3 !== 0 || mesh.triangles.length % 3 !== 0) return null;
+/** Copy a flat evaluator mesh into source-neutral surface arrays. */
+export function shapeMeshToSurfaceObservation(mesh: ShapeMesh): SurfaceObservation | null {
+  if (
+    mesh.vertices.length === 0 ||
+    mesh.triangles.length === 0 ||
+    mesh.vertices.length % 3 !== 0 ||
+    mesh.triangles.length % 3 !== 0
+  ) {
+    return null;
+  }
   const vertices: [number, number, number][] = [];
   for (let index = 0; index < mesh.vertices.length; index += 3) {
     const x = mesh.vertices[index];
     const y = mesh.vertices[index + 1];
     const z = mesh.vertices[index + 2];
-    if (x === undefined || y === undefined || z === undefined) return null;
+    if (
+      x === undefined ||
+      y === undefined ||
+      z === undefined ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(z)
+    ) {
+      return null;
+    }
     vertices.push([x, y, z]);
   }
   const triangles: [number, number, number][] = [];
@@ -149,7 +166,19 @@ function surfaceFromShapeMesh(mesh: ShapeMesh): SurfaceObservation | null {
     const a = mesh.triangles[index];
     const b = mesh.triangles[index + 1];
     const c = mesh.triangles[index + 2];
-    if (a === undefined || b === undefined || c === undefined) return null;
+    if (
+      a === undefined ||
+      b === undefined ||
+      c === undefined ||
+      !Number.isSafeInteger(a) ||
+      !Number.isSafeInteger(b) ||
+      !Number.isSafeInteger(c) ||
+      a >= vertices.length ||
+      b >= vertices.length ||
+      c >= vertices.length
+    ) {
+      return null;
+    }
     triangles.push([a, b, c]);
   }
   return { unit: 'millimetre', vertices, triangles, closed: true };

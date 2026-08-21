@@ -93,6 +93,18 @@ export interface ComparisonDiagnostic {
   readonly pass: boolean;
 }
 
+export interface OverallDiagnostic {
+  readonly revision: number;
+  readonly durationMs: number;
+  readonly computedAt: string;
+  readonly coordinateSpace: 'world';
+  readonly productCount: number;
+  readonly surfaces: {
+    readonly reference: DiagnosticSurface;
+    readonly candidate: DiagnosticSurface;
+  };
+}
+
 export interface WorkbenchProduct {
   readonly semanticKey: string;
   readonly group: string;
@@ -142,6 +154,8 @@ export type WorkbenchResult<T> =
 
 export const WORKBENCH_API = {
   catalog: '/api/workbench',
+  overall: '/api/workbench/overall',
+  overallRefresh: '/api/workbench/overall/refresh',
   comparison: '/api/workbench/comparison',
   refresh: '/api/workbench/refresh',
 } as const;

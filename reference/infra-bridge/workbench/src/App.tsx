@@ -9,12 +9,15 @@ import {
 } from 'react';
 import {
   SOURCE_INVALIDATED_EVENT,
-  type SourceInvalidatedPayload,
   type ComparisonDiagnostic,
+  type OverallDiagnostic,
+  type SourceInvalidatedPayload,
   type WorkbenchCatalog,
   type WorkbenchDiagnosticError,
 } from '../shared/protocol.js';
 import { EvidenceLedger } from './EvidenceLedger.js';
+import { ModeRail, type WorkbenchMode } from './ModeRail.js';
+import { OverallComparison } from './OverallComparison.js';
 import { ProductRail } from './ProductRail.js';
 import {
   persistWorkbenchTheme,
@@ -42,11 +45,15 @@ interface SourceInvalidationChannel {
 export function App() {
   const client = useMemo(() => createWorkbenchClient(), []);
   const [theme, setTheme] = useState<WorkbenchTheme>(resolveInitialWorkbenchTheme);
+  const [mode, setMode] = useState<WorkbenchMode>('overall');
   const [catalog, setCatalog] = useState<WorkbenchCatalog>();
   const [catalogError, setCatalogError] = useState<WorkbenchDiagnosticError>();
   const [diagnostic, setDiagnostic] = useState<ComparisonDiagnostic>();
+  const [overallDiagnostic, setOverallDiagnostic] = useState<OverallDiagnostic>();
   const [comparisonError, setComparisonError] = useState<WorkbenchDiagnosticError>();
+  const [overallError, setOverallError] = useState<WorkbenchDiagnosticError>();
   const [comparisonRevision, setComparisonRevision] = useState<number>();
+  const [overallRevision, setOverallRevision] = useState<number>();
   const [phase, setPhase] = useState<RequestPhase>('catalog');
   const [query, setQuery] = useState('');
   const [watcherState, setWatcherState] = useState<'watching' | 'changed'>('watching');
@@ -55,8 +62,12 @@ export function App() {
   );
   const diagnosticRef = useRef<ComparisonDiagnostic | undefined>(undefined);
   diagnosticRef.current = diagnostic;
+  const overallDiagnosticRef = useRef<OverallDiagnostic | undefined>(undefined);
+  overallDiagnosticRef.current = overallDiagnostic;
   const selectedKeyRef = useRef<string | null>(ui.selectedSemanticKey);
   selectedKeyRef.current = ui.selectedSemanticKey;
+  const modeRef = useRef<WorkbenchMode>(mode);
+  modeRef.current = mode;
 
   useLayoutEffect(() => {
     document.documentElement.dataset['theme'] = theme;
@@ -99,7 +110,13 @@ export function App() {
         kind === 'refresh'
           ? await client.refreshComparison(semanticKey)
           : await client.loadComparison(semanticKey);
-      if (result === undefined || selectedKeyRef.current !== semanticKey) return;
+      if (
+        result === undefined ||
+        modeRef.current !== 'products' ||
+        selectedKeyRef.current !== semanticKey
+      ) {
+        return;
+      }
       setComparisonRevision(result.revision);
       if (!result.ok) {
         setComparisonError(result.error);
@@ -108,6 +125,30 @@ export function App() {
       }
       setDiagnostic(result.value);
       setComparisonError(undefined);
+      setPhase('ready');
+      setWatcherState('watching');
+    },
+    [client]
+  );
+
+  const requestOverall = useCallback(
+    async (kind: 'load' | 'refresh' | 'source-change') => {
+      const keepPrevious = overallDiagnosticRef.current !== undefined;
+      setPhase(kind === 'load' && !keepPrevious ? 'comparison' : 'recompute');
+      setOverallError(undefined);
+      if (!keepPrevious) setOverallDiagnostic(undefined);
+
+      const result =
+        kind === 'refresh' ? await client.refreshOverall() : await client.loadOverall();
+      if (result === undefined || modeRef.current !== 'overall') return;
+      setOverallRevision(result.revision);
+      if (!result.ok) {
+        setOverallError(result.error);
+        setPhase('error');
+        return;
+      }
+      setOverallDiagnostic(result.value);
+      setOverallError(undefined);
       setPhase('ready');
       setWatcherState('watching');
     },
@@ -123,9 +164,14 @@ export function App() {
 
   useEffect(() => {
     const semanticKey = ui.selectedSemanticKey;
-    if (catalog === undefined || semanticKey === null) return;
+    if (mode !== 'products' || catalog === undefined || semanticKey === null) return;
     void requestComparison(semanticKey, 'load');
-  }, [catalog, requestComparison, ui.selectedSemanticKey]);
+  }, [catalog, mode, requestComparison, ui.selectedSemanticKey]);
+
+  useEffect(() => {
+    if (mode !== 'overall' || catalog === undefined) return;
+    void requestOverall('load');
+  }, [catalog, mode, requestOverall]);
 
   useEffect(() => {
     const active = diagnostic;
@@ -139,16 +185,19 @@ export function App() {
     if (hot === undefined) return;
     const handleInvalidation = (payload: SourceInvalidatedPayload) => {
       if (payload.revision < client.getRequestState().acceptedRevision) return;
-      const semanticKey = selectedKeyRef.current;
-      if (semanticKey === null) return;
       setWatcherState('changed');
-      void requestComparison(semanticKey, 'source-change');
+      if (modeRef.current === 'overall') {
+        void requestOverall('source-change');
+        return;
+      }
+      const semanticKey = selectedKeyRef.current;
+      if (semanticKey !== null) void requestComparison(semanticKey, 'source-change');
     };
     hot.on(SOURCE_INVALIDATED_EVENT, handleInvalidation);
     return () => {
       hot.off?.(SOURCE_INVALIDATED_EVENT, handleInvalidation);
     };
-  }, [requestComparison]);
+  }, [requestComparison, requestOverall]);
 
   const handleSelect = (semanticKey: string) => {
     if (semanticKey !== ui.selectedSemanticKey) {
@@ -157,6 +206,13 @@ export function App() {
       setComparisonRevision(undefined);
     }
     dispatch({ type: 'select', semanticKey });
+  };
+
+  const handleModeChange = (nextMode: WorkbenchMode) => {
+    if (nextMode === mode) return;
+    client.cancelActive();
+    setPhase('comparison');
+    setMode(nextMode);
   };
 
   if (catalog === undefined) {
@@ -193,77 +249,104 @@ export function App() {
     comparisonError?.retryable === true
       ? () => void requestComparison(selectedKey, 'refresh')
       : undefined;
+  const retryOverall =
+    overallError?.retryable === true ? () => void requestOverall('refresh') : undefined;
+  const activeDiagnostic = mode === 'overall' ? overallDiagnostic : selectedDiagnostic;
+  const activeError = mode === 'overall' ? overallError : comparisonError;
+  const activeRevision =
+    mode === 'overall'
+      ? (overallRevision ?? overallDiagnostic?.revision ?? catalog.sourceRevision)
+      : footerRevision;
+  const recompute =
+    busy || (mode === 'products' && selectedKey.length === 0)
+      ? undefined
+      : mode === 'overall'
+        ? () => void requestOverall('refresh')
+        : () => void requestComparison(selectedKey, 'refresh');
 
   return (
     <main className="workbench-shell" data-theme={theme}>
       <CommandBar
         catalog={catalog}
         phase={phase}
-        referenceVerification={referenceVerification(selectedDiagnostic, comparisonError)}
+        referenceVerification={referenceVerification(activeDiagnostic, activeError)}
         theme={theme}
         watcherState={watcherState}
-        onRecompute={
-          selectedKey.length === 0 || busy
-            ? undefined
-            : () => void requestComparison(selectedKey, 'refresh')
-        }
+        onRecompute={recompute}
         onToggleTheme={toggleTheme}
       />
 
-      <div className="survey-workspace">
-        <ProductRail
-          products={catalog.products}
-          selectedKey={selectedKey}
-          query={query}
-          onQueryChange={setQuery}
-          onSelect={handleSelect}
-        />
+      <div className="workbench-body">
+        <ModeRail mode={mode} onChange={handleModeChange} />
+        {mode === 'overall' ? (
+          <OverallComparison
+            diagnostic={overallDiagnostic}
+            error={overallError}
+            busy={busy}
+            theme={theme}
+            onRetry={retryOverall}
+          />
+        ) : (
+          <div className="survey-workspace">
+            <ProductRail
+              products={catalog.products}
+              selectedKey={selectedKey}
+              query={query}
+              onQueryChange={setQuery}
+              onSelect={handleSelect}
+            />
 
-        <WorkbenchViewport
-          diagnostic={selectedDiagnostic}
-          error={comparisonError}
-          busy={busy}
-          theme={theme}
-          ui={ui}
-          dispatch={dispatch}
-          onRetry={retrySelected}
-        />
-
-        <div className="evidence-column">
-          {comparisonError !== undefined && (
-            <DiagnosticError
+            <WorkbenchViewport
+              diagnostic={selectedDiagnostic}
               error={comparisonError}
-              compact={selectedDiagnostic !== undefined}
+              busy={busy}
+              theme={theme}
+              ui={ui}
+              dispatch={dispatch}
               onRetry={retrySelected}
             />
-          )}
-          {selectedDiagnostic === undefined ? (
-            comparisonError === undefined && <EvidenceLoading />
-          ) : (
-            <EvidenceLedger diagnostic={selectedDiagnostic} previous={previous} />
-          )}
-        </div>
+
+            <div className="evidence-column">
+              {comparisonError !== undefined && (
+                <DiagnosticError
+                  error={comparisonError}
+                  compact={selectedDiagnostic !== undefined}
+                  onRetry={retrySelected}
+                />
+              )}
+              {selectedDiagnostic === undefined ? (
+                comparisonError === undefined && <EvidenceLoading />
+              ) : (
+                <EvidenceLedger diagnostic={selectedDiagnostic} previous={previous} />
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      <footer
-        className="status-footer"
-        aria-live={comparisonError === undefined ? 'polite' : 'off'}
-      >
-        <StatusSummary phase={phase} diagnostic={selectedDiagnostic} error={comparisonError} />
+      <footer className="status-footer" aria-live={activeError === undefined ? 'polite' : 'off'}>
+        <StatusSummary
+          phase={phase}
+          diagnostic={activeDiagnostic}
+          error={activeError}
+          mode={mode}
+        />
         <div className="footer-ledger">
-          <span>Revision {footerRevision}</span>
+          <span>Revision {activeRevision}</span>
           <span>
-            {selectedDiagnostic === undefined
-              ? 'Awaiting score'
-              : `${selectedDiagnostic.durationMs.toLocaleString('en-US')} ms`}
+            {activeDiagnostic === undefined
+              ? mode === 'overall'
+                ? 'Awaiting models'
+                : 'Awaiting score'
+              : `${activeDiagnostic.durationMs.toLocaleString('en-US')} ms`}
           </span>
           <span title={catalog.reference.expectedChecksum}>
             SHA {catalog.reference.expectedChecksum.slice(0, 10)}…
           </span>
           <span>
-            {selectedDiagnostic === undefined
+            {activeDiagnostic === undefined
               ? 'No completed run'
-              : formatRunTime(selectedDiagnostic.computedAt)}
+              : formatRunTime(activeDiagnostic.computedAt)}
           </span>
         </div>
       </footer>
@@ -448,10 +531,12 @@ function StatusSummary({
   phase,
   diagnostic,
   error,
+  mode,
 }: {
   phase: RequestPhase;
-  diagnostic: ComparisonDiagnostic | undefined;
+  diagnostic: ComparisonDiagnostic | OverallDiagnostic | undefined;
   error: WorkbenchDiagnosticError | undefined;
+  mode: WorkbenchMode;
 }) {
   if (error !== undefined) {
     return (
@@ -465,17 +550,30 @@ function StatusSummary({
       <span className="footer-state footer-state--busy">
         <i aria-hidden="true" />{' '}
         {phase === 'recompute'
-          ? 'Recomputing selected comparison'
-          : 'Evaluating selected Occurrence'}
+          ? mode === 'overall'
+            ? 'Recomputing complete models'
+            : 'Recomputing selected comparison'
+          : mode === 'overall'
+            ? 'Assembling complete models'
+            : 'Evaluating selected Occurrence'}
       </span>
     );
   }
+  if (mode === 'overall') {
+    return (
+      <span className="footer-state footer-state--ready">
+        <i aria-hidden="true" />
+        {diagnostic === undefined ? 'Workbench ready' : 'Complete models ready for inspection'}
+      </span>
+    );
+  }
+  const comparison = diagnostic as ComparisonDiagnostic | undefined;
   return (
-    <span className={`footer-state footer-state--${diagnostic?.pass === false ? 'fail' : 'ready'}`}>
+    <span className={`footer-state footer-state--${comparison?.pass === false ? 'fail' : 'ready'}`}>
       <i aria-hidden="true" />
-      {diagnostic === undefined
+      {comparison === undefined
         ? 'Workbench ready'
-        : diagnostic.pass
+        : comparison.pass
           ? 'Fidelity Gate evidence passes'
           : 'Fidelity Gate attention required'}
     </span>
@@ -513,7 +611,7 @@ function stageLabel(stage: WorkbenchDiagnosticError['stage']): string {
 }
 
 function referenceVerification(
-  diagnostic: ComparisonDiagnostic | undefined,
+  diagnostic: ComparisonDiagnostic | OverallDiagnostic | undefined,
   error: WorkbenchDiagnosticError | undefined
 ): ReferenceVerification {
   if (

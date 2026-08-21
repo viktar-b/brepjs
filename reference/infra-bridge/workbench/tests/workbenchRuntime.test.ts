@@ -7,6 +7,7 @@ import type {
 import {
   createWorkbenchRuntime,
   type AuthoredSnapshot,
+  type BackendResult,
   type ReferenceSnapshot,
   type WorkbenchRuntimeDependencies,
 } from '../server/workbenchRuntime.js';
@@ -49,7 +50,40 @@ describe('cached workbench runtime', () => {
     expect(first).toMatchObject({ ok: true, revision: 0, value: { semanticKey: FIRST } });
     expect(repeated).toEqual(first);
     expect(second).toMatchObject({ ok: true, revision: 0, value: { semanticKey: SECOND } });
-    expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 2 });
+    expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 2, overall: 0 });
+  });
+
+  it('publishes and caches one whole-model diagnostic at the current source revision', async () => {
+    const harness = runtimeHarness();
+
+    const [first, concurrent] = await Promise.all([
+      harness.runtime.overall(),
+      harness.runtime.overall(),
+    ]);
+    const cached = await harness.runtime.overall();
+
+    expect(first).toMatchObject({
+      ok: true,
+      revision: 0,
+      value: {
+        revision: 0,
+        coordinateSpace: 'world',
+        productCount: 2,
+      },
+    });
+    expect(concurrent).toEqual(first);
+    expect(cached).toEqual(first);
+    expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 0, overall: 1 });
+  });
+
+  it('refreshes the complete authored Model without decoding the Reference again', async () => {
+    const harness = runtimeHarness();
+    await harness.runtime.overall();
+
+    const refreshed = await harness.runtime.refreshOverall();
+
+    expect(refreshed).toMatchObject({ ok: true, revision: 1, value: { revision: 1 } });
+    expect(harness.counts).toEqual({ reference: 1, authored: 2, compare: 0, overall: 2 });
   });
 
   it('invalidates only authored/per-key caches and preserves the checksummed Reference', async () => {
@@ -60,7 +94,7 @@ describe('cached workbench runtime', () => {
     const refreshed = await harness.runtime.comparison(FIRST);
 
     expect(refreshed).toMatchObject({ ok: true, revision: 1, value: { revision: 1 } });
-    expect(harness.counts).toEqual({ reference: 1, authored: 2, compare: 2 });
+    expect(harness.counts).toEqual({ reference: 1, authored: 2, compare: 2, overall: 0 });
   });
 
   it('never compares against an authored snapshot made stale by a newer edit', async () => {
@@ -91,6 +125,17 @@ describe('cached workbench runtime', () => {
           comparedOrigins.push(node?.localFrame.origin[0] ?? Number.NaN);
           return { ok: true, value: comparisonCase(request.semanticKey) };
         },
+        assembleOverall() {
+          const surface = comparisonCase(FIRST).surfaces.reference;
+          return {
+            ok: true,
+            value: {
+              coordinateSpace: 'world',
+              productCount: 1,
+              surfaces: { reference: surface, candidate: surface },
+            },
+          };
+        },
         now: () => 1_000,
         isoNow: () => '2026-08-20T08:00:00.000Z',
       }
@@ -108,6 +153,71 @@ describe('cached workbench runtime', () => {
     expect(comparedOrigins).not.toContain(0);
     expect(comparedOrigins.every((origin) => origin === 100)).toBe(true);
   });
+
+  it.each(['success', 'failure'] as const)(
+    'never assembles a complete model from a stale authored $succeedOrFail',
+    async (succeedOrFail) => {
+      const oldSnapshot = deferred<BackendResult<AuthoredSnapshot>>();
+      const currentSnapshot = deferred<BackendResult<AuthoredSnapshot>>();
+      const assembledOrigins: number[] = [];
+      let evaluationCalls = 0;
+      const runtime = createWorkbenchRuntime(
+        { ifcPath: '/reference/Infra-Bridge.ifc', manifest: manifest() },
+        {
+          loadReference: () =>
+            Promise.resolve({
+              ok: true,
+              value: { targets: new Map(), referenceScenes: new Map() },
+            }),
+          evaluateAuthored() {
+            evaluationCalls += 1;
+            return evaluationCalls === 1 ? oldSnapshot.promise : currentSnapshot.promise;
+          },
+          compare: ({ semanticKey }) => ({ ok: true, value: comparisonCase(semanticKey) }),
+          assembleOverall(request) {
+            const node = request.resolvedNodes.get(FIRST);
+            assembledOrigins.push(node?.localFrame.origin[0] ?? Number.NaN);
+            const surface = comparisonCase(FIRST).surfaces.reference;
+            return {
+              ok: true,
+              value: {
+                coordinateSpace: 'world',
+                productCount: 1,
+                surfaces: { reference: surface, candidate: surface },
+              },
+            };
+          },
+          now: () => 1_000,
+          isoNow: () => '2026-08-20T08:00:00.000Z',
+        }
+      );
+
+      const requestedBeforeEdit = runtime.overall();
+      expect(runtime.invalidateSource()).toBe(1);
+      const requestedAfterEdit = runtime.overall();
+      oldSnapshot.resolve(
+        succeedOrFail === 'success'
+          ? { ok: true, value: authoredSnapshotAt(0) }
+          : {
+              ok: false,
+              error: {
+                stage: 'authored-evaluation',
+                code: 'STALE_AUTHORED_FAILURE',
+                message: 'The superseded authored Model failed',
+                context: {},
+                retryable: true,
+                action: 'Ignore the stale failure',
+              },
+            }
+      );
+      await waitFor(() => evaluationCalls === 2);
+      currentSnapshot.resolve({ ok: true, value: authoredSnapshotAt(100) });
+
+      await expect(requestedBeforeEdit).resolves.toMatchObject({ ok: true, revision: 1 });
+      await expect(requestedAfterEdit).resolves.toMatchObject({ ok: true, revision: 1 });
+      expect(assembledOrigins).toEqual([100]);
+    }
+  );
 
   it('does not permanently cache a failed Reference load', async () => {
     const harness = runtimeHarness();
@@ -172,7 +282,7 @@ describe('cached workbench runtime', () => {
       revision: 0,
       value: { semanticKey: FIRST },
     });
-    expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 2 });
+    expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 2, overall: 0 });
   });
 
   it('coalesces concurrent retryable comparisons but allows the next request to retry', async () => {
@@ -196,7 +306,7 @@ describe('cached workbench runtime', () => {
     expect(first).toMatchObject({ ok: false, error: { retryable: true } });
     expect(concurrent).toEqual(first);
     expect(recovered).toMatchObject({ ok: true, value: { semanticKey: FIRST } });
-    expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 2 });
+    expect(harness.counts).toEqual({ reference: 1, authored: 1, compare: 2, overall: 0 });
   });
 
   it('returns actionable configuration and comparison-stage errors', async () => {
@@ -519,7 +629,7 @@ describe('cached workbench runtime', () => {
 });
 
 function runtimeHarness() {
-  const counts = { reference: 0, authored: 0, compare: 0 };
+  const counts = { reference: 0, authored: 0, compare: 0, overall: 0 };
   const referenceResults: Array<
     | { readonly ok: true; readonly value: ReferenceSnapshot }
     | {
@@ -562,6 +672,18 @@ function runtimeHarness() {
       return comparisonError === undefined
         ? { ok: true, value: comparisonCase(request.semanticKey) }
         : { ok: false, error: comparisonError };
+    },
+    assembleOverall(request) {
+      counts.overall += 1;
+      const surface = comparisonCase(FIRST).surfaces.reference;
+      return {
+        ok: true,
+        value: {
+          coordinateSpace: 'world',
+          productCount: request.semanticKeys.length,
+          surfaces: { reference: surface, candidate: surface },
+        },
+      };
     },
     now: () => 1_000,
     isoNow: () => '2026-08-20T08:00:00.000Z',
