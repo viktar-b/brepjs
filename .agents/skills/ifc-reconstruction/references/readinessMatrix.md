@@ -9,6 +9,8 @@ Use this matrix at final review. The linked playbook is authoritative; this page
 | Local geometry and scene placement are separate          | [Targets](targetsAndTracer.md)                                | Local target plus independently compared Frames                       |
 | Tracer before bulk authoring                             | [Targets](targetsAndTracer.md)                                | One leaf passes author/export/reimport/compare seam                   |
 | Typed dimensions, Datum, semantics, clean TSX            | [Leaf](leafFamily.md)                                         | Focused Family test and donor-cleanliness audit                       |
+| Calibrated numbers have one engineering owner            | [Set-out](setoutAndDimensions.md)                              | Reconciled number ledger and dimension-propagation tests              |
+| Shared placement controls form a reviewable set-out seam | [Set-out](setoutAndDimensions.md)                              | Named controls and resolved Assembly Frame tests                      |
 | One definition/file, explicit occurrences, stable keys   | [Model](modelAndProjection.md)                                | Layout, hierarchy, key, count, and Frame tests                        |
 | Declarative Projection is preferred; fallbacks are owned | [Projection](modelAndProjection.md)                           | Public-seam test and complete fallback register                       |
 | Authored parametric intent can export as tessellation    | [Projection](modelAndProjection.md)                           | Authored and SPF representation columns reported separately           |

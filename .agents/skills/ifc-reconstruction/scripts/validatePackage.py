@@ -14,6 +14,7 @@ REQUIRED_REFERENCES = {
     "intakeAndEvidence.md",
     "targetsAndTracer.md",
     "leafFamily.md",
+    "setoutAndDimensions.md",
     "modelAndProjection.md",
     "verificationAndHandoff.md",
     "readinessMatrix.md",

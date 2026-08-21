@@ -7,9 +7,11 @@ import { RailArchSuperstructure } from '../src/assemblies/railArchSuperstructure
 import { RailPier } from '../src/assemblies/railPier.js';
 import { RailSite } from '../src/assemblies/railSite.js';
 import { RoadAbutment } from '../src/assemblies/roadAbutment.js';
+import { RoadDeck } from '../src/assemblies/roadDeck.js';
 import { RoadGirderBridge } from '../src/assemblies/roadGirderBridge.js';
 import { RoadPier } from '../src/assemblies/roadPier.js';
 import { RoadSite } from '../src/assemblies/roadSite.js';
+import { RoadSuperstructure } from '../src/assemblies/roadSuperstructure.js';
 import { MATERIALS } from '../src/materials.js';
 import { loadProjectFont } from '../src/fonts/projectFont.js';
 
@@ -103,6 +105,79 @@ describe('owned infrastructure Assemblies', () => {
       'approach-01',
       'approach-02',
     ]);
+  });
+
+  it('resolves the named road-bridge set-out controls at each Assembly boundary', () => {
+    const root = resolve(<RoadGirderBridge key="road" />);
+    const [substructure, superstructure, , startApproach, endApproach] = root.children;
+
+    expect(substructure?.children.map(({ localFrame }) => localFrame.origin)).toEqual([
+      [-4_795.5, 0, 0],
+      [0, 0, 0],
+      [4_845.5, 0, 0],
+    ]);
+    expect(superstructure?.children.map(({ localFrame }) => localFrame.origin)).toEqual([
+      [4_945.5, 1_675, -356],
+      [4_945.5, 0, -356],
+      [4_945.5, -1_675, -356],
+    ]);
+    expect(startApproach?.localFrame.origin).toEqual([-4_945.5, -1_684, 0]);
+    expect(endApproach?.localFrame.origin).toEqual([4_945.5, -1_684, 0]);
+  });
+
+  it('derives RoadDeck child set-out from its typed authored dimensions', () => {
+    const defaultRoot = resolve(<RoadDeck key="default-deck" />);
+    expect(defaultRoot.children.map(({ localFrame }) => localFrame.origin)).toEqual([
+      [4_945.5, -1_675, -56],
+      [4_945.5, 1_684, 0],
+      [4_945.5, -1_684, 0],
+    ]);
+
+    const variantRoot = resolve(
+      <RoadDeck
+        key="variant-deck"
+        length={10_000}
+        width={4_000}
+        slabThickness={100}
+        setoutInset={10}
+      />
+    );
+
+    expect(childKeys(variantRoot)).toEqual(['bridge-deck', 'railing-01', 'railing-02']);
+    expect(variantRoot.children.map(({ localFrame }) => localFrame.origin)).toEqual([
+      [4_990, -1_990, -100],
+      [4_990, 2_000, 0],
+      [4_990, -2_000, 0],
+    ]);
+    expect(
+      variantRoot.children.map(({ localFrame }) =>
+        localFrame.xAxis.map((value) => Math.round(value))
+      )
+    ).toEqual([
+      [-1, 0, 0],
+      [1, 0, 0],
+      [-1, 0, 0],
+    ]);
+  });
+
+  it('coordinates repeated main-girder dimensions through RoadSuperstructure props', () => {
+    const root = resolve(
+      <RoadSuperstructure
+        key="superstructure"
+        girderLength={10_000}
+        girderWidth={300}
+        girderDepth={400}
+      />
+    );
+
+    expect(childKeys(root)).toEqual(['main-girder-01', 'main-girder-02', 'main-girder-03']);
+    for (const child of root.children) {
+      expect(child.semantics?.properties).toMatchObject({
+        length: 10_000,
+        width: 300,
+        height: 400,
+      });
+    }
   });
 
   it('owns one road Site definition with the keyed road Bridge', () => {

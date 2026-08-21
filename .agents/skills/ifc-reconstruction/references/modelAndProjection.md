@@ -2,6 +2,8 @@
 
 ## Compose the authored model
 
+Complete the [set-out ownership pass](setoutAndDimensions.md) before composing the full Model.
+
 - Give every reusable Family and Assembly one primary TSX file with validated typed props and definition-owned semantics.
 - Represent major Occurrences explicitly. Generate only genuine regular patterns procedurally, and still assign every occurrence a deterministic Semantic Key.
 - Compose parent-relative nested rigid Frames; test key paths, counts, frame composition, containment intent, and repeated-definition reuse.

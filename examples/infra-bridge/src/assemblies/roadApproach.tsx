@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { ApproachSlab } from '../families/approachSlab.js';
 import { yawFrame } from '../frames.js';
 import { MATERIALS } from '../materials.js';
+import { ROAD_BRIDGE_SET_OUT } from '../setout.js';
 import { RoadAbutment } from './roadAbutment.js';
 
 const roadApproachProps = z.object({
@@ -33,8 +34,9 @@ export const RoadApproach = assembly<RoadApproachProps, RoadApproachInput>(
   ({ side, slopeDegrees, slabLength, slabWidth, slabThickness }) => {
     const sign = side === 'start' ? 1 : -1;
     const radians = (sign * slopeDegrees * Math.PI) / 180;
+    const { slab, abutment } = ROAD_BRIDGE_SET_OUT.approaches;
     const slabFrame = frame({
-      origin: [-116, sign * 2_443.111, -242.321],
+      origin: [slab.xOffset, sign * slab.runFromDeckEnd, slab.elevation],
       xAxis: [0, Math.cos(radians), -Math.sin(radians)],
       zAxis: [0, Math.sin(radians), Math.cos(radians)],
     });
@@ -52,13 +54,8 @@ export const RoadApproach = assembly<RoadApproachProps, RoadApproachInput>(
       />,
       <RoadAbutment
         key="abutment"
-        frame={yawFrame([-116, sign * 175, -756])}
+        frame={yawFrame([abutment.xOffset, sign * abutment.runFromDeckEnd, abutment.elevation])}
         transverseSide={side === 'start' ? 'negative' : 'positive'}
-        length={3_600}
-        width={195}
-        bearingInset={20}
-        bearingSeatHeight={556.993}
-        backHeight={539.493}
         material={MATERIALS.reinforcedConcrete}
       />,
     ]);
