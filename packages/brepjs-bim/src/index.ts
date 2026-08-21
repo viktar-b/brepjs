@@ -69,6 +69,12 @@ export {
   evaluateBridgeIds,
 } from './validation/bridgeIds.js';
 export type { BridgeIdsEvaluationInput, BridgeIdsEvaluation } from './validation/bridgeIds.js';
+export { commitValidatedBridgeExport } from './validation/atomicBridgeExport.js';
+export type {
+  BridgeExportFileSystem,
+  ValidatedBridgeExportInput,
+  ValidatedBridgeExportResult,
+} from './validation/atomicBridgeExport.js';
 export { checkGeometryValidity } from './validation/geometryValidity.js';
 export { checkGherkinRules } from './validation/gherkinChecks.js';
 export { issue, emptyReport, hasErrors, countBySeverity } from './validation/severity.js';
