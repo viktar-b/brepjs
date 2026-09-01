@@ -324,16 +324,22 @@ type ImportedSchema = 'IFC2X3' | 'IFC4' | 'IFC4X3';
  * How faithfully a product's body geometry was reconstructed:
  * - `PARAMETRIC` — rebuilt losslessly from a swept solid (extrude/revolve).
  * - `TESSELLATED_MANIFOLD` — a tessellated mesh was recovered as a closed solid
- *   via an STL round-trip; geometrically faithful but topology was re-derived.
+ *   by sewing its triangles; geometrically faithful but topology was re-derived.
  * - `TESSELLATED_LOSSY` — geometry exists only as raw triangles (mesh did not
  *   close into a solid); `solid` is null, `meshVertices`/`meshIndices` carry it.
  * - `NONE` — no recognised body representation was found.
  */
 type GeometryFidelity = 'PARAMETRIC' | 'TESSELLATED_MANIFOLD' | 'TESSELLATED_LOSSY' | 'NONE';
 
+type ImportedBodyCompleteness = 'COMPLETE' | 'PARTIAL' | 'NONE';
+
 interface ImportedGeometry {
   readonly fidelity: GeometryFidelity;
-  /** The reconstructed solid; null when fidelity is `NONE` or `TESSELLATED_LOSSY`. */
+  /** Whether every IFC Body item reconstructed into an owned solid. */
+  readonly completeness: ImportedBodyCompleteness;
+  /** Owned World-placed reconstructed handles. Dispose them through disposeImportedModel(). */
+  readonly solids: readonly ValidSolid[];
+  /** Borrowed alias for a COMPLETE one-solid Body. Otherwise null. */
   readonly solid: ValidSolid | null;
   /** Raw triangle vertices (interleaved xyz), present only for `TESSELLATED_LOSSY`. */
   readonly meshVertices?: Float32Array | undefined;
@@ -1845,7 +1851,12 @@ interface BimError {
 
 declare function specError(code: string, message: string, cause?: unknown): BimError;
 
-declare function ifcError(code: string, message: string, cause?: unknown): BimError;
+declare function ifcError(
+  code: string,
+  message: string,
+  cause?: unknown,
+  metadata?: Readonly<Record<string, unknown>>
+): BimError;
 
 declare function geometryError(code: string, message: string, cause?: unknown): BimError;
 

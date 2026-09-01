@@ -2,13 +2,17 @@ import * as WebIFC from 'web-ifc';
 import {
   applyMatrix,
   castShape,
+  clone,
   err,
   extrude,
   getKernel,
+  getSolids,
   isSolid,
   ok,
   polygon,
   revolve,
+  sewShells,
+  solidFromShell,
   validSolid,
   type MatrixTransform,
   type OrientedFace,
@@ -32,7 +36,7 @@ import { readPlaneAngleScale } from './placement.js';
  * Outcome of reconstructing a single product's body geometry.
  *
  * - `SOLID` — a brepjs ValidSolid was rebuilt (parametrically from a swept
- *   solid, or by a manifold STL round-trip of a tessellated mesh).
+ *   solid, or by sewing a manifold tessellated mesh).
  * - `MESH` — geometry exists but could not be turned into a closed solid;
  *   raw triangle data is returned and flagged lossy via `diagnostic`.
  * - `NONE` — the product carries no recognised body representation.
@@ -47,6 +51,12 @@ export type GeometryResult =
     }
   | { readonly kind: 'NONE' };
 
+export interface BodyGeometryItems {
+  readonly hasBody: boolean;
+  readonly itemCount: number;
+  readonly items: readonly GeometryResult[];
+}
+
 // web-ifc wraps measure/real values as { value | _representationValue } and
 // references as { value: expressId }. Both are read via `.value`/`._representationValue`.
 interface IfcRef {
@@ -54,6 +64,17 @@ interface IfcRef {
 }
 
 const NONE: GeometryResult = { kind: 'NONE' };
+
+export interface GeometryReadTestHooks {
+  readonly afterItemSolid?: ((itemExpressId: number, solid: ValidSolid) => void) | undefined;
+}
+
+let testHooks: GeometryReadTestHooks | null = null;
+
+/** Package-internal deterministic failure seam for import ownership tests. */
+export function setGeometryReadTestHooksForTesting(hooks: GeometryReadTestHooks | null): void {
+  testHooks = hooks;
+}
 
 /**
  * Reconstructs the `Body` (SweptSolid) representation of a product into a brepjs
@@ -70,53 +91,72 @@ export function readBodyGeometry(
   scale: number,
   diagnostics: ValidationIssue[]
 ): GeometryResult {
+  const body = readBodyItems(reader, productExpressId, scale, diagnostics);
+  const selected = body.items.find((item) => item.kind !== 'NONE') ?? NONE;
+  for (const item of body.items) {
+    if (item !== selected && item.kind === 'SOLID') item.solid[Symbol.dispose]();
+  }
+  return selected;
+}
+
+/** Reconstructs each supported IFC Body item independently in representation order. */
+export function readBodyItems(
+  reader: SpfReader,
+  productExpressId: number,
+  scale: number,
+  diagnostics: ValidationIssue[]
+): BodyGeometryItems {
   const product = reader.getLine<Record<string, unknown>>(productExpressId);
-  if (product === null) return NONE;
+  if (product === null) return { hasBody: false, itemCount: 0, items: [] };
   const representationRef = asRef(product['Representation']);
-  if (representationRef === undefined) return NONE;
+  if (representationRef === undefined) return { hasBody: false, itemCount: 0, items: [] };
 
   const productShape = reader.getLine<Record<string, unknown>>(representationRef.value);
   const representations =
     productShape === null ? undefined : asRefArray(productShape['Representations']);
-  if (representations === undefined) return NONE;
+  if (representations === undefined) return { hasBody: false, itemCount: 0, items: [] };
 
-  const bodyItemId = findBodyItem(reader, representations);
-  if (bodyItemId === undefined) return NONE;
+  const bodyItemIds = findBodyItems(reader, representations);
+  if (bodyItemIds === null) return { hasBody: false, itemCount: 0, items: [] };
 
   const worldTransform = readWorldTransform(reader, product, scale);
+  const items = bodyItemIds.map((bodyItemId): GeometryResult => {
+    const itemType = reader.getLineType(bodyItemId);
+    try {
+      if (itemType === WebIFC.IFCEXTRUDEDAREASOLID) {
+        return reconstructExtrusion(reader, bodyItemId, scale, worldTransform, diagnostics);
+      }
+      if (itemType === WebIFC.IFCREVOLVEDAREASOLID) {
+        return reconstructRevolution(reader, bodyItemId, scale, worldTransform, diagnostics);
+      }
+      if (itemType === WebIFC.IFCTRIANGULATEDFACESET) {
+        return reconstructTriangulatedItem(reader, bodyItemId, scale, worldTransform, diagnostics);
+      }
+    } catch (cause) {
+      diagnostics.push(
+        issue(
+          'warning',
+          'GEOMETRY_RECONSTRUCTION_FAILED',
+          `Body item ${bodyItemId} reconstruction threw: ${errMsg(cause)}`,
+          bodyItemId,
+          { productExpressId }
+        )
+      );
+      return NONE;
+    }
 
-  const itemType = reader.getLineType(bodyItemId);
-  try {
-    if (itemType === WebIFC.IFCEXTRUDEDAREASOLID) {
-      return reconstructExtrusion(reader, bodyItemId, scale, worldTransform, diagnostics);
-    }
-    if (itemType === WebIFC.IFCREVOLVEDAREASOLID) {
-      return reconstructRevolution(reader, bodyItemId, scale, worldTransform, diagnostics);
-    }
-    if (isTessellatedType(itemType)) {
-      return reconstructTessellated(reader, productExpressId, diagnostics);
-    }
-  } catch (e) {
     diagnostics.push(
       issue(
         'warning',
-        'GEOMETRY_RECONSTRUCTION_FAILED',
-        `Body geometry reconstruction threw: ${errMsg(e)}`,
-        productExpressId
+        'UNSUPPORTED_REPRESENTATION_ITEM',
+        `Unsupported Body item ${bodyItemId} type ${itemType}; geometry skipped`,
+        bodyItemId,
+        { productExpressId }
       )
     );
     return NONE;
-  }
-
-  diagnostics.push(
-    issue(
-      'warning',
-      'UNSUPPORTED_REPRESENTATION_ITEM',
-      `Unsupported body representation item type ${itemType}; geometry skipped`,
-      productExpressId
-    )
-  );
-  return NONE;
+  });
+  return { hasBody: true, itemCount: bodyItemIds.length, items };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,41 +321,60 @@ function reconstructRevolution(
 }
 
 // ---------------------------------------------------------------------------
-// Tessellated fallback (STL round-trip; lossy when not manifold)
+// Tessellated reconstruction (direct sewing with an STL fallback)
 // ---------------------------------------------------------------------------
 
-function reconstructTessellated(
+function reconstructTriangulatedItem(
   reader: SpfReader,
-  productExpressId: number,
+  itemExpressId: number,
+  scale: number,
+  worldTransform: MatrixTransform | null,
   diagnostics: ValidationIssue[]
 ): GeometryResult {
-  const mesh = collectMesh(reader, productExpressId);
+  const faceSet = reader.getLine<Record<string, unknown>>(itemExpressId);
+  const coordinatesRef = faceSet === null ? undefined : asRef(faceSet['Coordinates']);
+  const pointList =
+    coordinatesRef === undefined
+      ? null
+      : reader.getLine<Record<string, unknown>>(coordinatesRef.value);
+  const rawPoints = pointList?.['CoordList'];
+  const rawTriangles = faceSet?.['CoordIndex'];
+  const mesh = readTriangulatedMesh(rawPoints, rawTriangles, scale, worldTransform);
   if (mesh === null || mesh.indices.length === 0) {
     diagnostics.push(
       issue(
         'warning',
         'GEOMETRY_RECONSTRUCTION_FAILED',
         'Tessellated geometry yielded no triangles',
-        productExpressId
+        itemExpressId
       )
     );
     return NONE;
   }
 
-  // web-ifc emits geometry in metres; STL import expects mm to match the
-  // parametric path's units.
-  const stl = packBinaryStl(mesh.vertices, mesh.indices, 1000);
-  let solid: ValidSolid | null = null;
+  const stl = packBinaryStl(mesh.vertices, mesh.indices, 1);
+  let solid = sewTriangulatedMesh(mesh);
   try {
     // getKernel().importSTL returns the kernel's KernelShape (typed `any` at the
     // WASM boundary); castShape brands it back into a brepjs handle.
-    const cast = castShape(getKernel().importSTL(stl.buffer as ArrayBuffer));
-    if (isSolid(cast)) {
-      const valid = validSolid(cast);
-      if (valid.ok) solid = valid.value;
-      else cast[Symbol.dispose]();
-    } else {
-      cast[Symbol.dispose]();
+    if (solid === null) {
+      const cast = castShape(getKernel().importSTL(new Uint8Array(stl).buffer));
+      if (isSolid(cast)) {
+        const valid = validSolid(cast);
+        if (valid.ok) solid = valid.value;
+        else cast[Symbol.dispose]();
+      } else {
+        const solids = getSolids(cast);
+        if (solids.length === 1 && solids[0] !== undefined) {
+          const copied = clone(solids[0]);
+          if (copied.ok) {
+            const valid = validSolid(copied.value);
+            if (valid.ok) solid = valid.value;
+            else copied.value[Symbol.dispose]();
+          }
+        }
+        cast[Symbol.dispose]();
+      }
     }
   } catch (e) {
     diagnostics.push(
@@ -323,18 +382,24 @@ function reconstructTessellated(
         'info',
         'TESSELLATION_NOT_MANIFOLD',
         `STL round-trip failed: ${errMsg(e)}`,
-        productExpressId
+        itemExpressId
       )
     );
   }
 
   if (solid !== null) {
+    try {
+      testHooks?.afterItemSolid?.(itemExpressId, solid);
+    } catch (cause) {
+      solid[Symbol.dispose]();
+      throw cause;
+    }
     diagnostics.push(
       issue(
         'info',
         'TESSELLATED_MANIFOLD',
-        'Tessellated mesh recovered as a closed solid via STL round-trip',
-        productExpressId
+        'Tessellated mesh recovered as a closed solid',
+        itemExpressId
       )
     );
     return { kind: 'SOLID', solid, lossy: true };
@@ -345,7 +410,7 @@ function reconstructTessellated(
       'info',
       'TESSELLATION_NOT_MANIFOLD',
       'Tessellated mesh is not closed/manifold; returning raw triangle data (lossy)',
-      productExpressId
+      itemExpressId
     )
   );
   return {
@@ -361,49 +426,85 @@ interface MeshData {
   readonly indices: Uint32Array;
 }
 
-function collectMesh(reader: SpfReader, productExpressId: number): MeshData | null {
+function sewTriangulatedMesh(mesh: MeshData): ValidSolid | null {
+  const faces: PlanarFace[] = [];
+  try {
+    for (let index = 0; index + 2 < mesh.indices.length; index += 3) {
+      const a = (mesh.indices[index] ?? 0) * 3;
+      const b = (mesh.indices[index + 1] ?? 0) * 3;
+      const c = (mesh.indices[index + 2] ?? 0) * 3;
+      const face = polygon([
+        [mesh.vertices[a] ?? 0, mesh.vertices[a + 1] ?? 0, mesh.vertices[a + 2] ?? 0],
+        [mesh.vertices[b] ?? 0, mesh.vertices[b + 1] ?? 0, mesh.vertices[b + 2] ?? 0],
+        [mesh.vertices[c] ?? 0, mesh.vertices[c + 1] ?? 0, mesh.vertices[c + 2] ?? 0],
+      ]);
+      if (!face.ok) return null;
+      faces.push(face.value);
+    }
+    if (faces.length === 0) return null;
+    const shell = sewShells(faces);
+    if (!shell.ok) return null;
+    try {
+      const solid = solidFromShell(shell.value);
+      return solid.ok ? solid.value : null;
+    } finally {
+      shell.value[Symbol.dispose]();
+    }
+  } catch {
+    return null;
+  } finally {
+    for (const face of faces) face[Symbol.dispose]();
+  }
+}
+
+function readTriangulatedMesh(
+  rawPoints: unknown,
+  rawTriangles: unknown,
+  scale: number,
+  worldTransform: MatrixTransform | null
+): MeshData | null {
+  if (!Array.isArray(rawPoints) || !Array.isArray(rawTriangles)) return null;
   const vertices: number[] = [];
   const indices: number[] = [];
-  let base = 0;
-
-  reader.streamMeshes([productExpressId], (flatMesh) => {
-    try {
-      const geometries = flatMesh.geometries;
-      for (let g = 0; g < geometries.size(); g++) {
-        const placed = geometries.get(g);
-        const geom = reader.getGeometry(placed.geometryExpressID);
-        try {
-          const verts = reader.getVertexArray(geom.GetVertexData(), geom.GetVertexDataSize());
-          const idx = reader.getIndexArray(geom.GetIndexData(), geom.GetIndexDataSize());
-          const m = placed.flatTransformation;
-          // web-ifc vertex stride is 6 floats: position(3) + normal(3).
-          const vertexCount = verts.length / 6;
-          for (let v = 0; v < vertexCount; v++) {
-            const x = verts[v * 6] ?? 0;
-            const y = verts[v * 6 + 1] ?? 0;
-            const z = verts[v * 6 + 2] ?? 0;
-            // Apply the 4x4 column-major placement transform.
-            vertices.push(
-              (m[0] ?? 1) * x + (m[4] ?? 0) * y + (m[8] ?? 0) * z + (m[12] ?? 0),
-              (m[1] ?? 0) * x + (m[5] ?? 1) * y + (m[9] ?? 0) * z + (m[13] ?? 0),
-              (m[2] ?? 0) * x + (m[6] ?? 0) * y + (m[10] ?? 1) * z + (m[14] ?? 0)
-            );
-          }
-          for (let i = 0; i < idx.length; i++) {
-            indices.push(base + (idx[i] ?? 0));
-          }
-          base += vertexCount;
-        } finally {
-          geom.delete();
-        }
-      }
-    } finally {
-      flatMesh.delete();
-    }
-  });
-
-  if (vertices.length === 0) return null;
+  const lengthFactor = scale * 1000;
+  for (const rawPoint of rawPoints) {
+    if (!Array.isArray(rawPoint) || rawPoint.length < 3) return null;
+    const local: Vec3 = [
+      (readMeasure(rawPoint[0]) ?? 0) * lengthFactor,
+      (readMeasure(rawPoint[1]) ?? 0) * lengthFactor,
+      (readMeasure(rawPoint[2]) ?? 0) * lengthFactor,
+    ];
+    const placed = transformPoint(local, worldTransform);
+    vertices.push(placed[0], placed[1], placed[2]);
+  }
+  for (const rawTriangle of rawTriangles) {
+    if (!Array.isArray(rawTriangle) || rawTriangle.length < 3) return null;
+    indices.push(
+      (readMeasure(rawTriangle[0]) ?? 1) - 1,
+      (readMeasure(rawTriangle[1]) ?? 1) - 1,
+      (readMeasure(rawTriangle[2]) ?? 1) - 1
+    );
+  }
   return { vertices: new Float32Array(vertices), indices: new Uint32Array(indices) };
+}
+
+function transformPoint(point: Vec3, transform: MatrixTransform | null): Vec3 {
+  if (transform === null) return point;
+  const m = transform.linear;
+  return [
+    (m[0] ?? 1) * point[0] +
+      (m[1] ?? 0) * point[1] +
+      (m[2] ?? 0) * point[2] +
+      transform.translation[0],
+    (m[3] ?? 0) * point[0] +
+      (m[4] ?? 1) * point[1] +
+      (m[5] ?? 0) * point[2] +
+      transform.translation[1],
+    (m[6] ?? 0) * point[0] +
+      (m[7] ?? 0) * point[1] +
+      (m[8] ?? 1) * point[2] +
+      transform.translation[2],
+  ];
 }
 
 // Packs interleaved triangle data into a binary STL buffer. `scaleToMm` converts
@@ -797,17 +898,17 @@ function isIdentity(t: MatrixTransform): boolean {
 // Line / value extraction helpers
 // ---------------------------------------------------------------------------
 
-function findBodyItem(reader: SpfReader, representations: readonly IfcRef[]): number | undefined {
+function findBodyItems(reader: SpfReader, representations: readonly IfcRef[]): number[] | null {
   for (const repRef of representations) {
     const rep = reader.getLine<Record<string, unknown>>(repRef.value);
     if (rep === null) continue;
     const repId = readLabel(rep['RepresentationIdentifier']);
     if (repId !== 'Body') continue;
     const items = asRefArray(rep['Items']);
-    if (items === undefined || items.length === 0) continue;
-    return items[0]?.value;
+    if (items === undefined) return [];
+    return items.map((item) => item.value);
   }
-  return undefined;
+  return null;
 }
 
 function readPolylinePoints(
@@ -907,14 +1008,6 @@ function readLabel(value: unknown): string | undefined {
     if (typeof v === 'string') return v;
   }
   return undefined;
-}
-
-function isTessellatedType(type: number): boolean {
-  return (
-    type === WebIFC.IFCTRIANGULATEDFACESET ||
-    type === WebIFC.IFCPOLYGONALFACESET ||
-    type === WebIFC.IFCFACEBASEDSURFACEMODEL
-  );
 }
 
 function normalize(v: Vec3): Vec3 {

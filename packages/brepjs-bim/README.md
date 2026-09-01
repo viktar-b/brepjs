@@ -40,6 +40,11 @@ beneath a placed spatial structure, pass its cumulative frame as
 `placedSolids(element, { parentFrame })` to obtain world coordinates. This is especially important
 for parent-local Proxy and Earthworks Fill bodies.
 
+IFC import reconstructs every supported Body item independently. `ImportedGeometry.solids` owns
+the resulting World-placed handles and `completeness` reports `COMPLETE`, `PARTIAL`, or `NONE`.
+The legacy `.solid` property is a borrowed alias only for a complete one-solid Body. Dispose import
+geometry through `disposeImportedModel()` rather than through either property.
+
 - Units default to mm; IFC export emits SI metres.
 - Stable identity: deterministic IFC GUIDs (`deriveIfcGuid`) and local id counters.
 - Shaped geometry: roofs build real shed/gable/hip/dome solids when `pitch` is set (flat slab

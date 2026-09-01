@@ -210,6 +210,7 @@ export type {
   ImportedElement,
   ImportedElementCategory,
   ImportedGeometry,
+  ImportedBodyCompleteness,
   GeometryFidelity,
   ImportedPset,
   ImportedMaterial,
