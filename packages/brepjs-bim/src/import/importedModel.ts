@@ -1,4 +1,4 @@
-import type { ValidSolid } from 'brepjs';
+import type { Bounds3D, ValidSolid } from 'brepjs';
 import type { ValidationReport } from '../validation/severity.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import type { ImportedSchema } from './spfReader.js';
@@ -25,6 +25,10 @@ export interface ImportedGeometry {
   readonly solids: readonly ValidSolid[];
   /** Borrowed alias for a COMPLETE one-solid Body. Otherwise null. */
   readonly solid: ValidSolid | null;
+  /** Component-wise union of all item bounds for a COMPLETE Body. Otherwise null. */
+  readonly bounds: Bounds3D | null;
+  /** Sum of item volumes in mm³ for a COMPLETE Body. Otherwise null. */
+  readonly volumeMm3: number | null;
   /** Raw triangle vertices (interleaved xyz), present only for `TESSELLATED_LOSSY`. */
   readonly meshVertices?: Float32Array | undefined;
   /** Raw triangle indices, present only for `TESSELLATED_LOSSY`. */

@@ -1,6 +1,6 @@
 import * as WebIFC from 'web-ifc';
-import type { Result, ValidSolid } from 'brepjs';
-import { ok, err, cut } from 'brepjs';
+import type { Bounds3D, Result, ValidSolid } from 'brepjs';
+import { ok, err, cut, getBounds, measureVolume } from 'brepjs';
 import type { BimError } from '../errors/bimError.js';
 import { importError } from '../errors/bimError.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
@@ -210,7 +210,14 @@ function readElement(
     const fills = findFills(reader, expressId);
 
     geometry = skipGeometry
-      ? { fidelity: 'NONE', completeness: 'NONE', solids: [], solid: null }
+      ? {
+          fidelity: 'NONE',
+          completeness: 'NONE',
+          solids: [],
+          solid: null,
+          bounds: null,
+          volumeMm3: null,
+        }
       : reconstructGeometry(reader, expressId, scale, voidedBy, diagnostics);
     testHooks?.afterGeometry?.(expressId, geometry);
 
@@ -310,12 +317,7 @@ function reconstructGeometry(
     host[Symbol.dispose]();
     host = cutResult.value;
   }
-  return {
-    fidelity: 'PARAMETRIC',
-    completeness: 'COMPLETE',
-    solids: [host],
-    solid: host,
-  };
+  return completeImportedGeometry('PARAMETRIC', [host], expressId, diagnostics);
 }
 
 function toImportedGeometry(
@@ -373,15 +375,78 @@ function toImportedGeometry(
       : lossyMesh !== null
         ? 'TESSELLATED_LOSSY'
         : 'NONE';
+  const aggregate =
+    completeness === 'COMPLETE'
+      ? measureCompleteBody(solids, expressId, diagnostics)
+      : { bounds: null, volumeMm3: null };
   return {
     fidelity,
     completeness,
     solids,
     solid: completeness === 'COMPLETE' && solids.length === 1 ? (solids[0] ?? null) : null,
+    ...aggregate,
     ...(lossyMesh !== null
       ? { meshVertices: lossyMesh.vertices, meshIndices: lossyMesh.indices }
       : {}),
   };
+}
+
+function completeImportedGeometry(
+  fidelity: ImportedGeometry['fidelity'],
+  solids: readonly [ValidSolid, ...ValidSolid[]],
+  expressId: number,
+  diagnostics: ValidationIssue[]
+): ImportedGeometry {
+  return {
+    fidelity,
+    completeness: 'COMPLETE',
+    solids,
+    solid: solids.length === 1 ? solids[0] : null,
+    ...measureCompleteBody(solids, expressId, diagnostics),
+  };
+}
+
+function measureCompleteBody(
+  solids: readonly ValidSolid[],
+  expressId: number,
+  diagnostics: ValidationIssue[]
+): { readonly bounds: Bounds3D | null; readonly volumeMm3: number | null } {
+  try {
+    const first = solids[0];
+    if (first === undefined) return { bounds: null, volumeMm3: null };
+    const initial = getBounds(first);
+    let xMin = initial.xMin;
+    let xMax = initial.xMax;
+    let yMin = initial.yMin;
+    let yMax = initial.yMax;
+    let zMin = initial.zMin;
+    let zMax = initial.zMax;
+    let volumeMm3 = 0;
+    for (const solid of solids) {
+      const measured = measureVolume(solid);
+      if (!measured.ok) throw new Error(measured.error.message);
+      volumeMm3 += measured.value;
+      const itemBounds = getBounds(solid);
+      xMin = Math.min(xMin, itemBounds.xMin);
+      xMax = Math.max(xMax, itemBounds.xMax);
+      yMin = Math.min(yMin, itemBounds.yMin);
+      yMax = Math.max(yMax, itemBounds.yMax);
+      zMin = Math.min(zMin, itemBounds.zMin);
+      zMax = Math.max(zMax, itemBounds.zMax);
+    }
+    const bounds: Bounds3D = { xMin, xMax, yMin, yMax, zMin, zMax };
+    return { bounds, volumeMm3 };
+  } catch (cause) {
+    diagnostics.push(
+      issue(
+        'warning',
+        'BODY_AGGREGATE_MEASUREMENT_FAILED',
+        `Complete Body aggregate measurement failed: ${errMsg(cause)}`,
+        expressId
+      )
+    );
+    return { bounds: null, volumeMm3: null };
+  }
 }
 
 function disposeGeometry(geometry: ImportedGeometry): void {

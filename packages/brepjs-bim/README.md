@@ -31,6 +31,11 @@ borrow their Product-local model handles and narrow `geometry.kind` when a calle
 needs the parametric branch. Other solid-bearing categories continue to expose their existing
 geometry types.
 
+`takeExactProductBody(localId, { kind: 'EXACT', solids })` installs an authoritative wall or
+railing Body atomically. Success transfers every supplied handle to the model and disposes the
+superseded parametric Body; failure transfers nothing. Add wall openings before takeover, because
+an exact wall rejects later `addDoor()` and `addWindow()` mutations.
+
 Element geometry is **unplaced template geometry** in local coordinates. Placement (`origin` /
 `axisX` / `axisZ`) is applied by the IFC layer via `IfcLocalPlacement`, not baked into the brepjs
 solid. Use `placedSolids(element)` to read fresh, caller-owned solids transformed by the element's
@@ -43,7 +48,8 @@ for parent-local Proxy and Earthworks Fill bodies.
 IFC import reconstructs every supported Body item independently. `ImportedGeometry.solids` owns
 the resulting World-placed handles and `completeness` reports `COMPLETE`, `PARTIAL`, or `NONE`.
 The legacy `.solid` property is a borrowed alias only for a complete one-solid Body. Dispose import
-geometry through `disposeImportedModel()` rather than through either property.
+geometry through `disposeImportedModel()` rather than through either property. Complete Bodies
+also expose aggregate `bounds` and `volumeMm3`; both are `null` for partial or missing Bodies.
 
 - Units default to mm; IFC export emits SI metres.
 - Stable identity: deterministic IFC GUIDs (`deriveIfcGuid`) and local id counters.

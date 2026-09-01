@@ -140,6 +140,7 @@ describe('imported Body completeness and ownership', () => {
     expect(wall?.geometry.completeness).toBe('COMPLETE');
     expect(wall?.geometry.solids).toHaveLength(1);
     expect(wall?.geometry.solid).toBe(wall?.geometry.solids[0]);
+    expect(wall?.geometry.volumeMm3).toBeCloseTo(1_000_000, 3);
     disposeImportedModel(imported.value);
   });
 
@@ -160,6 +161,13 @@ describe('imported Body completeness and ownership', () => {
     expect(bounds[0]?.yMin).toBeCloseTo(2_000, 2);
     expect(bounds[0]?.zMin).toBeCloseTo(3_000, 2);
     expect(bounds[1]?.xMin).toBeCloseTo(1_200, 2);
+    expect(wall?.geometry.volumeMm3).toBeCloseTo(1_125_000, 2);
+    expect(wall?.geometry.bounds?.xMin).toBeCloseTo(1_000, 2);
+    expect(wall?.geometry.bounds?.xMax).toBeCloseTo(1_250, 2);
+    expect(wall?.geometry.bounds?.yMin).toBeCloseTo(2_000, 2);
+    expect(wall?.geometry.bounds?.yMax).toBeCloseTo(2_100, 2);
+    expect(wall?.geometry.bounds?.zMin).toBeCloseTo(3_000, 2);
+    expect(wall?.geometry.bounds?.zMax).toBeCloseTo(3_100, 2);
 
     const disposals = wall?.geometry.solids.map(() => 0) ?? [];
     wall?.geometry.solids.forEach((solid, index) => {
@@ -182,6 +190,8 @@ describe('imported Body completeness and ownership', () => {
       expect(wall?.geometry.completeness).toBe('PARTIAL');
       expect(wall?.geometry.solids).toHaveLength(1);
       expect(wall?.geometry.solid).toBeNull();
+      expect(wall?.geometry.bounds).toBeNull();
+      expect(wall?.geometry.volumeMm3).toBeNull();
       const codes = imported.value.diagnostics.issues.map((diagnostic) => diagnostic.code);
       expect(codes).toContain('UNSUPPORTED_REPRESENTATION_ITEM');
       expect(codes).toContain('PARTIAL_BODY_RECONSTRUCTION');
@@ -199,6 +209,8 @@ describe('imported Body completeness and ownership', () => {
     expect(wall?.geometry.completeness).toBe('NONE');
     expect(wall?.geometry.solids).toEqual([]);
     expect(wall?.geometry.solid).toBeNull();
+    expect(wall?.geometry.bounds).toBeNull();
+    expect(wall?.geometry.volumeMm3).toBeNull();
     expect(imported.value.diagnostics.issues.map((diagnostic) => diagnostic.code)).toContain(
       'BODY_RECONSTRUCTION_NONE'
     );

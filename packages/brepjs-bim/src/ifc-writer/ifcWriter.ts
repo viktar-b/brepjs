@@ -16,6 +16,17 @@ export interface IfcWriterApiForTesting {
   CloseModel(modelId: number): void;
 }
 
+export interface IfcWriterTestHooks {
+  readonly afterClose?: (() => void) | undefined;
+}
+
+let testHooks: IfcWriterTestHooks | null = null;
+
+/** Package-internal deterministic lifecycle observation seam. */
+export function setIfcWriterTestHooksForTesting(hooks: IfcWriterTestHooks | null): void {
+  testHooks = hooks;
+}
+
 /** Default MVD ViewDefinition declared in the STEP FILE_DESCRIPTION header. */
 export const DEFAULT_MVD_VIEW_DEFINITION = 'ReferenceView_v1.2';
 
@@ -143,6 +154,7 @@ export class IfcWriter {
     if (this.#closed) return;
     this.#closed = true;
     this.#api.CloseModel(this.#modelId);
+    testHooks?.afterClose?.();
   }
 
   [Symbol.dispose](): void {

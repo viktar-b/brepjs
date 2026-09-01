@@ -9,6 +9,15 @@ import {
 
 export type ExactBodyItemPreparer = (solid: ValidSolid) => TessellationPreparation;
 
+let testItemPreparer: ExactBodyItemPreparer | null = null;
+
+/** Package-internal deterministic failure seam for serialization cleanup tests. */
+export function setExactBodyItemPreparerForTesting(
+  prepareItem: ExactBodyItemPreparer | null
+): void {
+  testItemPreparer = prepareItem;
+}
+
 export interface ExactBodyPreflightInput {
   readonly localId: LocalId;
   readonly solids: readonly ValidSolid[];
@@ -20,7 +29,7 @@ export function preflightExactBody(
   input: ExactBodyPreflightInput
 ): Result<readonly PreparedTessellation[], BimError> {
   const prepared: PreparedTessellation[] = [];
-  const prepareItem = input.prepareItem ?? prepareTessellation;
+  const prepareItem = input.prepareItem ?? testItemPreparer ?? prepareTessellation;
   for (const [itemIndex, solid] of input.solids.entries()) {
     const item = prepareItem(solid);
     if (!item.ok) {

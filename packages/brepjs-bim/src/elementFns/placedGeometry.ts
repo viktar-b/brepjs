@@ -2,23 +2,48 @@ import { applyMatrix, ok, err } from 'brepjs';
 import type { ValidSolid, Result } from 'brepjs';
 import type { AnyBimElement } from '../types/bimTypes.js';
 import type { BimError } from '../errors/bimError.js';
-import { fromBrepError } from '../errors/bimError.js';
+import { fromBrepError, geometryError } from '../errors/bimError.js';
 import { placementToMatrix, type FrameInput } from '../import/placement.js';
 import { stairFlightToSolid } from './stairFns.js';
 import { rampFlightToSolid } from './rampFns.js';
 import { bodySolids } from '../types/productBody.js';
 
+export interface PlacedGeometryTestHooks {
+  readonly afterPlaced?: ((solid: ValidSolid) => void) | undefined;
+}
+
+let testHooks: PlacedGeometryTestHooks | null = null;
+
+/** Package-internal deterministic failure seam for placement ownership tests. */
+export function setPlacedGeometryTestHooksForTesting(hooks: PlacedGeometryTestHooks | null): void {
+  testHooks = hooks;
+}
+
 // Applies an (origin, axisX, axisZ) frame to a local solid, returning a fresh
 // caller-owned solid. Orthonormal frames use the validity-preserving transform
 // path, so the result is a ValidSolid.
 function place(solid: ValidSolid, frame: FrameInput): Result<ValidSolid, BimError> {
-  const result = applyMatrix(solid, placementToMatrix(frame));
-  if (!result.ok) {
+  let placed: ValidSolid | null = null;
+  try {
+    const result = applyMatrix(solid, placementToMatrix(frame));
+    if (!result.ok) {
+      return err(
+        fromBrepError(result.error, 'PLACED_GEOMETRY_FAILED', 'Failed to place element geometry')
+      );
+    }
+    placed = result.value;
+    testHooks?.afterPlaced?.(placed);
+    return ok(placed);
+  } catch (cause) {
+    placed?.[Symbol.dispose]();
     return err(
-      fromBrepError(result.error, 'PLACED_GEOMETRY_FAILED', 'Failed to place element geometry')
+      geometryError(
+        'PLACED_GEOMETRY_FAILED',
+        'Element placement threw while transforming geometry',
+        cause
+      )
     );
   }
-  return ok(result.value);
 }
 
 function disposeAll(solids: readonly ValidSolid[]): void {

@@ -5,7 +5,15 @@
  * Ambient type declarations for brepjs-bim available in the playground editor.
  */
 
-import type { BrepError, OrientedFace, PlanarFace, Result, ValidSolid, csg } from 'brepjs';
+import type {
+  Bounds3D,
+  BrepError,
+  OrientedFace,
+  PlanarFace,
+  Result,
+  ValidSolid,
+  csg,
+} from 'brepjs';
 
 /** Optional identity override for created elements: a stable key (e.g. a
  *  families key path) that replaces the positional GlobalId derivation. */
@@ -52,6 +60,20 @@ declare class BimModel {
    */
   addRamp(spec: RampSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
   addRailing(spec: RailingSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
+  /**
+   * Atomically replaces a parametric wall or railing Body with authoritative,
+   * caller-owned exact solids. Success transfers every supplied handle to this
+   * model. Failure leaves both the model and all supplied handles unchanged.
+   */
+  takeExactProductBody(
+    localId: LocalId,
+    body: Extract<
+      ProductBody,
+      {
+        readonly kind: 'EXACT';
+      }
+    >
+  ): Result<void, BimError>;
   /**
    * Adds an IfcCovering. When `hostLocalId` is supplied, an
    * IfcRelCoversBldgElements linking the covering to its host (e.g. a slab it
@@ -341,6 +363,10 @@ interface ImportedGeometry {
   readonly solids: readonly ValidSolid[];
   /** Borrowed alias for a COMPLETE one-solid Body. Otherwise null. */
   readonly solid: ValidSolid | null;
+  /** Component-wise union of all item bounds for a COMPLETE Body. Otherwise null. */
+  readonly bounds: Bounds3D | null;
+  /** Sum of item volumes in mm³ for a COMPLETE Body. Otherwise null. */
+  readonly volumeMm3: number | null;
   /** Raw triangle vertices (interleaved xyz), present only for `TESSELLATED_LOSSY`. */
   readonly meshVertices?: Float32Array | undefined;
   /** Raw triangle indices, present only for `TESSELLATED_LOSSY`. */

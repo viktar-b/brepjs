@@ -47,8 +47,9 @@ Imported geometry pins kernel memory; call `disposeImportedModel` when done. `ge
 every reconstructed, World-placed Body item. `geometry.completeness` reports `COMPLETE`, `PARTIAL`,
 or `NONE`. The `geometry.solid` compatibility property borrows the same handle only when a
 `COMPLETE` Body contains one solid; it is `null` for multi-item, partial, and missing Bodies. Never
-dispose the alias separately. For header-level inspection without geometry, `SpfReader` parses the
-STEP structure directly.
+dispose the alias separately. Complete Bodies expose the component-wise aggregate `bounds` and the
+sum of item volumes as `volumeMm3`; both are `null` when completeness is `PARTIAL` or `NONE`. For
+header-level inspection without geometry, `SpfReader` parses the STEP structure directly.
 
 The IFC4X3 importer recognizes Bridge and Bridge Part nodes in `spatialTree` and imports
 `IfcEarthworksFill` as `EARTHWORKS_FILL`. Each imported product exposes
