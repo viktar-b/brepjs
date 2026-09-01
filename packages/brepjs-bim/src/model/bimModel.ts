@@ -66,6 +66,7 @@ import { curtainWallToGrid } from '../elementFns/curtainWallFns.js';
 import { footingToSolid, pileToSolid } from '../elementFns/foundationFns.js';
 import { railingToSolid } from '../elementFns/railingFns.js';
 import { coveringToSolid } from '../elementFns/coveringFns.js';
+import { disposeProductBody } from '../types/productBody.js';
 
 /** Optional identity override for created elements: a stable key (e.g. a
  *  families key path) that replaces the positional GlobalId derivation. */
@@ -110,7 +111,6 @@ export class BimModel {
   [Symbol.dispose](): void {
     for (const el of this.#elements.values()) {
       if (
-        el.category === 'WALL' ||
         el.category === 'SLAB' ||
         el.category === 'BEAM' ||
         el.category === 'COLUMN' ||
@@ -120,10 +120,11 @@ export class BimModel {
         el.category === 'ROOF' ||
         el.category === 'FOOTING' ||
         el.category === 'PILE' ||
-        el.category === 'RAILING' ||
         el.category === 'COVERING'
       ) {
         el.geometry[Symbol.dispose]();
+      } else if (el.category === 'WALL' || el.category === 'RAILING') {
+        disposeProductBody(el.geometry);
       } else if (el.category === 'CURTAIN_WALL') {
         // Curtain wall geometry is a grid of component solids (panels + mullions).
         for (const panel of el.geometry.panels) panel.solid[Symbol.dispose]();
@@ -209,7 +210,12 @@ export class BimModel {
     if (!keyCheck.ok) return keyCheck;
     const geomResult = wallToSolid(spec);
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement('WALL', spec, geomResult.value, options?.stableKey);
+    const id = this.#makeElement(
+      'WALL',
+      spec,
+      { kind: 'PARAMETRIC', solid: geomResult.value },
+      options?.stableKey
+    );
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
@@ -338,7 +344,12 @@ export class BimModel {
     if (!keyCheck.ok) return keyCheck;
     const geomResult = railingToSolid(spec);
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement('RAILING', spec, geomResult.value, options?.stableKey);
+    const id = this.#makeElement(
+      'RAILING',
+      spec,
+      { kind: 'PARAMETRIC', solid: geomResult.value },
+      options?.stableKey
+    );
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
@@ -784,10 +795,18 @@ export class BimModel {
     wall: BimElement<'WALL'>,
     openingSpec: WallOpeningSpec
   ): Result<ValidSolid, BimError> {
+    if (wall.geometry.kind === 'EXACT') {
+      return err(
+        specError(
+          'EXACT_WALL_BODY_IMMUTABLE',
+          'Cannot add an opening after a wall has taken an exact Product Body'
+        )
+      );
+    }
     const toolResult = openingToSolid(openingSpec, wall.spec.thickness);
     if (!toolResult.ok) return err(toolResult.error);
     using tool = toolResult.value;
-    const cutResult = cut(wall.geometry, tool);
+    const cutResult = cut(wall.geometry.solid, tool);
     if (!cutResult.ok) {
       return err(
         fromBrepError(cutResult.error, 'WALL_CUT_FAILED', 'Boolean cut of wall with opening failed')
@@ -798,9 +817,12 @@ export class BimModel {
 
   #replaceWallGeometry(wall: BimElement<'WALL'>, newGeometry: ValidSolid): void {
     const oldGeometry = wall.geometry;
-    const replaced: BimElement<'WALL'> = { ...wall, geometry: newGeometry };
+    const replaced: BimElement<'WALL'> = {
+      ...wall,
+      geometry: { kind: 'PARAMETRIC', solid: newGeometry },
+    };
     this.#elements.set(wall.localId, replaced);
-    oldGeometry[Symbol.dispose]();
+    disposeProductBody(oldGeometry);
   }
 
   #cutSlabGeometry(

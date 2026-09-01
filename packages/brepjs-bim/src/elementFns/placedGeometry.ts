@@ -6,6 +6,7 @@ import { fromBrepError } from '../errors/bimError.js';
 import { placementToMatrix, type FrameInput } from '../import/placement.js';
 import { stairFlightToSolid } from './stairFns.js';
 import { rampFlightToSolid } from './rampFns.js';
+import { bodySolids } from '../types/productBody.js';
 
 // Applies an (origin, axisX, axisZ) frame to a local solid, returning a fresh
 // caller-owned solid. Orthonormal frames use the validity-preserving transform
@@ -69,6 +70,18 @@ export function placedSolids(
   const parentFrame = options.parentFrame;
   switch (el.category) {
     case 'WALL':
+    case 'RAILING': {
+      const out: ValidSolid[] = [];
+      for (const solid of bodySolids(el.geometry)) {
+        const placed = placeWithinParent(solid, el.spec, parentFrame);
+        if (!placed.ok) {
+          disposeAll(out);
+          return placed;
+        }
+        out.push(placed.value);
+      }
+      return ok(out);
+    }
     case 'SLAB':
     case 'BEAM':
     case 'COLUMN':
@@ -76,8 +89,7 @@ export function placedSolids(
     case 'ROOF':
     case 'FOOTING':
     case 'PILE':
-    case 'COVERING':
-    case 'RAILING': {
+    case 'COVERING': {
       const placed = placeWithinParent(el.geometry, el.spec, parentFrame);
       if (!placed.ok) return placed;
       return ok([placed.value]);

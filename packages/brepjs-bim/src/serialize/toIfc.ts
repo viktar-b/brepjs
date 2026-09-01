@@ -126,6 +126,7 @@ import {
   type ValidationReport,
   type ValidationIssue,
 } from '../validation/severity.js';
+import { bodySolids } from '../types/productBody.js';
 
 export async function toIfc(
   model: BimModel,
@@ -722,7 +723,15 @@ export async function toIfc(
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
     const { localPlacementId, productDefinitionShapeId, bodyItemId, usedFallback } =
-      writeRailingGeometry(w, railing.spec, railing.geometry, geomSubContextId, storeyPlacementId);
+      writeRailingGeometry(
+        w,
+        railing.spec,
+        railing.geometry.kind === 'PARAMETRIC'
+          ? railing.geometry.solid
+          : railing.geometry.solids[0],
+        geomSubContextId,
+        storeyPlacementId
+      );
     if (usedFallback) {
       console.warn(`Railing ${i + 1} tessellation failed; IFC body is a degenerate fallback.`);
     }
@@ -1222,7 +1231,6 @@ export async function toIfcValidated(
 function collectGeometryIssues(model: BimModel): ValidationReport {
   const issues: ValidationIssue[] = [];
   const groups: ReadonlyArray<readonly [string, ReadonlyArray<{ geometry: ValidSolid }>]> = [
-    ['Wall', model.getWalls()],
     ['Slab', model.getSlabs()],
     ['Beam', model.getBeams()],
     ['Column', model.getColumns()],
@@ -1232,13 +1240,28 @@ function collectGeometryIssues(model: BimModel): ValidationReport {
     ['Roof', model.getRoofs()],
     ['Footing', model.getFootings()],
     ['Pile', model.getPiles()],
-    ['Railing', model.getRailings()],
     ['Covering', model.getCoverings()],
   ];
   for (const [label, elements] of groups) {
     elements.forEach((el, index) => {
       const report = checkGeometryValidity(el.geometry, `${label} ${index + 1}`);
       issues.push(...report.issues);
+    });
+  }
+
+  const productGroups = [
+    ['Wall', model.getWalls()],
+    ['Railing', model.getRailings()],
+  ] as const;
+  for (const [label, elements] of productGroups) {
+    elements.forEach((el, index) => {
+      bodySolids(el.geometry).forEach((solid, itemIndex) => {
+        const report = checkGeometryValidity(
+          solid,
+          `${label} ${index + 1} Body item ${itemIndex + 1}`
+        );
+        issues.push(...report.issues);
+      });
     });
   }
 

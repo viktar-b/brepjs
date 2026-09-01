@@ -240,6 +240,21 @@ declare function placedSolids(
   options?: PlacedSolidsOptions
 ): Result<readonly ValidSolid[], BimError>;
 
+type NonEmpty<T> = readonly [T, ...T[]];
+
+type ProductBody =
+  | {
+      readonly kind: 'PARAMETRIC';
+      readonly solid: ValidSolid;
+    }
+  | {
+      readonly kind: 'EXACT';
+      readonly solids: NonEmpty<ValidSolid>;
+    };
+
+/** Returns borrowed Product-local solids. The model retains ownership. */
+declare function bodySolids(body: ProductBody): NonEmpty<ValidSolid>;
+
 /** An (origin, axisX, axisZ) frame in mm — the authoring/display side of a placement. */
 interface FrameInput {
   readonly origin: Vec3;
