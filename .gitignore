@@ -63,6 +63,11 @@ tmp/
 examples/output/
 docs/images/examples/
 
+# Local issue tracker. Shared specs are explicitly un-ignored.
+.scratch/*
+!.scratch/scalable-bim-architecture/
+!.scratch/scalable-bim-architecture/**
+
 # Local agent skill tooling (installed via `skills add`, not project source)
 .agents/
 .claude/skills/langfuse
