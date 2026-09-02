@@ -153,6 +153,8 @@ export type {
   BridgePartPredefinedType,
   EarthworksFillSpec,
   EarthworksFillPredefinedType,
+  SignSpec,
+  SignPredefinedType,
   FacilityUsageType,
 } from './specs/infrastructureSpec.js';
 export type {

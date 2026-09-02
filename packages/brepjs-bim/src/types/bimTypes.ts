@@ -23,6 +23,7 @@ import type {
   BridgePartSpec,
   BridgeSpec,
   EarthworksFillSpec,
+  SignSpec,
 } from '../specs/infrastructureSpec.js';
 
 export type BimCategory =
@@ -51,6 +52,7 @@ export type BimCategory =
   | 'BRIDGE'
   | 'BRIDGE_PART'
   | 'EARTHWORKS_FILL'
+  | 'SIGN'
   | 'BUILDING'
   | 'STOREY';
 
@@ -130,11 +132,13 @@ export type BimSpecFor<C extends BimCategory> = C extends 'WALL'
                                                 ? BridgePartSpec
                                                 : C extends 'EARTHWORKS_FILL'
                                                   ? EarthworksFillSpec
-                                                  : C extends 'BUILDING'
-                                                    ? BuildingSpec
-                                                    : C extends 'STOREY'
-                                                      ? StoreySpec
-                                                      : never;
+                                                  : C extends 'SIGN'
+                                                    ? SignSpec
+                                                    : C extends 'BUILDING'
+                                                      ? BuildingSpec
+                                                      : C extends 'STOREY'
+                                                        ? StoreySpec
+                                                        : never;
 
 export type BimGeometryFor<C extends BimCategory> = C extends 'CURTAIN_WALL'
   ? CurtainWallGrid
@@ -145,6 +149,7 @@ export type BimGeometryFor<C extends BimCategory> = C extends 'CURTAIN_WALL'
         | 'COLUMN'
         | 'PROXY'
         | 'EARTHWORKS_FILL'
+        | 'SIGN'
         | 'SPACE'
         | 'ROOF'
         | 'FOOTING'
@@ -188,5 +193,6 @@ export type AnyBimElement =
   | BimElement<'BRIDGE'>
   | BimElement<'BRIDGE_PART'>
   | BimElement<'EARTHWORKS_FILL'>
+  | BimElement<'SIGN'>
   | BimElement<'BUILDING'>
   | BimElement<'STOREY'>;

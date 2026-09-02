@@ -53,6 +53,7 @@ import type {
   BridgePartSpec,
   BridgeSpec,
   EarthworksFillSpec,
+  SignSpec,
 } from '../specs/infrastructureSpec.js';
 import { wallToSolid } from '../elementFns/wallFns.js';
 import { slabToSolid } from '../elementFns/slabFns.js';
@@ -116,6 +117,7 @@ export class BimModel {
         el.category === 'COLUMN' ||
         el.category === 'PROXY' ||
         el.category === 'EARTHWORKS_FILL' ||
+        el.category === 'SIGN' ||
         el.category === 'SPACE' ||
         el.category === 'ROOF' ||
         el.category === 'FOOTING' ||
@@ -162,6 +164,19 @@ export class BimModel {
       return err(specError('EARTHWORKS_FILL_NO_GEOMETRY', 'EarthworksFillSpec.solid is required'));
     }
     const id = this.#makeElement('EARTHWORKS_FILL', spec, spec.solid, options?.stableKey);
+    this.#associateMaterial(id, spec);
+    return ok(id);
+  }
+
+  /** Adds a typed IfcSign body. Ownership of `spec.solid` transfers to the
+   * model only when this call succeeds. */
+  addSign(spec: SignSpec, options?: ElementIdentityOptions): Result<LocalId, BimError> {
+    const keyCheck = this.#checkStableKey(options);
+    if (!keyCheck.ok) return keyCheck;
+    if (spec.solid === null || spec.solid === undefined) {
+      return err(specError('SIGN_NO_GEOMETRY', 'SignSpec.solid is required'));
+    }
+    const id = this.#makeElement('SIGN', spec, spec.solid, options?.stableKey);
     this.#associateMaterial(id, spec);
     return ok(id);
   }
@@ -995,6 +1010,14 @@ export class BimModel {
       if (el.category === 'EARTHWORKS_FILL') fills.push(el);
     }
     return fills;
+  }
+
+  getSigns(): BimElement<'SIGN'>[] {
+    const signs: BimElement<'SIGN'>[] = [];
+    for (const el of this.#elements.values()) {
+      if (el.category === 'SIGN') signs.push(el);
+    }
+    return signs;
   }
 
   getColumns(): BimElement<'COLUMN'>[] {

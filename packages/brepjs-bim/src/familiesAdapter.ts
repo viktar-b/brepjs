@@ -6,7 +6,7 @@
  * families key paths (stable under reordering), not insertion order.
  *
  * Scope: building Storey containers; civil Site/Bridge/recursive Bridge Part
- * structure and Earthworks Fill bodies; Wall/Slab/Column/Beam/Roof/Stair,
+ * structure and exact Earthworks Fill and Sign bodies; Wall/Slab/Column/Beam/Roof/Stair,
  * Footing/Pile, Railing/Ramp, Covering/CurtainWall, and Space elements; and
  * wall openings — a fill-role void (Door/Window family) maps onto
  * addDoor/addWindow, which cut
@@ -63,11 +63,10 @@ import {
   parseBridgeSpec,
   type BridgePartPredefinedType,
   type BridgePredefinedType,
-  type EarthworksFillSpec,
   type EarthworksFillPredefinedType,
   type FacilityUsageType,
+  type SignPredefinedType,
 } from './specs/infrastructureSpec.js';
-import type { ProxySpec } from './specs/proxySpec.js';
 import {
   parseSiteSpec,
   type IfcElementCompositionType,
@@ -82,7 +81,7 @@ export interface FamiliesToBimOptions {
   readonly buildingName?: string | undefined;
   /**
    * Materializes exact evaluated Product Bodies for supported typed routes
-   * such as Earthworks Fill. Supplying this option does not opt unsupported
+   * such as Earthworks Fill and Sign. Supplying this option does not opt unsupported
    * products into the proxy fallback.
    */
   readonly bodyEvaluator?: csg.Evaluator | undefined;
@@ -470,8 +469,17 @@ const COMMON_PSET_FIELDS: Readonly<Record<string, string>> = {
   Status: 'status',
 };
 
-function collectSpecProps(el: ResolvedElement): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+type CustomProperties = Readonly<
+  Record<string, Readonly<Record<string, string | number | boolean>>>
+>;
+
+interface CollectedSpecProps extends Record<string, unknown> {
+  materialName?: string | undefined;
+  customProperties?: CustomProperties | undefined;
+}
+
+function collectSpecProps(el: ResolvedElement): CollectedSpecProps {
+  const out: CollectedSpecProps = {};
   const material = el.attributes['material'];
   const semanticsMaterial = el.semantics?.kind === 'product' ? el.semantics.material : undefined;
   if (el.props['materialName'] === undefined) {
@@ -649,11 +657,8 @@ function addProxyElement(
     {
       name: typeof nameAttr === 'string' ? nameAttr : el.type,
       solid: localized.value,
-      materialName:
-        typeof materialProp === 'string'
-          ? materialProp
-          : (specProps['materialName'] as string | undefined),
-      customProperties: specProps['customProperties'] as ProxySpec['customProperties'],
+      materialName: typeof materialProp === 'string' ? materialProp : specProps.materialName,
+      customProperties: specProps.customProperties,
     },
     { stableKey: el.keyPath }
   );
@@ -783,9 +788,13 @@ const EARTHWORKS_FILL_ROLE: Readonly<Record<string, EarthworksFillPredefinedType
   'transition-section': 'TRANSITIONSECTION',
 };
 
+const SIGN_ROLE: Readonly<Record<string, SignPredefinedType>> = {
+  marker: 'PICTORAL',
+};
+
 function unsupportedCivilRole(
   el: ResolvedElement,
-  entity: 'Site' | 'Bridge' | 'Bridge Part' | 'Earthworks Fill'
+  entity: 'Site' | 'Bridge' | 'Bridge Part' | 'Earthworks Fill' | 'Sign'
 ): Result<never, BimError> {
   return err(
     specError(
@@ -819,6 +828,10 @@ function hasCivilSpatialIntent(el: ResolvedElement): boolean {
 
 function isEarthworksFillOccurrence(el: ResolvedElement): boolean {
   return el.semantics?.kind === 'product' && el.semantics.category === 'earthworks-fill';
+}
+
+function isSignOccurrence(el: ResolvedElement): boolean {
+  return el.semantics?.kind === 'product' && el.semantics.category === 'sign';
 }
 
 function semanticName(el: ResolvedElement): string {
@@ -1212,9 +1225,63 @@ function addEarthworksFillElement(
       materialName:
         typeof authoredMaterial === 'string'
           ? authoredMaterial
-          : ((specProps['materialName'] as string | undefined) ?? el.semantics.material),
+          : (specProps.materialName ?? el.semantics.material),
       predefinedType,
-      customProperties: specProps['customProperties'] as EarthworksFillSpec['customProperties'],
+      customProperties: specProps.customProperties,
+    },
+    { stableKey: el.keyPath }
+  );
+  if (!added.ok) localized.value[Symbol.dispose]();
+  return added;
+}
+
+function addSignElement(
+  model: BimModel,
+  el: ResolvedElement,
+  evaluator: csg.Evaluator,
+  spatialFrame: Frame
+): Result<LocalId, BimError> {
+  if (el.semantics?.kind !== 'product') {
+    return err(
+      specError(
+        'FAMILIES_UNSUPPORTED_CIVIL_SEMANTICS',
+        `familiesToBim: '${el.keyPath}' is not authored as a civil Product`
+      )
+    );
+  }
+  const predefinedType = lookup(SIGN_ROLE, el.semantics.role);
+  if (predefinedType === undefined) return unsupportedCivilRole(el, 'Sign');
+  const body = materializeOwnedSolid(el, evaluator, {
+    evalCode: 'FAMILIES_SIGN_EVAL_FAILED',
+    notSolidCode: 'FAMILIES_SIGN_NOT_SOLID',
+    invalidCode: 'FAMILIES_SIGN_INVALID',
+    routeName: 'Sign',
+  });
+  if (!body.ok) return body;
+
+  const localized = localizeBodyToFrame(
+    el,
+    body.value,
+    spatialFrame,
+    'FAMILIES_SIGN_LOCALIZE_FAILED',
+    'spatial parent'
+  );
+  if (!localized.ok) return localized;
+
+  const specProps = collectSpecProps(el);
+  const authoredMaterial = el.props['materialName'];
+  const legend = el.semantics.properties?.['text'];
+  const added = model.addSign(
+    {
+      name: semanticName(el),
+      solid: localized.value,
+      materialName:
+        typeof authoredMaterial === 'string'
+          ? authoredMaterial
+          : (specProps.materialName ?? el.semantics.material),
+      predefinedType,
+      ...(typeof legend === 'string' ? { signLegend: legend } : {}),
+      customProperties: specProps.customProperties,
     },
     { stableKey: el.keyPath }
   );
@@ -1422,6 +1489,35 @@ export function familiesToBim(
       const keyed = requireKeyed(el);
       if (!keyed.ok) return keyed;
       const added = addEarthworksFillElement(model, el, bodyEvaluator, state.spatialFrame);
+      if (!added.ok) return added;
+      model.placeIn(added.value, nextSpatialStructureId);
+      idByKeyPath.set(el.keyPath, added.value);
+    } else if (isSignOccurrence(el)) {
+      if (
+        nextSpatialStructureId === null ||
+        (usesAuthoredCivilHierarchy && state.civilParent !== 'bridge-part')
+      ) {
+        return err(
+          specError(
+            usesAuthoredCivilHierarchy ? 'FAMILIES_INVALID_CIVIL_HIERARCHY' : 'FAMILIES_NO_STOREY',
+            usesAuthoredCivilHierarchy
+              ? `familiesToBim: Sign '${el.keyPath}' needs a Bridge Part ancestor`
+              : `familiesToBim: '${el.keyPath}' has no Storey ancestor — IFC elements need spatial containment`
+          )
+        );
+      }
+      const bodyEvaluator = options.bodyEvaluator ?? options.proxyEvaluator;
+      if (bodyEvaluator === undefined) {
+        return err(
+          specError(
+            'FAMILIES_SIGN_EVALUATOR_REQUIRED',
+            `familiesToBim: Sign '${el.keyPath}' needs bodyEvaluator to materialize its exact Product Body`
+          )
+        );
+      }
+      const keyed = requireKeyed(el);
+      if (!keyed.ok) return keyed;
+      const added = addSignElement(model, el, bodyEvaluator, state.spatialFrame);
       if (!added.ok) return added;
       model.placeIn(added.value, nextSpatialStructureId);
       idByKeyPath.set(el.keyPath, added.value);

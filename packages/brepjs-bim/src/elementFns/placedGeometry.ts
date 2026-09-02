@@ -121,8 +121,9 @@ export function placedSolids(
       return ok(out);
     }
     case 'PROXY':
-    case 'EARTHWORKS_FILL': {
-      // No frame on either body spec: identity mints a caller-owned copy, then
+    case 'EARTHWORKS_FILL':
+    case 'SIGN': {
+      // These exact-body specs have no frame. Identity mints a caller-owned copy, then
       // parentFrame (when supplied) takes the parent-local body into world space.
       const placed = placeWithinParent(
         el.geometry,

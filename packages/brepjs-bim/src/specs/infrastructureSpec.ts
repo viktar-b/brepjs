@@ -54,6 +54,8 @@ export type EarthworksFillPredefinedType =
   | 'USERDEFINED'
   | 'NOTDEFINED';
 
+export type SignPredefinedType = 'MARKER' | 'MIRROR' | 'PICTORAL' | 'USERDEFINED' | 'NOTDEFINED';
+
 export interface CivilSpatialSpec extends SpatialPlacementSpec {
   readonly name: string;
   readonly description?: string | undefined;
@@ -76,6 +78,18 @@ export interface EarthworksFillSpec {
   readonly solid: ValidSolid;
   readonly materialName: string;
   readonly predefinedType?: EarthworksFillPredefinedType | undefined;
+  readonly customProperties?:
+    Readonly<Record<string, Readonly<Record<string, string | number | boolean>>>> | undefined;
+}
+
+/** Typed arbitrary body for IfcSign. The model takes ownership of `solid` on
+ * a successful add and disposes it with the model. */
+export interface SignSpec {
+  readonly name: string;
+  readonly solid: ValidSolid;
+  readonly materialName: string;
+  readonly predefinedType?: SignPredefinedType | undefined;
+  readonly signLegend?: string | undefined;
   readonly customProperties?:
     Readonly<Record<string, Readonly<Record<string, string | number | boolean>>>> | undefined;
 }
