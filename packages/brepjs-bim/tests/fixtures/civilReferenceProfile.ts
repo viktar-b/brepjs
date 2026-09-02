@@ -324,15 +324,27 @@ export const Member = family('ExcludedMember', () => el('Box', { size: [1_000, 2
   }),
 });
 
-export const Sign = family('ExcludedSign', () => el('Box', { size: [500, 30, 300] }), {
-  semantics: civilSemantics({
-    kind: 'product',
-    category: 'sign',
-    role: 'marker',
-    material: 'Aluminium',
-    dimensionsMm: { width: 500, thickness: 30, height: 300 },
-  }),
-});
+export const Sign = family(
+  'ReferenceSign',
+  () =>
+    el('Geometry', {
+      node: csg.translate(csg.box(500, 30, 300), [-250, -30, 0]),
+    }),
+  {
+    semantics: civilSemantics({
+      kind: 'product',
+      category: 'sign',
+      role: 'marker',
+      material: 'Aluminium',
+      dimensionsMm: { length: 500, width: 30, height: 300 },
+      properties: {
+        name: 'Bridge name sign',
+        text: 'BREPJS',
+        textRepresentation: 'metadata-only',
+      },
+    }),
+  }
+);
 
 export function profileModel(
   additionalProducts: readonly Element[] = []

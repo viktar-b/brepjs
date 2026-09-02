@@ -204,6 +204,29 @@ describe('BimModel', () => {
     rejectedBody[Symbol.dispose]();
   });
 
+  it('addSign stores an exact body, exposes it, and owns it after success', () => {
+    const model = new BimModel();
+    unwrap(model.init({ name: 'Civil', projectId: 'civil' }));
+    const body = box(500, 30, 300);
+    const signId = unwrap(
+      model.addSign(
+        {
+          name: 'Bridge name sign',
+          solid: body,
+          materialName: 'Aluminium',
+          predefinedType: 'PICTORAL',
+          signLegend: 'BREPJS',
+        },
+        { stableKey: 'sign' }
+      )
+    );
+
+    expect(model.getSigns()).toEqual([model.getElement(signId)]);
+    expect(model.getSigns()[0]?.spec.signLegend).toBe('BREPJS');
+    model[Symbol.dispose]();
+    expect(body.disposed).toBe(true);
+  });
+
   it('getWalls returns only wall elements', () => {
     const model = new BimModel();
     unwrap(model.init({ name: 'P' }));

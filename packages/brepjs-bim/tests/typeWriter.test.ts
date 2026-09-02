@@ -6,8 +6,8 @@ import { deriveIfcGuid } from '../src/identity/guidDerivation.js';
 import { newIfcGuid } from '../src/identity/ifcGuid.js';
 import { isValidIfcGuid } from '../src/identity/ifcGuid.js';
 
-async function makeWriter(): Promise<IfcWriter> {
-  const result = await IfcWriter.create();
+async function makeWriter(schema: 'IFC4' | 'IFC4X3' = 'IFC4'): Promise<IfcWriter> {
+  const result = await IfcWriter.create(undefined, schema);
   if (!result.ok) throw new Error(result.error.message);
   return result.value;
 }
@@ -157,6 +157,34 @@ describe('typeWriter', () => {
     for (const [, typeConst] of cases) {
       expect(api.GetLineIDsWithType(mid, typeConst).size()).toBe(1);
     }
+    api.CloseModel(mid);
+  });
+
+  it('writes an IfcSignType with PICTORAL in IFC4X3', async () => {
+    const w = await makeWriter('IFC4X3');
+    const oh = writeOwnerHistory(w);
+    const occurrence = writeWall(w, oh);
+    const typeGuid = await deriveIfcGuid('type:SIGN:PICTORAL');
+    const relGuid = await deriveIfcGuid('rel-type:SIGN:PICTORAL');
+
+    writeIfcType(w, oh, 'IFCSIGNTYPE', typeGuid, relGuid, 'PICTORAL', [occurrence]);
+
+    const { api, mid } = await openSaved(w);
+    const ids = api.GetLineIDsWithType(mid, WebIFC.IFCSIGNTYPE);
+    expect(ids.size()).toBe(1);
+    const signType: unknown = api.GetLine(mid, ids.get(0));
+    if (typeof signType !== 'object' || signType === null || !('PredefinedType' in signType)) {
+      throw new Error('Expected IfcSignType.PredefinedType');
+    }
+    const predefinedType: unknown = signType.PredefinedType;
+    if (
+      typeof predefinedType !== 'object' ||
+      predefinedType === null ||
+      !('value' in predefinedType)
+    ) {
+      throw new Error('Expected wrapped IfcSignType.PredefinedType value');
+    }
+    expect(predefinedType.value).toBe('PICTORAL');
     api.CloseModel(mid);
   });
 
