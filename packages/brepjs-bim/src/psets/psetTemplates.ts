@@ -104,6 +104,7 @@ export const PSET_PROPERTY_TYPE_TABLE: Readonly<Record<string, PsetMeasureType>>
   Manufacturer: 'IFCLABEL',
   ModelLabel: 'IFCLABEL',
   ProductionYear: 'IFCLABEL',
+  SignLegend: 'IFCTEXT',
   // Door / window common properties
   FireExit: 'IFCBOOLEAN',
   SelfClosing: 'IFCBOOLEAN',

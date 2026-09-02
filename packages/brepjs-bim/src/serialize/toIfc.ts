@@ -45,7 +45,9 @@ import {
   writeBridge,
   writeBridgePart,
   writeEarthworksFillEntity,
+  writeSignEntity,
 } from '../ifc-writer/infrastructureWriter.js';
+import type { SignSpec } from '../specs/infrastructureSpec.js';
 import { writeTessellatedProductGeometry } from '../ifc-writer/tessellatedProductWriter.js';
 import {
   writeZoneEntity,
@@ -138,13 +140,14 @@ export async function toIfc(
   if (
     (model.getBridges().length > 0 ||
       model.getBridgeParts().length > 0 ||
-      model.getEarthworksFills().length > 0) &&
+      model.getEarthworksFills().length > 0 ||
+      model.getSigns().length > 0) &&
     (meta.ifcSchema ?? 'IFC4') !== 'IFC4X3'
   ) {
     return err(
       ifcError(
         'IFC4X3_REQUIRED',
-        'Bridge, Bridge Part, and Earthworks Fill entities require IFC4X3 serialization'
+        'Bridge, Bridge Part, Earthworks Fill, and Sign entities require IFC4X3 serialization'
       )
     );
   }
@@ -169,6 +172,7 @@ export async function toIfc(
   const bridges = model.getBridges();
   const bridgeParts = model.getBridgeParts();
   const earthworksFills = model.getEarthworksFills();
+  const signs = model.getSigns();
   const columns = model.getColumns();
   const doors = model.getDoors();
   const windows = model.getWindows();
@@ -494,6 +498,32 @@ export async function toIfc(
     placementMap.set(fill.localId, localPlacementId);
     if (fill.spec.customProperties !== undefined) {
       writeCustomPsets(w, ownerHistoryId, expressId, fill.spec.customProperties);
+    }
+  }
+
+  for (const sign of signs) {
+    const containingId = findContainerOf(sign.localId, relationships);
+    const parentPlacementId =
+      containingId !== null ? (placementMap.get(containingId) ?? null) : null;
+    const { localPlacementId, productDefinitionShapeId } = writeTessellatedProductGeometry(
+      w,
+      sign.geometry,
+      geomSubContextId,
+      parentPlacementId
+    );
+    const expressId = writeSignEntity(
+      w,
+      sign.guid,
+      sign.spec,
+      ownerHistoryId,
+      localPlacementId,
+      productDefinitionShapeId
+    );
+    idMap.set(sign.localId, expressId);
+    placementMap.set(sign.localId, localPlacementId);
+    const properties = signProperties(sign.spec);
+    if (properties !== undefined) {
+      writeCustomPsets(w, ownerHistoryId, expressId, properties);
     }
   }
 
@@ -1106,6 +1136,7 @@ function writeTypeLayer(
     ['IFCPILETYPE', 'PILE', toOccurrences(model.getPiles(), (s) => s.predefinedType)],
     ['IFCRAILINGTYPE', 'RAILING', toOccurrences(model.getRailings(), (s) => s.predefinedType)],
     ['IFCCOVERINGTYPE', 'COVERING', toOccurrences(model.getCoverings(), (s) => s.predefinedType)],
+    ['IFCSIGNTYPE', 'SIGN', toOccurrences(model.getSigns(), (s) => s.predefinedType)],
   ];
 
   // Model-scope (project GlobalId) mixed into type/rel GUID keys so type objects
@@ -1228,6 +1259,7 @@ function collectGeometryIssues(model: BimModel): ValidationReport {
     ['Column', model.getColumns()],
     ['Proxy', model.getProxies()],
     ['Earthworks Fill', model.getEarthworksFills()],
+    ['Sign', model.getSigns()],
     ['Space', model.getSpaces()],
     ['Roof', model.getRoofs()],
     ['Footing', model.getFootings()],
@@ -1270,6 +1302,17 @@ function collectGeometryIssues(model: BimModel): ValidationReport {
   });
 
   return { issues };
+}
+
+function signProperties(spec: SignSpec): SignSpec['customProperties'] {
+  if (spec.signLegend === undefined) return spec.customProperties;
+  return {
+    ...spec.customProperties,
+    Pset_RailwaySignalAspect: {
+      ...spec.customProperties?.['Pset_RailwaySignalAspect'],
+      SignLegend: spec.signLegend,
+    },
+  };
 }
 
 /**

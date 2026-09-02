@@ -13,7 +13,8 @@ export type IfcTypeName =
   | 'IFCFOOTINGTYPE'
   | 'IFCPILETYPE'
   | 'IFCRAILINGTYPE'
-  | 'IFCCOVERINGTYPE';
+  | 'IFCCOVERINGTYPE'
+  | 'IFCSIGNTYPE';
 
 export interface TypeWriteResult {
   typeExpressId: number;
@@ -32,6 +33,7 @@ const TYPE_CONSTANT: Record<IfcTypeName, number> = {
   IFCPILETYPE: WebIFC.IFCPILETYPE,
   IFCRAILINGTYPE: WebIFC.IFCRAILINGTYPE,
   IFCCOVERINGTYPE: WebIFC.IFCCOVERINGTYPE,
+  IFCSIGNTYPE: WebIFC.IFCSIGNTYPE,
 };
 
 function commonTypeFields(

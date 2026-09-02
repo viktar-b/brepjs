@@ -54,6 +54,7 @@ function normalizeStepReals(bytes: Uint8Array): Uint8Array {
 }
 
 export class IfcWriter {
+  readonly schema: IfcSchema;
   readonly #api: IfcAPI;
   readonly #modelId: number;
   readonly #mvdViewDefinition: string;
@@ -68,9 +69,11 @@ export class IfcWriter {
   private constructor(
     api: IfcAPI,
     modelId: number,
+    schema: IfcSchema,
     mvdViewDefinition: string,
     header: IfcHeaderMeta
   ) {
+    this.schema = schema;
     this.#api = api;
     this.#modelId = modelId;
     this.#mvdViewDefinition = mvdViewDefinition;
@@ -87,7 +90,7 @@ export class IfcWriter {
       const api = new IfcAPI();
       await initIfcApi(api);
       const modelId = api.CreateModel({ schema: fileSchemaString(ifcSchema) });
-      return ok(new IfcWriter(api, modelId, mvdViewDefinition, header));
+      return ok(new IfcWriter(api, modelId, ifcSchema, mvdViewDefinition, header));
     } catch (e) {
       return err(ifcError('IFC_INIT_FAILED', 'Failed to initialize web-ifc', e));
     }

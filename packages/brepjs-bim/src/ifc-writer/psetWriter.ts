@@ -21,6 +21,10 @@ import { densityFor, writeWeightQuantity } from '../psets/qtoWeights.js';
 
 type PsetValue = string | number | boolean;
 
+function propertySpecification(w: IfcWriter): Record<string, null> {
+  return w.schema === 'IFC4X3' ? { Specification: null } : { Description: null };
+}
+
 /**
  * Resolves the IFC measure value for a Pset property by name. Properties listed
  * in the Pset measure-type table emit their canonical IFC measure type (e.g.
@@ -56,7 +60,7 @@ export function writePropertySingleValueTyped(
     expressID: id,
     type: WebIFC.IFCPROPERTYSINGLEVALUE,
     Name: w.mkType(WebIFC.IFCIDENTIFIER, name),
-    Description: null,
+    ...propertySpecification(w),
     NominalValue: writePsetValueTyped(w, name, value),
     Unit: null,
   });
@@ -87,7 +91,7 @@ export function writePropertyEnumeratedValue(
     expressID: id,
     type: WebIFC.IFCPROPERTYENUMERATEDVALUE,
     Name: w.mkType(WebIFC.IFCIDENTIFIER, name),
-    Description: null,
+    ...propertySpecification(w),
     EnumerationValues: [w.mkType(WebIFC.IFCLABEL, value)],
     EnumerationReference: w.ref(enumerationId),
   });
