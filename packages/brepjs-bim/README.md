@@ -25,14 +25,31 @@ the low-level path (and covers elements the declarative route doesn't yet). See 
 
 Parametric authoring of the common IFC4 building elements plus the data layers that make a model
 useful downstream (psets, classification, materials, quantities), with import, export, and
-validation. Geometry is produced by brepjs (OCCT); each element carries a `ValidSolid` (or, for
-curtain walls, a panel/mullion grid). Element geometry is **unplaced template geometry** in local
-coordinates — placement (`origin` / `axisX` / `axisZ`) is applied by the IFC layer via
-`IfcLocalPlacement`, not baked into the brepjs solid. Use `placedSolids(element)` to read fresh,
-caller-owned solids transformed by the element's own placement (stairs and ramps return one solid
-per flight, curtain walls their panels and mullions). When an element is beneath a placed spatial
-structure, pass its cumulative frame as `placedSolids(element, { parentFrame })` to obtain world
-coordinates. This is especially important for parent-local Proxy and Earthworks Fill bodies.
+validation. Geometry is produced by brepjs (OCCT). Walls and railings carry a `ProductBody`, either
+a parametric solid or a non-empty collection of authoritative exact solids. Use `bodySolids()` to
+borrow their Product-local model handles and narrow `geometry.kind` when a caller specifically
+needs the parametric branch. Other solid-bearing categories continue to expose their existing
+geometry types.
+
+`takeExactProductBody(localId, { kind: 'EXACT', solids })` installs an authoritative wall or
+railing Body atomically. Success transfers every supplied handle to the model and disposes the
+superseded parametric Body; failure transfers nothing. Add wall openings before takeover, because
+an exact wall rejects later `addDoor()` and `addWindow()` mutations.
+
+Element geometry is **unplaced template geometry** in local coordinates. Placement (`origin` /
+`axisX` / `axisZ`) is applied by the IFC layer via `IfcLocalPlacement`, not baked into the brepjs
+solid. Use `placedSolids(element)` to read fresh, caller-owned solids transformed by the element's
+own placement. Stairs and ramps return one solid per flight, curtain walls return their panels and
+mullions, and an exact Product Body returns one placed copy per Body item. When an element is
+beneath a placed spatial structure, pass its cumulative frame as
+`placedSolids(element, { parentFrame })` to obtain world coordinates. This is especially important
+for parent-local Proxy and Earthworks Fill bodies.
+
+IFC import reconstructs every supported Body item independently. `ImportedGeometry.solids` owns
+the resulting World-placed handles and `completeness` reports `COMPLETE`, `PARTIAL`, or `NONE`.
+The legacy `.solid` property is a borrowed alias only for a complete one-solid Body. Dispose import
+geometry through `disposeImportedModel()` rather than through either property. Complete Bodies
+also expose aggregate `bounds` and `volumeMm3`; both are `null` for partial or missing Bodies.
 
 - Units default to mm; IFC export emits SI metres.
 - Stable identity: deterministic IFC GUIDs (`deriveIfcGuid`) and local id counters.
@@ -76,9 +93,13 @@ otherwise supplied. Existing non-semantic Families archetypes continue to use th
 registry beneath Bridge Parts. Bridge, Bridge Part, and Earthworks Fill require IFC4X3; `fromIfc`
 reconstructs their civil spatial hierarchy, direct containment, and typed Earthworks inventory.
 
-The existing typed routes adapt semantic envelope dimensions from the reference Families into
-their parametric BIM specs. They do not promise exact preservation of compound or voided source
-bodies; exact authored-body preservation in this profile is specific to Earthworks Fill.
+The wall and railing routes require `bodyEvaluator` (or the backward-compatible
+`proxyEvaluator` fallback) so the adapter can verify the authored Product Body. It first applies
+registered wall openings to the parametric candidate, then compares that candidate with the
+evaluated source in Product-local coordinates. Coincident bodies retain editable parametric IFC;
+compound, voided, or otherwise different bodies retain their typed Wall or Railing classification
+and export every authoritative item as tessellation. The evaluator's source handles remain
+borrowed. Other typed civil routes continue to use their semantic envelope dimensions.
 
 This is deliberately not a claim of complete IFC infrastructure coverage or unchanged parity with
 the full scratch prototype. Member and Sign remain outside the profile: without `proxyEvaluator`
@@ -153,6 +174,8 @@ warnings travel inside the payload rather than throwing.
 Each `add*` call parses and validates its spec and stores a typed `BimElement` keyed by a `LocalId`.
 Parametric physical elements build an analytical brepjs solid; civil spatial elements are body-less,
 and arbitrary-body products such as Earthworks Fill take ownership of a validated authored solid.
+Families-projected civil walls and railings retain evaluated authored solids when their Bodies do
+not coincide with the post-opening parametric candidate.
 The IFC writer walks the model, applies placement, and emits schema-correct IFC entities; the
 importer is the inverse. No kernel/WASM changes are required.
 

@@ -47,7 +47,13 @@ On the brepjs side, `extendedProfileToFace` builds the section face for the soli
 
 ## Placement and display
 
-Element geometry is **unplaced template geometry**. A wall's solid starts at the local origin and runs along local +X regardless of where the wall stands; `origin` / `axisX` / `axisZ` live in the spec and become `IfcLocalPlacement`. `placedSolids(element)` returns fresh, caller-owned solids transformed by the element's own placement. For an element beneath a placed spatial structure, pass its cumulative frame as `placedSolids(element, { parentFrame })` to obtain world coordinates for display or clash checks. Most elements return one solid; stairs and ramps return one per flight, and curtain walls return their panels and mullions. Elements that are purely relational (doors, windows, groups, spatial containers) return an empty list rather than an error.
+Element geometry is **unplaced template geometry**. A wall's Body starts at the local origin and runs along local +X regardless of where the wall stands; `origin` / `axisX` / `axisZ` live in the spec and become `IfcLocalPlacement`. Wall and railing `.geometry` is a `ProductBody`: narrow `geometry.kind` to distinguish one `PARAMETRIC` solid from a non-empty `EXACT` solid collection. `bodySolids()` borrows Product-local handles from either branch. Do not dispose them.
+
+Use `takeExactProductBody()` to replace a parametric wall or railing Body. A successful call transfers ownership of every supplied solid to the model; a failed call leaves the model and caller ownership unchanged. Register wall openings first. Once a wall has an exact Body, later `addDoor()` and `addWindow()` calls return `EXACT_WALL_BODY_IMMUTABLE`.
+
+`familiesToBim()` performs that sequence automatically for civil-semantic walls and railings when given `bodyEvaluator`. It compares the evaluated authored Body with the post-opening parametric Body in Product-local coordinates. Coincident bodies stay parametric; different bodies preserve every exact item without losing their typed category.
+
+`placedSolids(element)` returns fresh, caller-owned solids transformed by the element's own placement. For an element beneath a placed spatial structure, pass its cumulative frame as `placedSolids(element, { parentFrame })` to obtain world coordinates for display or clash checks. Exact Product Bodies return one placed copy per Body item. Stairs and ramps return one per flight, and curtain walls return their panels and mullions. Elements that are purely relational (doors, windows, groups, spatial containers) return an empty list rather than an error.
 
 ## Data layers
 

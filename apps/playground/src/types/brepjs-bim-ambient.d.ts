@@ -5,7 +5,15 @@
  * Ambient type declarations for brepjs-bim available in the playground editor.
  */
 
-import type { BrepError, OrientedFace, PlanarFace, Result, ValidSolid, csg } from 'brepjs';
+import type {
+  Bounds3D,
+  BrepError,
+  OrientedFace,
+  PlanarFace,
+  Result,
+  ValidSolid,
+  csg,
+} from 'brepjs';
 
 /** Optional identity override for created elements: a stable key (e.g. a
  *  families key path) that replaces the positional GlobalId derivation. */
@@ -52,6 +60,20 @@ declare class BimModel {
    */
   addRamp(spec: RampSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
   addRailing(spec: RailingSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
+  /**
+   * Atomically replaces a parametric wall or railing Body with authoritative,
+   * caller-owned exact solids. Success transfers every supplied handle to this
+   * model. Failure leaves both the model and all supplied handles unchanged.
+   */
+  takeExactProductBody(
+    localId: LocalId,
+    body: Extract<
+      ProductBody,
+      {
+        readonly kind: 'EXACT';
+      }
+    >
+  ): Result<void, BimError>;
   /**
    * Adds an IfcCovering. When `hostLocalId` is supplied, an
    * IfcRelCoversBldgElements linking the covering to its host (e.g. a slab it
@@ -240,6 +262,21 @@ declare function placedSolids(
   options?: PlacedSolidsOptions
 ): Result<readonly ValidSolid[], BimError>;
 
+type NonEmpty<T> = readonly [T, ...T[]];
+
+type ProductBody =
+  | {
+      readonly kind: 'PARAMETRIC';
+      readonly solid: ValidSolid;
+    }
+  | {
+      readonly kind: 'EXACT';
+      readonly solids: NonEmpty<ValidSolid>;
+    };
+
+/** Returns borrowed Product-local solids. The model retains ownership. */
+declare function bodySolids(body: ProductBody): NonEmpty<ValidSolid>;
+
 /** An (origin, axisX, axisZ) frame in mm — the authoring/display side of a placement. */
 interface FrameInput {
   readonly origin: Vec3;
@@ -309,17 +346,27 @@ type ImportedSchema = 'IFC2X3' | 'IFC4' | 'IFC4X3';
  * How faithfully a product's body geometry was reconstructed:
  * - `PARAMETRIC` — rebuilt losslessly from a swept solid (extrude/revolve).
  * - `TESSELLATED_MANIFOLD` — a tessellated mesh was recovered as a closed solid
- *   via an STL round-trip; geometrically faithful but topology was re-derived.
+ *   by sewing its triangles; geometrically faithful but topology was re-derived.
  * - `TESSELLATED_LOSSY` — geometry exists only as raw triangles (mesh did not
  *   close into a solid); `solid` is null, `meshVertices`/`meshIndices` carry it.
  * - `NONE` — no recognised body representation was found.
  */
 type GeometryFidelity = 'PARAMETRIC' | 'TESSELLATED_MANIFOLD' | 'TESSELLATED_LOSSY' | 'NONE';
 
+type ImportedBodyCompleteness = 'COMPLETE' | 'PARTIAL' | 'NONE';
+
 interface ImportedGeometry {
   readonly fidelity: GeometryFidelity;
-  /** The reconstructed solid; null when fidelity is `NONE` or `TESSELLATED_LOSSY`. */
+  /** Whether every IFC Body item reconstructed into an owned solid. */
+  readonly completeness: ImportedBodyCompleteness;
+  /** Owned World-placed reconstructed handles. Dispose them through disposeImportedModel(). */
+  readonly solids: readonly ValidSolid[];
+  /** Borrowed alias for a COMPLETE one-solid Body. Otherwise null. */
   readonly solid: ValidSolid | null;
+  /** Component-wise union of all item bounds for a COMPLETE Body. Otherwise null. */
+  readonly bounds: Bounds3D | null;
+  /** Sum of item volumes in mm³ for a COMPLETE Body. Otherwise null. */
+  readonly volumeMm3: number | null;
   /** Raw triangle vertices (interleaved xyz), present only for `TESSELLATED_LOSSY`. */
   readonly meshVertices?: Float32Array | undefined;
   /** Raw triangle indices, present only for `TESSELLATED_LOSSY`. */
@@ -1830,7 +1877,12 @@ interface BimError {
 
 declare function specError(code: string, message: string, cause?: unknown): BimError;
 
-declare function ifcError(code: string, message: string, cause?: unknown): BimError;
+declare function ifcError(
+  code: string,
+  message: string,
+  cause?: unknown,
+  metadata?: Readonly<Record<string, unknown>>
+): BimError;
 
 declare function geometryError(code: string, message: string, cause?: unknown): BimError;
 
@@ -2653,9 +2705,11 @@ interface FamiliesToBimOptions {
   readonly siteName?: string | undefined;
   readonly buildingName?: string | undefined;
   /**
-   * Materializes exact evaluated Product Bodies for supported typed routes
-   * such as Earthworks Fill. Supplying this option does not opt unsupported
-   * products into the proxy fallback.
+   * Materializes exact evaluated Product Bodies for supported typed routes.
+   * Earthworks Fill always retains that Body; civil walls and railings compare
+   * it with their post-opening parametric Body and retain it when they differ.
+   * Supplying this option does not opt unsupported products into the proxy
+   * fallback.
    */
   readonly bodyEvaluator?: csg.Evaluator | undefined;
   /**
