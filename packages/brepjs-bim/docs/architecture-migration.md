@@ -87,4 +87,3 @@ These are future implementation gates, not passing test results from this docume
 
 - [ADR-0001 and the complete decision series](adr/0001-independent-product-representation-and-placement.md)
 - [Evidence and original concern mapping](architecture-evidence.md)
-- [CSG-to-IFC map](csg-to-ifc-map.md)

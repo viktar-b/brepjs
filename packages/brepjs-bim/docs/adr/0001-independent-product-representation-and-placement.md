@@ -69,5 +69,5 @@ Both conflict with the accepted package and prototype constraints and add compet
 - [ADR-0006: IFC exchange adapter](0006-ifc-exchange-adapter.md)
 - [ADR-0007: IFC import fidelity and item outcomes](0007-ifc-import-fidelity-and-item-outcomes.md)
 - [ADR-0008: Explicit BIM type identity](0008-explicit-bim-type-identity.md)
-- [Evidence and original concern mapping](../architecture-evidence.md), [bounded migration and acceptance scenarios](../architecture-migration.md), [CSG-to-IFC map](../csg-to-ifc-map.md)
+- [Evidence and original concern mapping](../architecture-evidence.md), [bounded migration and acceptance scenarios](../architecture-migration.md)
 - Root decisions on [layering](../../../../docs/decisions/0001-layered-architecture.md), [kernel/domain boundaries](../../../../docs/decisions/0006-domain-boundaries.md), and [identity beside content](../../../../docs/decisions/0014-identity-beside-content.md)

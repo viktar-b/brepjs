@@ -67,5 +67,4 @@ Containers and geometry helpers have different meanings; promoting them all dupl
 - [Family registry](../../../brepjs-families/registry/families/)
 - [ADR-0001: Document and adapter boundaries](0001-independent-product-representation-and-placement.md)
 - [ADR-0002: Authored authority](0002-authored-body-authority.md), [ADR-0004: Placement](0004-document-resolved-placement-and-datum.md), [ADR-0008: Type identity](0008-explicit-bim-type-identity.md)
-- [CSG-to-IFC map](../csg-to-ifc-map.md)
 - Repository [#2295](https://github.com/andymai/brepjs/pull/2295)
