@@ -1,5 +1,5 @@
 import type { Result, ValidSolid } from 'brepjs';
-import { ok, err, cut, isValidSolid } from 'brepjs';
+import { ok, err, cut } from 'brepjs';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { deriveIfcGuidSync, makeElementKey, makeRelKey } from '../identity/guidDerivation.js';
 import type { LocalId } from '../identity/localId.js';
@@ -66,7 +66,14 @@ import { curtainWallToGrid } from '../elementFns/curtainWallFns.js';
 import { footingToSolid, pileToSolid } from '../elementFns/foundationFns.js';
 import { railingToSolid } from '../elementFns/railingFns.js';
 import { coveringToSolid } from '../elementFns/coveringFns.js';
-import { disposeProductBody, type ProductBody } from '../types/productBody.js';
+import {
+  bodySolids,
+  disposeProductBody,
+  prepareProductBody,
+  productBodyFromOwnedShape,
+  productBodyItemsFromOwnedShape,
+  type ProductBody,
+} from '../types/productBody.js';
 
 /** Optional identity override for created elements: a stable key (e.g. a
  *  families key path) that replaces the positional GlobalId derivation. */
@@ -80,13 +87,24 @@ export interface OpeningIdentityOptions extends ElementIdentityOptions {
   readonly openingStableKey?: string | undefined;
 }
 
-function exactWallBodyImmutable(): Result<never, BimError> {
+function authoritativeWallBodyImmutable(): Result<never, BimError> {
   return err(
     specError(
-      'EXACT_WALL_BODY_IMMUTABLE',
-      'Cannot add an opening after a wall has taken an exact Product Body'
+      'AUTHORITATIVE_WALL_BODY_IMMUTABLE',
+      'Cannot add an opening to an authoritative Product Body'
     )
   );
+}
+
+export interface BimModelBodyTestHooks {
+  readonly afterCut?: ((itemIndex: number, solid: ValidSolid) => void) | undefined;
+}
+
+let bodyTestHooks: BimModelBodyTestHooks | null = null;
+
+/** Package-internal failure seam for transactional opening tests. */
+export function setBimModelBodyTestHooksForTesting(hooks: BimModelBodyTestHooks | null): void {
+  bodyTestHooks = hooks;
 }
 
 export class BimModel {
@@ -118,7 +136,9 @@ export class BimModel {
   }
 
   [Symbol.dispose](): void {
-    for (const el of this.#elements.values()) {
+    const elements = [...this.#elements.values()];
+    this.#elements.clear();
+    for (const el of elements) {
       if (
         el.category === 'SLAB' ||
         el.category === 'BEAM' ||
@@ -219,12 +239,9 @@ export class BimModel {
     if (!keyCheck.ok) return keyCheck;
     const geomResult = wallToSolid(spec);
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement(
-      'WALL',
-      spec,
-      { kind: 'PARAMETRIC', solid: geomResult.value },
-      options?.stableKey
-    );
+    const body = productBodyFromOwnedShape('PARAMETRIC', geomResult.value);
+    if (!body.ok) return body;
+    const id = this.#makeElement('WALL', spec, body.value, options?.stableKey);
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
@@ -353,106 +370,54 @@ export class BimModel {
     if (!keyCheck.ok) return keyCheck;
     const geomResult = railingToSolid(spec);
     if (!geomResult.ok) return err(geomResult.error);
-    const id = this.#makeElement(
-      'RAILING',
-      spec,
-      { kind: 'PARAMETRIC', solid: geomResult.value },
-      options?.stableKey
-    );
+    const body = productBodyFromOwnedShape('PARAMETRIC', geomResult.value);
+    if (!body.ok) return body;
+    const id = this.#makeElement('RAILING', spec, body.value, options?.stableKey);
     this.#associateMaterial(id, spec);
     this.#associateClassification(id, spec);
     return ok(id);
   }
 
   /**
-   * Atomically replaces a parametric wall or railing Body with authoritative,
-   * caller-owned exact solids. Success transfers every supplied handle to this
-   * model. Failure leaves both the model and all supplied handles unchanged.
+   * Explicitly replaces a wall or railing Body, including its requested authority.
+   * Success transfers every supplied handle. Failure preserves all caller inputs
+   * and model state. The caller must own each handle exclusively, including with
+   * respect to other models, evaluators and caches. Clone borrowed handles first.
    */
-  takeExactProductBody(
-    localId: LocalId,
-    body: Extract<ProductBody, { readonly kind: 'EXACT' }>
-  ): Result<void, BimError> {
+  takeProductBody(localId: LocalId, body: ProductBody): Result<void, BimError> {
     const target = this.#elements.get(localId);
     if (target === undefined) {
-      return err(
-        specError('EXACT_BODY_TARGET_NOT_FOUND', `No element found for localId ${localId}`)
-      );
+      return err(specError('BODY_TARGET_NOT_FOUND', `No element found for localId ${localId}`));
     }
     if (target.category !== 'WALL' && target.category !== 'RAILING') {
       return err(
         specError(
-          'EXACT_BODY_UNSUPPORTED_CATEGORY',
-          `Exact Product Bodies are supported only for walls and railings, not ${target.category}`
+          'BODY_UNSUPPORTED_CATEGORY',
+          `Product Bodies are supported only for walls and railings, not ${target.category}`
         )
       );
     }
-    if (target.geometry.kind === 'EXACT') {
-      return err(
-        specError(
-          'EXACT_BODY_ALREADY_EXACT',
-          `Element ${localId} already has an exact Product Body`
-        )
-      );
-    }
-
-    const solids: readonly ValidSolid[] = body.solids;
-    if (solids.length === 0) {
-      return err(
-        specError('EXACT_BODY_EMPTY', 'An exact Product Body must contain at least one solid')
-      );
-    }
-    if (solids.includes(target.geometry.solid)) {
-      return err(
-        specError(
-          'EXACT_BODY_SOLID_OWNERSHIP_CONFLICT',
-          `Exact Product Body for ${localId} reuses the target parametric solid`
-        )
-      );
-    }
-    const identities = new Set<ValidSolid>();
-    for (const [itemIndex, solid] of solids.entries()) {
-      if (identities.has(solid)) {
-        return err(
-          specError(
-            'EXACT_BODY_DUPLICATE_SOLID',
-            `Exact Product Body item ${itemIndex} duplicates an earlier handle`
-          )
-        );
-      }
-      identities.add(solid);
-      if (solid.disposed) {
-        return err(
-          specError(
-            'EXACT_BODY_SOLID_DISPOSED',
-            `Exact Product Body item ${itemIndex} is already disposed`
-          )
-        );
-      }
-      try {
-        if (!isValidSolid(solid)) {
-          return err(
-            specError(
-              'EXACT_BODY_SOLID_INVALID',
-              `Exact Product Body item ${itemIndex} is not a valid solid`
-            )
-          );
-        }
-      } catch (cause) {
-        return err(
-          specError(
-            'EXACT_BODY_SOLID_INVALID',
-            `Exact Product Body item ${itemIndex} could not be validated`,
-            cause
-          )
-        );
-      }
-    }
-
-    const replaced = { ...target, geometry: body } as BimElement<'WALL'> | BimElement<'RAILING'>;
-    this.#elements.set(localId, replaced);
+    const prepared = prepareProductBody(body, this.#ownedGeometryItems());
+    if (!prepared.ok) return prepared;
+    // This map write is the ownership commit point. Cleanup cannot report a failed transfer.
+    this.#elements.set(localId, { ...target, geometry: prepared.value });
     disposeProductBody(target.geometry);
     return ok(undefined);
+  }
+
+  #ownedGeometryItems(): ReadonlySet<ValidSolid> {
+    const owned = new Set<ValidSolid>();
+    for (const element of this.#elements.values()) {
+      if (element.category === 'WALL' || element.category === 'RAILING') {
+        for (const item of bodySolids(element.geometry)) owned.add(item);
+      } else if (element.category === 'CURTAIN_WALL') {
+        for (const component of [...element.geometry.panels, ...element.geometry.mullions])
+          owned.add(component.solid);
+      } else if (element.geometry !== null) {
+        owned.add(element.geometry);
+      }
+    }
+    return owned;
   }
 
   /**
@@ -716,7 +681,7 @@ export class BimModel {
     if (wall === undefined || wall.category !== 'WALL') {
       return err(specError('DOOR_WALL_NOT_FOUND', `No wall found for localId ${spec.wallLocalId}`));
     }
-    if (wall.geometry.kind === 'EXACT') return exactWallBodyImmutable();
+    if (wall.geometry.kind === 'AUTHORITATIVE') return authoritativeWallBodyImmutable();
     const keyCheck = this.#checkOpeningKeys(options);
     if (!keyCheck.ok) return keyCheck;
     if (spec.offsetAlongWall + spec.width > wall.spec.length) {
@@ -768,7 +733,7 @@ export class BimModel {
         specError('WINDOW_WALL_NOT_FOUND', `No wall found for localId ${spec.wallLocalId}`)
       );
     }
-    if (wall.geometry.kind === 'EXACT') return exactWallBodyImmutable();
+    if (wall.geometry.kind === 'AUTHORITATIVE') return authoritativeWallBodyImmutable();
     const keyCheck = this.#checkOpeningKeys(options);
     if (!keyCheck.ok) return keyCheck;
     if (spec.offsetAlongWall + spec.width > wall.spec.length) {
@@ -896,30 +861,54 @@ export class BimModel {
   #cutWallGeometry(
     wall: BimElement<'WALL'>,
     openingSpec: WallOpeningSpec
-  ): Result<ValidSolid, BimError> {
-    if (wall.geometry.kind === 'EXACT') {
-      return exactWallBodyImmutable();
-    }
+  ): Result<ProductBody, BimError> {
+    if (wall.geometry.kind === 'AUTHORITATIVE') return authoritativeWallBodyImmutable();
     const toolResult = openingToSolid(openingSpec, wall.spec.thickness);
     if (!toolResult.ok) return err(toolResult.error);
     using tool = toolResult.value;
-    const cutResult = cut(wall.geometry.solid, tool);
-    if (!cutResult.ok) {
-      return err(
-        fromBrepError(cutResult.error, 'WALL_CUT_FAILED', 'Boolean cut of wall with opening failed')
-      );
+    const outputs: ValidSolid[] = [];
+    let committed = false;
+    try {
+      for (const [itemIndex, item] of bodySolids(wall.geometry).entries()) {
+        const result = cut(item, tool, { trackEvolution: false });
+        if (!result.ok)
+          return err(
+            fromBrepError(
+              result.error,
+              'WALL_CUT_FAILED',
+              'Boolean cut of wall with opening failed'
+            )
+          );
+        try {
+          bodyTestHooks?.afterCut?.(itemIndex, result.value);
+        } catch (cause) {
+          result.value[Symbol.dispose]();
+          throw cause;
+        }
+        const items = productBodyItemsFromOwnedShape(result.value);
+        if (!items.ok) return items;
+        outputs.push(...items.value);
+      }
+      const first = outputs[0];
+      if (first === undefined)
+        return err(specError('BODY_EMPTY', 'Opening cut produced no Body items'));
+      const prepared = prepareProductBody({
+        kind: 'PARAMETRIC',
+        items: [first, ...outputs.slice(1)],
+      });
+      if (!prepared.ok) return prepared;
+      committed = true;
+      return prepared;
+    } catch (cause) {
+      return err(specError('WALL_CUT_FAILED', 'Boolean cut of wall with opening threw', cause));
+    } finally {
+      if (!committed) for (const item of outputs) item[Symbol.dispose]();
     }
-    return ok(cutResult.value);
   }
 
-  #replaceWallGeometry(wall: BimElement<'WALL'>, newGeometry: ValidSolid): void {
-    const oldGeometry = wall.geometry;
-    const replaced: BimElement<'WALL'> = {
-      ...wall,
-      geometry: { kind: 'PARAMETRIC', solid: newGeometry },
-    };
-    this.#elements.set(wall.localId, replaced);
-    disposeProductBody(oldGeometry);
+  #replaceWallGeometry(wall: BimElement<'WALL'>, newGeometry: ProductBody): void {
+    this.#elements.set(wall.localId, { ...wall, geometry: newGeometry });
+    disposeProductBody(wall.geometry);
   }
 
   #cutSlabGeometry(

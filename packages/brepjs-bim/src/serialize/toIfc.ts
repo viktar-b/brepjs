@@ -13,7 +13,6 @@ import {
   writeColumnEntity,
 } from '../ifc-writer/entityWriter.js';
 import {
-  writeWallGeometry,
   writeSlabGeometry,
   writeBeamGeometry,
   writeColumnGeometry,
@@ -34,11 +33,7 @@ import {
   writePileEntity,
 } from '../ifc-writer/foundationWriter.js';
 import { writeStairAssembly, writeRampAssembly } from '../ifc-writer/stairWriter.js';
-import {
-  writeRailingGeometry,
-  writeRailingEntity,
-  type RailingRepresentationIds,
-} from '../ifc-writer/railingWriter.js';
+import { writeRailingEntity } from '../ifc-writer/railingWriter.js';
 import {
   writeCoveringGeometry,
   writeCoveringEntity,
@@ -73,7 +68,6 @@ import {
   writeWallCommonPset,
   writeManufacturerPset,
   writeCustomPsets,
-  writeWallBaseQuantities,
   writeExactWallBaseQuantities,
   writeSlabCommonPset,
   writeSlabBaseQuantities,
@@ -118,7 +112,7 @@ import { err, ok } from 'brepjs';
 import type { LocalId } from '../identity/localId.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { deriveIfcGuidSync } from '../identity/guidDerivation.js';
-import type { BimElement, WallOpeningSpec, SlabOpeningSpec } from '../types/bimTypes.js';
+import type { BimElement, SlabOpeningSpec } from '../types/bimTypes.js';
 import { isWallOpening, isSlabOpening } from '../types/bimTypes.js';
 import type { BimRelationship } from '../types/relationships.js';
 import { checkReferentialIntegrity } from '../validation/referentialIntegrity.js';
@@ -137,42 +131,27 @@ import { preflightExactBody } from './exactBodyPreflight.js';
 import { deriveExactWallQuantities } from './exactWallQuantities.js';
 import {
   writeExactBodyGeometry,
+  writeWallAxisRepresentation,
   type PreparedTessellation,
 } from '../ifc-writer/tessellationWriter.js';
 
-type ExactBodyCapableElement = BimElement<'WALL'> | BimElement<'RAILING'>;
+type ProductBodyElement = BimElement<'WALL'> | BimElement<'RAILING'>;
 
-type PreflightedProductElement<E extends ExactBodyCapableElement> =
-  | {
-      readonly kind: 'PARAMETRIC';
-      readonly element: E;
-      readonly solid: ValidSolid;
-    }
-  | {
-      readonly kind: 'EXACT';
-      readonly element: E;
-      readonly solids: NonEmpty<ValidSolid>;
-      readonly items: NonEmpty<PreparedTessellation>;
-    };
+interface PreflightedProductElement<E extends ProductBodyElement> {
+  readonly element: E;
+  readonly solids: NonEmpty<ValidSolid>;
+  readonly items: NonEmpty<PreparedTessellation>;
+}
 
-function preflightProductBodies<E extends ExactBodyCapableElement>(
+function preflightProductBodies<E extends ProductBodyElement>(
   elements: readonly E[]
 ): Result<readonly PreflightedProductElement<E>[], BimError> {
   const preflighted: PreflightedProductElement<E>[] = [];
   for (const element of elements) {
-    const body = element.geometry;
-    if (body.kind === 'PARAMETRIC') {
-      preflighted.push({ kind: 'PARAMETRIC', element, solid: body.solid });
-      continue;
-    }
-    const prepared = preflightExactBody({ localId: element.localId, solids: body.solids });
+    const solids = bodySolids(element.geometry);
+    const prepared = preflightExactBody({ localId: element.localId, solids });
     if (!prepared.ok) return err(prepared.error);
-    preflighted.push({
-      kind: 'EXACT',
-      element,
-      solids: body.solids,
-      items: prepared.value,
-    });
+    preflighted.push({ element, solids, items: prepared.value });
   }
   return ok(preflighted);
 }
@@ -352,17 +331,6 @@ export async function toIfc(
     placementMap.set(el.localId, placementId);
   }
 
-  const openingsByWall = new Map<LocalId, WallOpeningSpec[]>();
-  for (const rel of relationships) {
-    if (rel.kind !== 'VOIDS_WALL') continue;
-    const opening = elements.find((el) => el.localId === rel.openingLocalId);
-    if (opening === undefined || opening.category !== 'OPENING') continue;
-    if (!isWallOpening(opening.spec)) continue;
-    const list = openingsByWall.get(rel.wallLocalId) ?? [];
-    list.push(opening.spec);
-    openingsByWall.set(rel.wallLocalId, list);
-  }
-
   const openingsBySlab = new Map<LocalId, SlabOpeningSpec[]>();
   for (const rel of relationships) {
     if (rel.kind !== 'VOIDS_SLAB') continue;
@@ -379,21 +347,18 @@ export async function toIfc(
     const containingId = findContainerOf(wall.localId, relationships);
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
-    const exactQuantities =
-      preflighted.kind === 'EXACT'
-        ? deriveExactWallQuantities({ spec: wall.spec, solids: preflighted.solids })
-        : null;
-
-    const { localPlacementId, productDefinitionShapeId } =
-      preflighted.kind === 'EXACT'
-        ? writeExactBodyGeometry(
-            w,
-            wall.spec,
-            preflighted.items,
-            geomSubContextId,
-            storeyPlacementId
-          )
-        : writeWallGeometry(w, wall.spec, geomSubContextId, storeyPlacementId);
+    const exactQuantities = deriveExactWallQuantities({
+      spec: wall.spec,
+      solids: preflighted.solids,
+    });
+    const { localPlacementId, productDefinitionShapeId } = writeExactBodyGeometry(
+      w,
+      wall.spec,
+      preflighted.items,
+      geomSubContextId,
+      storeyPlacementId,
+      [writeWallAxisRepresentation(w, wall.spec.length, geomSubContextId)]
+    );
     const wallExpressId = writeWallEntity(
       w,
       wall.guid,
@@ -409,18 +374,17 @@ export async function toIfc(
     if (wall.spec.customProperties !== undefined) {
       writeCustomPsets(w, ownerHistoryId, wallExpressId, wall.spec.customProperties);
     }
-    if (preflighted.kind === 'EXACT') {
-      if (exactQuantities !== null && exactQuantities.ok) {
-        writeExactWallBaseQuantities(w, ownerHistoryId, wallExpressId, exactQuantities.value);
-      }
-    } else {
-      writeWallBaseQuantities(
+    if (exactQuantities.ok) {
+      const density =
+        (wall.spec.materialLayers?.length ?? 0) > 1
+          ? undefined
+          : densityByElement.get(wall.localId);
+      writeExactWallBaseQuantities(
         w,
         ownerHistoryId,
         wallExpressId,
-        wall.spec,
-        openingsByWall.get(wall.localId) ?? [],
-        densityByElement.get(wall.localId)
+        exactQuantities.value,
+        density
       );
     }
   }
@@ -795,31 +759,13 @@ export async function toIfc(
     const containingId = findContainerOf(railing.localId, relationships);
     const storeyPlacementId =
       containingId !== null ? (placementMap.get(containingId) ?? null) : null;
-    let representation: RailingRepresentationIds;
-    let exactBodyItemIds: readonly number[] = [];
-    if (preflighted.kind === 'EXACT') {
-      const exact = writeExactBodyGeometry(
-        w,
-        railing.spec,
-        preflighted.items,
-        geomSubContextId,
-        storeyPlacementId
-      );
-      exactBodyItemIds = exact.bodyItemIds;
-      representation = { ...exact, bodyItemId: null, usedFallback: false };
-    } else {
-      representation = writeRailingGeometry(
-        w,
-        railing.spec,
-        preflighted.solid,
-        geomSubContextId,
-        storeyPlacementId
-      );
-    }
-    const { localPlacementId, productDefinitionShapeId, bodyItemId, usedFallback } = representation;
-    if (usedFallback) {
-      console.warn(`Railing ${i + 1} tessellation failed; IFC body is a degenerate fallback.`);
-    }
+    const { localPlacementId, productDefinitionShapeId, bodyItemIds } = writeExactBodyGeometry(
+      w,
+      railing.spec,
+      preflighted.items,
+      geomSubContextId,
+      storeyPlacementId
+    );
     const railingExpressId = writeRailingEntity(
       w,
       railing.guid,
@@ -836,13 +782,8 @@ export async function toIfc(
     if (railing.spec.customProperties !== undefined) {
       writeCustomPsets(w, ownerHistoryId, railingExpressId, railing.spec.customProperties);
     }
-    // POSTED railings tessellate and have no single styleable body item.
-    if (preflighted.kind === 'EXACT') {
-      for (const itemId of exactBodyItemIds) {
-        applySurfaceStyle(w, model, railing.localId, itemId);
-      }
-    } else if (bodyItemId !== null) {
-      applySurfaceStyle(w, model, railing.localId, bodyItemId);
+    for (const itemId of bodyItemIds) {
+      applySurfaceStyle(w, model, railing.localId, itemId);
     }
   }
 

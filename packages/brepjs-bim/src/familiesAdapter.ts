@@ -76,7 +76,7 @@ import {
 import { specError, type BimError } from './errors/bimError.js';
 import type { FillsOpeningRel } from './types/relationships.js';
 import { disposeProductBody } from './types/productBody.js';
-import { selectCivilProductBody } from './familiesProductBody.js';
+import { materializeCivilProductBody } from './familiesProductBody.js';
 
 export interface FamiliesToBimOptions {
   readonly project: ProjectSpec;
@@ -1269,18 +1269,16 @@ function installCivilProductBody(
       )
     );
   }
-  const selected = selectCivilProductBody({
+  const selected = materializeCivilProductBody({
     element: el,
     category,
     evaluator,
     productWorldFrame,
-    parametricBody: target.geometry,
   });
   if (!selected.ok) return selected;
-  if (selected.value.kind === 'PARAMETRIC') return ok(undefined);
 
-  const takeover = model.takeExactProductBody(localId, selected.value.body);
-  if (!takeover.ok) disposeProductBody(selected.value.body);
+  const takeover = model.takeProductBody(localId, selected.value);
+  if (!takeover.ok) disposeProductBody(selected.value);
   return takeover;
 }
 

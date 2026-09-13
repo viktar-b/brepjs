@@ -171,7 +171,7 @@ describe('Phase 4 round-trip — fromIfc(toIfc(model))', () => {
     expect(vol.value).toBeCloseTo(6000 * 4000 * 250, 0);
   });
 
-  it('subtracts the door void from the reconstructed wall (PARAMETRIC)', async () => {
+  it('retains the already-cut door void in the tessellated wall', async () => {
     const { model } = buildRoundTripModel();
     const bytes = await toIfc(model, META);
     if (!bytes.ok) throw new Error(bytes.error.message);
@@ -180,7 +180,7 @@ describe('Phase 4 round-trip — fromIfc(toIfc(model))', () => {
     if (!imported.ok) throw new Error(imported.error.message);
 
     const wall = imported.value.elements.find((e) => e.category === 'WALL');
-    expect(wall?.geometry.fidelity).toBe('PARAMETRIC');
+    expect(wall?.geometry.fidelity).toBe('TESSELLATED_MANIFOLD');
     const solid = wall?.geometry.solid;
     if (solid === null || solid === undefined) throw new Error('wall solid missing');
     const vol = measureVolume(solid);

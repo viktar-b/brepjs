@@ -110,7 +110,7 @@ describe('Phase 2 door/window geometry', () => {
     api.CloseModel(mid);
   });
 
-  it('emits an Axis representation for walls alongside the SweptSolid Body', async () => {
+  it('emits an Axis representation for walls alongside the stored tessellated Body', async () => {
     const { model } = buildModelWithOpenings();
     const result = await toIfc(model, META);
     if (!result.ok) throw new Error(result.error.message);
@@ -144,7 +144,7 @@ describe('Phase 2 proxy geometry', () => {
     expect(proxyLine['Representation']).not.toBeNull();
 
     const faceSetIds = api.GetLineIDsWithType(mid, WebIFC.IFCTRIANGULATEDFACESET);
-    expect(faceSetIds.size()).toBe(1);
+    expect(faceSetIds.size()).toBe(2);
     api.CloseModel(mid);
   });
 });

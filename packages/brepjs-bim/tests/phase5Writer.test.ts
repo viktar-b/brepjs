@@ -103,6 +103,7 @@ describe('Phase 5 writer integration', () => {
       expect(weights.size()).toBeGreaterThan(0);
       const weight = api.GetLine(mid, weights.get(0)) as Record<string, unknown>;
       // Concrete (2400 kg/m³) × 5.0 × 0.25 × 3.0 m³ = 9000 kg.
+      expect((weight['Name'] as { value?: string } | undefined)?.value).toBe('NetWeight');
       const value = (weight['WeightValue'] as { value?: number } | undefined)?.value;
       expect(value).toBeCloseTo(9000, 3);
     } finally {

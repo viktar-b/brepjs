@@ -38,7 +38,7 @@ interface Case {
 const CASES: readonly Case[] = [
   {
     name: 'wall',
-    fidelity: 'PARAMETRIC',
+    fidelity: 'TESSELLATED_MANIFOLD',
     add: (m) =>
       unwrap(
         m.addWall({
@@ -54,7 +54,7 @@ const CASES: readonly Case[] = [
   },
   {
     name: 'wall running along +Y',
-    fidelity: 'PARAMETRIC',
+    fidelity: 'TESSELLATED_MANIFOLD',
     add: (m) =>
       unwrap(
         m.addWall({
@@ -136,7 +136,7 @@ const CASES: readonly Case[] = [
   },
   {
     name: 'panel railing',
-    fidelity: 'PARAMETRIC',
+    fidelity: 'TESSELLATED_MANIFOLD',
     add: (m) =>
       unwrap(
         m.addRailing({
@@ -351,7 +351,7 @@ describe('element placement survives the IFC round trip', () => {
 
     const imported = await roundTrip(model);
     try {
-      expectImportedBody(imported, wall, 'PARAMETRIC', 'wall with door');
+      expectImportedBody(imported, wall, 'TESSELLATED_MANIFOLD', 'wall with door');
     } finally {
       disposeImportedModel(imported);
       model[Symbol.dispose]();

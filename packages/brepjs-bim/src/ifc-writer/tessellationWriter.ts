@@ -127,7 +127,8 @@ export function writeTessellation(
 export function writePreparedTessellationBody(
   w: IfcWriter,
   items: NonEmpty<PreparedTessellation>,
-  geomSubContextId: number
+  geomSubContextId: number,
+  otherRepresentationIds: readonly number[] = []
 ): { readonly productDefinitionShapeId: number; readonly bodyItemIds: readonly number[] } {
   const bodyItemIds = items.map((item) => writePreparedTessellationItem(w, item));
   const shapeRepId = w.nextId();
@@ -146,7 +147,7 @@ export function writePreparedTessellationBody(
     type: WebIFC.IFCPRODUCTDEFINITIONSHAPE,
     Name: null,
     Description: null,
-    Representations: [w.ref(shapeRepId)],
+    Representations: [...otherRepresentationIds.map((id) => w.ref(id)), w.ref(shapeRepId)],
   });
   return { productDefinitionShapeId, bodyItemIds };
 }
@@ -156,7 +157,8 @@ export function writeExactBodyGeometry(
   placement: FrameInput,
   items: NonEmpty<PreparedTessellation>,
   geomSubContextId: number,
-  parentPlacementId: number | null
+  parentPlacementId: number | null,
+  otherRepresentationIds: readonly number[] = []
 ): ExactBodyRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
@@ -175,7 +177,7 @@ export function writeExactBodyGeometry(
     PlacementRelTo: parentPlacementId === null ? null : w.ref(parentPlacementId),
     RelativePlacement: w.ref(placement3DId),
   });
-  const body = writePreparedTessellationBody(w, items, geomSubContextId);
+  const body = writePreparedTessellationBody(w, items, geomSubContextId, otherRepresentationIds);
   return { localPlacementId, ...body };
 }
 

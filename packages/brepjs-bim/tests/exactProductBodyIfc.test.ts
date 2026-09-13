@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { box, fuseAll, measureVolume, translate } from 'brepjs';
+import { box, fuse, measureVolume, translate } from 'brepjs';
 import { initKernel } from '../../../tests/setup.js';
 import { makeLocalIdCounter } from '../src/identity/localId.js';
 import { IfcWriter, type IfcWriterApiForTesting } from '../src/ifc-writer/ifcWriter.js';
@@ -58,8 +58,8 @@ describe('exact wall quantities', () => {
       spec: WALL_SPEC,
       solids: [first, second],
       dependencies: {
-        fuse: (solids, options) => {
-          const result = fuseAll(solids, options);
+        fuse: (first, second, options) => {
+          const result = fuse(first, second, options);
           if (result.ok) result.value.onDispose(() => unionDisposals++);
           return result;
         },
@@ -82,8 +82,8 @@ describe('exact wall quantities', () => {
       spec: WALL_SPEC,
       solids: [first, second],
       dependencies: {
-        fuse: (solids, options) => {
-          const result = fuseAll(solids, options);
+        fuse: (first, second, options) => {
+          const result = fuse(first, second, options);
           if (result.ok) result.value.onDispose(() => unionDisposals++);
           return result;
         },

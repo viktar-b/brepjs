@@ -25,22 +25,30 @@ the low-level path (and covers elements the declarative route doesn't yet). See 
 
 Parametric authoring of the common IFC4 building elements plus the data layers that make a model
 useful downstream (psets, classification, materials, quantities), with import, export, and
-validation. Geometry is produced by brepjs (OCCT). Walls and railings carry a `ProductBody`, either
-a parametric solid or a non-empty collection of authoritative exact solids. Use `bodySolids()` to
-borrow their Product-local model handles and narrow `geometry.kind` when a caller specifically
-needs the parametric branch. Other solid-bearing categories continue to expose their existing
-geometry types.
+validation. Geometry is produced by brepjs (OCCT). Walls and railings carry a `ProductBody` with
+`kind: 'PARAMETRIC' | 'AUTHORITATIVE'` and nonempty `items` under both authorities. Use
+`bodySolids()` to borrow local model handles. Retaining a borrowed handle requires an independent
+copy. Other categories continue to expose their existing geometry types.
 
-`takeExactProductBody(localId, { kind: 'EXACT', solids })` installs an authoritative wall or
-railing Body atomically. Success transfers every supplied handle to the model and disposes the
-superseded parametric Body; failure transfers nothing. Add wall openings before takeover, because
-an exact wall rejects later `addDoor()` and `addWindow()` mutations.
+`takeProductBody(localId, { kind: 'AUTHORITATIVE', items })` replaces a Wall or Railing Body
+atomically. Success transfers every supplied handle, protects the stored collection from caller
+mutation, and disposes the prior Body. Failure transfers nothing. Inputs must be exclusively
+caller-owned; duplicates and handles already owned in this model are rejected. Register wall
+openings before authoritative adoption. An AUTHORITATIVE wall rejects later `addDoor()` and
+`addWindow()` mutations. Explicit replacement can request PARAMETRIC authority; coincidence never
+changes authority automatically.
+
+`measureProductBodyVolume(body)` returns occupied material in mm³ as a `Result`, using a temporary
+union for overlapping or disconnected items. It preserves the stored items and reports unavailable
+measurement as an error. Wall and Railing IFC export tessellates those stored items under both
+authorities. See [ADR-0003](docs/adr/0003-geometry-ownership-and-material-operations.md) for the
+implemented foundation and its limits.
 
 Element geometry is **unplaced template geometry** in local coordinates. Placement (`origin` /
 `axisX` / `axisZ`) is applied by the IFC layer via `IfcLocalPlacement`, not baked into the brepjs
 solid. Use `placedSolids(element)` to read fresh, caller-owned solids transformed by the element's
 own placement. Stairs and ramps return one solid per flight, curtain walls return their panels and
-mullions, and an exact Product Body returns one placed copy per Body item. When an element is
+mullions, and a ProductBody returns one placed copy per Body item. When an element is
 beneath a placed spatial structure, pass its cumulative frame as
 `placedSolids(element, { parentFrame })` to obtain world coordinates. This is especially important
 for parent-local Proxy and Earthworks Fill bodies.
@@ -50,7 +58,7 @@ the resulting World-placed handles and `completeness` reports `COMPLETE`, `PARTI
 `fidelity` reports the least faithful retained item. Raw mesh siblings are combined in
 `meshVertices` and `meshIndices`. The legacy `.solid` property is a borrowed alias only for a
 complete one-solid Body. Dispose import geometry through `disposeImportedModel()` rather than
-through either property. Complete Bodies also expose aggregate `bounds` and `volumeMm3`; both are
+through either property. Complete Bodies also expose aggregate `bounds` and occupied-union `volumeMm3`; both are
 `null` when aggregate measurement fails or when the Body is partial or missing.
 
 - Units default to mm; IFC export emits SI metres.

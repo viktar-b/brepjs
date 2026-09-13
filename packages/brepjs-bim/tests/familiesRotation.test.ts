@@ -119,7 +119,7 @@ async function padWorldPlacement(transform: readonly TransformOp[]): Promise<Wor
   using model = projected.model;
   const localId = projected.idByKeyPath.get('g/p');
   if (localId === undefined) throw new Error('pad not projected');
-  return worldPlacement(model, guidOf(model, localId));
+  return await worldPlacement(model, guidOf(model, localId));
 }
 
 function expectVec(actual: readonly number[], expected: readonly number[], precision = 4): void {

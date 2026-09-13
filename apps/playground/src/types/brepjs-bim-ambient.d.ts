@@ -13,6 +13,8 @@ import type {
   Result,
   ValidSolid,
   csg,
+  fuse,
+  measureVolume,
 } from 'brepjs';
 
 /** Optional identity override for created elements: a stable key (e.g. a
@@ -61,19 +63,12 @@ declare class BimModel {
   addRamp(spec: RampSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
   addRailing(spec: RailingSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
   /**
-   * Atomically replaces a parametric wall or railing Body with authoritative,
-   * caller-owned exact solids. Success transfers every supplied handle to this
-   * model. Failure leaves both the model and all supplied handles unchanged.
+   * Explicitly replaces a wall or railing Body, including its requested authority.
+   * Success transfers every supplied handle. Failure preserves all caller inputs
+   * and model state. The caller must own each handle exclusively, including with
+   * respect to other models, evaluators and caches. Clone borrowed handles first.
    */
-  takeExactProductBody(
-    localId: LocalId,
-    body: Extract<
-      ProductBody,
-      {
-        readonly kind: 'EXACT';
-      }
-    >
-  ): Result<void, BimError>;
+  takeProductBody(localId: LocalId, body: ProductBody): Result<void, BimError>;
   /**
    * Adds an IfcCovering. When `hostLocalId` is supplied, an
    * IfcRelCoversBldgElements linking the covering to its host (e.g. a slab it
@@ -267,15 +262,26 @@ type NonEmpty<T> = readonly [T, ...T[]];
 type ProductBody =
   | {
       readonly kind: 'PARAMETRIC';
-      readonly solid: ValidSolid;
+      readonly items: NonEmpty<ValidSolid>;
     }
   | {
-      readonly kind: 'EXACT';
-      readonly solids: NonEmpty<ValidSolid>;
+      readonly kind: 'AUTHORITATIVE';
+      readonly items: NonEmpty<ValidSolid>;
     };
 
-/** Returns borrowed Product-local solids. The model retains ownership. */
+/** Returns borrowed Product-local items. Retaining an item requires an independent clone. */
 declare function bodySolids(body: ProductBody): NonEmpty<ValidSolid>;
+
+interface ProductBodyVolumeDependencies {
+  readonly fuse?: typeof fuse | undefined;
+  readonly measure?: typeof measureVolume | undefined;
+}
+
+/** Measures occupied material in mm³ without changing the borrowed items or their order. */
+declare function measureProductBodyVolume(
+  body: ProductBody,
+  dependencies?: ProductBodyVolumeDependencies
+): Result<number, BimError>;
 
 /** An (origin, axisX, axisZ) frame in mm — the authoring/display side of a placement. */
 interface FrameInput {
@@ -898,6 +904,11 @@ interface RoofSpec {
 
 declare function parseRoofSpec(input: unknown): Result<RoofSpec, BimError>;
 
+/**
+ * Enumeration literals transcribed verbatim from `IfcCurtainWallTypeEnum` in
+ * the buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ */
 type CurtainWallPredefinedType = 'NOTDEFINED' | 'USERDEFINED';
 
 /**
@@ -1168,6 +1179,11 @@ type AssemblyPredefinedType =
   | 'USERDEFINED'
   | 'NOTDEFINED';
 
+/**
+ * Enumeration literals transcribed verbatim from `IfcAssemblyPlaceEnum` in the
+ * buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ */
 type AssemblyPlace = 'SITE' | 'FACTORY' | 'NOTDEFINED';
 
 /**
@@ -1271,6 +1287,16 @@ interface SlabOpeningInput {
 
 declare function parseSlabOpeningInput(input: unknown): Result<SlabOpeningInput, BimError>;
 
+/**
+ * IFC enumeration literals in this module are transcribed verbatim from the
+ * buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema, specifically
+ * `IfcBridgeTypeEnum`, `IfcBridgePartTypeEnum`, `IfcFacilityUsageEnum`, and
+ * `IfcEarthworksFillTypeEnum`:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ *
+ * The Families-facing civil vocabulary stays target-independent; projection
+ * into these IFC-owned keywords occurs in `familiesAdapter.ts`.
+ */
 type BridgePredefinedType =
   | 'ARCHED'
   | 'CABLE_STAYED'
@@ -1591,7 +1617,12 @@ declare function isIfcSchema(value: unknown): value is IfcSchema;
  */
 declare function schemaSupports(schema: IfcSchema, entityName: string): boolean;
 
-/** IfcAssemblyPlaceEnum values; SITE for in-place assemblies, FACTORY for prefabricated. */
+/**
+ * Enumeration literals transcribed verbatim from `IfcAssemblyPlaceEnum` in the
+ * buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ * SITE denotes in-place assemblies; FACTORY denotes prefabricated assemblies.
+ */
 type AssemblyPlaceIfc = 'SITE' | 'FACTORY' | 'NOTDEFINED';
 
 /** IfcElementAssemblyTypeEnum values (IFC4). */
@@ -1677,7 +1708,12 @@ declare function writePresentationLayer(
   itemIds: readonly number[]
 ): void;
 
-/** IfcConnectionTypeEnum values used by IfcRelConnectsPathElements path ends. */
+/**
+ * Enumeration literals transcribed verbatim from `IfcConnectionTypeEnum` in
+ * the buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ * These values identify the path ends used by `IfcRelConnectsPathElements`.
+ */
 type PathConnectionTypeIfc = 'ATSTART' | 'ATEND' | 'ATPATH' | 'NOTDEFINED';
 
 /**
@@ -1997,6 +2033,11 @@ interface ProjectCrs {
   readonly scale?: number | undefined;
 }
 
+/**
+ * Enumeration literals transcribed verbatim from `IfcElementCompositionEnum`
+ * in the buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ */
 type IfcElementCompositionType = 'COMPLEX' | 'ELEMENT' | 'PARTIAL';
 
 interface SpatialPlacementSpec {

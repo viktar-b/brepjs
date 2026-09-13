@@ -104,7 +104,7 @@ const EmptyBodyWall = family('EmptyBodyWall', () => el('Geometry', { node: csg.c
 });
 
 describe('Families civil Product Body authority', () => {
-  it('keeps a coincident rectangular civil railing PARAMETRIC and releases adapter copies', () => {
+  it('keeps authored authority and owned items when recipe geometry coincides', () => {
     const root = oneProduct(CoincidentRailing({ key: 'railing' }));
     using evaluator = new csg.Evaluator();
     const sourceDisposals = observeSources(evaluator, findElement(root, 'level/railing'));
@@ -116,51 +116,31 @@ describe('Families civil Product Body authority', () => {
     const projected = unwrap(familiesToBim(root, { project: PROJECT, bodyEvaluator: evaluator }));
     using model = projected.model;
     const railing = requiredElement(model, projected.idByKeyPath.get('level/railing'), 'RAILING');
-    expect(railing.geometry.kind).toBe('PARAMETRIC');
+    expect(railing.geometry.kind).toBe('AUTHORITATIVE');
+    expect(localizedDisposals).toBe(0);
+    model[Symbol.dispose]();
     expect(localizedDisposals).toBe(1);
     expect(sourceDisposals).toEqual([0]);
   });
 
-  it('selects EXACT when equal-volume wall Bodies occupy different space', () => {
+  it('retains AUTHORITATIVE items when equal-volume wall Bodies occupy different space', () => {
     const root = oneProduct(ShiftedWall({ key: 'wall' }));
     using evaluator = new csg.Evaluator();
     const projected = unwrap(familiesToBim(root, { project: PROJECT, bodyEvaluator: evaluator }));
     using model = projected.model;
     const wall = requiredElement(model, projected.idByKeyPath.get('level/wall'), 'WALL');
-    expect(wall.geometry.kind).toBe('EXACT');
+    expect(wall.geometry.kind).toBe('AUTHORITATIVE');
     expect(bodySolids(wall.geometry)).toHaveLength(1);
   });
 
-  it('selects EXACT when two sub-1 mm³ volumes disagree relatively', () => {
+  it('retains the authored volume even for sub-1 mm³ Bodies', () => {
     const root = oneProduct(TinyUnequalWall({ key: 'wall' }));
     using evaluator = new csg.Evaluator();
-    let candidateVolumes: readonly [number, number] | null = null;
-    setFamiliesProductBodyTestHooksForTesting({
-      beforeCoincidence: (exact, parametric) => {
-        const exactSolid = bodySolids(exact)[0];
-        const parametricSolid = bodySolids(parametric)[0];
-        if (exactSolid === undefined || parametricSolid === undefined) {
-          throw new Error('Expected coincidence solids');
-        }
-        candidateVolumes = [
-          unwrap(measureVolume(exactSolid)),
-          unwrap(measureVolume(parametricSolid)),
-        ];
-      },
-    });
     const projected = unwrap(familiesToBim(root, { project: PROJECT, bodyEvaluator: evaluator }));
     using model = projected.model;
     const wall = requiredElement(model, projected.idByKeyPath.get('level/wall'), 'WALL');
-    expect(wall.geometry.kind).toBe('EXACT');
-    expect(candidateVolumes).not.toBeNull();
-    if (candidateVolumes === null) throw new Error('Expected coincidence volumes');
-    const [authoredVolume, parametricVolume] = candidateVolumes;
-    expect(authoredVolume).toBeLessThan(1);
-    expect(parametricVolume).toBeLessThan(1);
-    expect(Math.abs(authoredVolume - parametricVolume)).toBeLessThan(1e-6);
-    expect(Math.abs(authoredVolume - parametricVolume)).toBeGreaterThan(
-      1e-6 * Math.max(Math.abs(authoredVolume), Math.abs(parametricVolume))
-    );
+    expect(wall.geometry.kind).toBe('AUTHORITATIVE');
+    expect(unwrap(measureVolume(bodySolids(wall.geometry)[0]))).toBeCloseTo(0.008 ** 3, 12);
   });
 
   it('requires an evaluator for every activated civil wall or railing', () => {
@@ -230,21 +210,20 @@ describe('Families civil Product Body authority', () => {
     expect(sourceDisposals).toEqual([0, 0]);
   });
 
-  it('disposes localized candidates when Body comparison throws', () => {
+  it('disposes the current localized candidate when its completion hook throws', () => {
     const root = oneProduct(CoincidentRailing({ key: 'railing' }));
     using evaluator = new csg.Evaluator();
     const sourceDisposals = observeSources(evaluator, findElement(root, 'level/railing'));
-    let exactDisposals = 0;
+    let localizedDisposals = 0;
     setFamiliesProductBodyTestHooksForTesting({
-      beforeCoincidence: (exact) => {
-        for (const solid of exact.solids) solid.onDispose(() => exactDisposals++);
-        throw new Error('injected comparison failure');
+      afterLocalized: (_itemIndex, solid) => {
+        solid.onDispose(() => localizedDisposals++);
+        throw new Error('injected localization completion failure');
       },
     });
-
     const result = familiesToBim(root, { project: PROJECT, bodyEvaluator: evaluator });
-    expect(errorCode(result)).toBe('FAMILIES_PRODUCT_BODY_COMPARISON_FAILED');
-    expect(exactDisposals).toBe(1);
+    expect(errorCode(result)).toBe('FAMILIES_PRODUCT_BODY_LOCALIZE_FAILED');
+    expect(localizedDisposals).toBe(1);
     expect(sourceDisposals).toEqual([0]);
   });
 

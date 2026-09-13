@@ -42,7 +42,7 @@ describe('exact wall quantity omission', () => {
     if (!wall.ok) throw new Error(wall.error.message);
 
     const exact = box(900, 100, 400);
-    const takeover = model.takeExactProductBody(wall.value, { kind: 'EXACT', solids: [exact] });
+    const takeover = model.takeProductBody(wall.value, { kind: 'AUTHORITATIVE', items: [exact] });
     if (!takeover.ok) {
       exact[Symbol.dispose]();
       throw new Error(takeover.error.message);

@@ -80,11 +80,11 @@ describe('railing IFC representation', () => {
     expect(txt).toContain('IFCTRIANGULATEDFACESET');
   });
 
-  it('PANEL railing keeps the parametric SweptSolid', async () => {
+  it('PANEL railing serializes its stored Body as a Tessellation', async () => {
     const txt = await ifcText((m) => {
       unwrap(m.addRailing({ ...railBase }));
     });
-    expect(txt).toContain('IFCEXTRUDEDAREASOLID');
+    expect(txt).toContain('IFCTRIANGULATEDFACESET');
   });
 });
 

@@ -661,15 +661,6 @@ describe('archetype routing', () => {
       })
     );
     using evaluator = new csg.Evaluator();
-    let candidateVolumes: readonly [number, number] | null = null;
-    setFamiliesProductBodyTestHooksForTesting({
-      beforeCoincidence: (exact, parametric) => {
-        candidateVolumes = [
-          unwrap(measureVolume(bodySolids(exact)[0])),
-          unwrap(measureVolume(bodySolids(parametric)[0])),
-        ];
-      },
-    });
     const result = unwrap(familiesToBim(tree, { project: PROJECT, bodyEvaluator: evaluator }));
     using model = result.model;
 
@@ -681,11 +672,7 @@ describe('archetype routing', () => {
     expect(wall?.category).toBe('WALL');
     if (wall?.category !== 'WALL') throw new Error('Expected projected wall');
     const expectedVolume = 3_000 * 200 * 2_700 - 900 * 200 * 2_100;
-    expect(candidateVolumes).not.toBeNull();
-    if (candidateVolumes === null) throw new Error('Expected coincidence volumes');
-    expect(candidateVolumes[0]).toBeCloseTo(expectedVolume, 3);
-    expect(candidateVolumes[1]).toBeCloseTo(expectedVolume, 3);
-    expect(wall.geometry.kind).toBe('PARAMETRIC');
+    expect(wall.geometry.kind).toBe('AUTHORITATIVE');
     expect(unwrap(measureVolume(bodySolids(wall.geometry)[0]))).toBeCloseTo(expectedVolume, 3);
     expect(model.getAllRelationships().filter(({ kind }) => kind === 'VOIDS_WALL')).toHaveLength(1);
     expect(model.getAllRelationships().filter(({ kind }) => kind === 'FILLS_OPENING')).toHaveLength(
@@ -694,7 +681,7 @@ describe('archetype routing', () => {
     const text = await ifcText(model);
     expect(text).toContain('IFCWALL');
     expect(text).toContain('IFCEXTRUDEDAREASOLID');
-    expect(text).not.toContain('IFCTRIANGULATEDFACESET');
+    expect(text).toContain('IFCTRIANGULATEDFACESET');
     expect(text).toContain('IFCOPENINGELEMENT');
     expect(text).toContain('IFCDOOR');
   });

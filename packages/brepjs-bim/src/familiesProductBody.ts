@@ -1,10 +1,8 @@
 import {
   clone,
   err,
-  fuseAll,
   getSolids,
   isSolid,
-  measureVolume,
   ok,
   validSolid,
   type Result,
@@ -14,33 +12,21 @@ import {
 } from 'brepjs';
 import type { ResolvedElement } from 'brepjs-families';
 import { specError, type BimError } from './errors/bimError.js';
-import { bodySolids, type ProductBody } from './types/productBody.js';
+import { prepareProductBody, type ProductBody } from './types/productBody.js';
 import { decomposeFrame, frameInverse, type Frame } from './placementFrame.js';
 import { locateShapeInFrame } from './rigidPlacement.js';
-
-const RELATIVE_VOLUME_TOLERANCE = 1e-6;
-
-type ExactProductBody = Extract<ProductBody, { readonly kind: 'EXACT' }>;
-type ParametricProductBody = Extract<ProductBody, { readonly kind: 'PARAMETRIC' }>;
-
-export type CivilProductBodySelection =
-  { readonly kind: 'PARAMETRIC' } | { readonly kind: 'EXACT'; readonly body: ExactProductBody };
 
 export interface CivilProductBodyInput {
   readonly element: ResolvedElement;
   readonly category: 'WALL' | 'RAILING';
   readonly evaluator: csg.Evaluator;
   readonly productWorldFrame: Frame;
-  /** Borrowed model-owned comparison candidate after registered openings. */
-  readonly parametricBody: ParametricProductBody;
 }
 
 export interface FamiliesProductBodyTestHooks {
   readonly afterCopy?: ((itemIndex: number, solid: Solid, source: Solid) => void) | undefined;
   readonly beforeLocalize?: ((itemIndex: number, solid: ValidSolid) => void) | undefined;
   readonly afterLocalized?: ((itemIndex: number, solid: ValidSolid) => void) | undefined;
-  readonly beforeCoincidence?:
-    ((exact: ExactProductBody, parametric: ParametricProductBody) => void) | undefined;
 }
 
 let testHooks: FamiliesProductBodyTestHooks | null = null;
@@ -53,13 +39,12 @@ export function setFamiliesProductBodyTestHooksForTesting(
 }
 
 /**
- * Evaluates a civil Product Body, clones and localizes every borrowed source,
- * then proves whether the registered-opening parametric Body is coincident.
- * An EXACT result is caller-owned until takeExactProductBody() succeeds.
+ * Clones and localizes every borrowed authored item. The resulting Body is
+ * caller-owned until takeProductBody() succeeds, regardless of recipe coincidence.
  */
-export function selectCivilProductBody(
+export function materializeCivilProductBody(
   input: CivilProductBodyInput
-): Result<CivilProductBodySelection, BimError> {
+): Result<ProductBody, BimError> {
   const evaluated = evaluateBody(input);
   if (!evaluated.ok) return evaluated;
   const sources = evaluated.value;
@@ -72,7 +57,21 @@ export function selectCivilProductBody(
   const localized: ValidSolid[] = [];
   const inverse = decomposeFrame(frameInverse(input.productWorldFrame));
   for (const [itemIndex, source] of sources.entries()) {
-    const copied = clone(source);
+    let copied: ReturnType<typeof clone<Solid>>;
+    try {
+      copied = clone(source);
+    } catch (cause) {
+      disposeAll(localized);
+      return err(
+        productBodyError(
+          input,
+          'FAMILIES_PRODUCT_BODY_COPY_FAILED',
+          `Body item ${itemIndex} copy threw`,
+          cause,
+          itemIndex
+        )
+      );
+    }
     if (!copied.ok) {
       disposeAll(localized);
       return err(
@@ -153,28 +152,17 @@ export function selectCivilProductBody(
     valid.value[Symbol.dispose]();
   }
 
-  const exactBody: ExactProductBody = {
-    kind: 'EXACT',
-    solids: asNonEmpty(localized),
-  };
-  try {
-    testHooks?.beforeCoincidence?.(exactBody, input.parametricBody);
-  } catch (cause) {
-    disposeAll(exactBody.solids);
+  const first = localized[0];
+  if (first === undefined)
     return err(
-      productBodyError(
-        input,
-        'FAMILIES_PRODUCT_BODY_COMPARISON_FAILED',
-        `authored and parametric Bodies could not be compared`,
-        cause
-      )
+      productBodyError(input, 'FAMILIES_PRODUCT_BODY_EMPTY', 'localized to no solid Body items')
     );
-  }
-  if (!bodiesCoincident(exactBody, input.parametricBody)) {
-    return ok({ kind: 'EXACT', body: exactBody });
-  }
-  disposeAll(exactBody.solids);
-  return ok({ kind: 'PARAMETRIC' });
+  const prepared = prepareProductBody({
+    kind: 'AUTHORITATIVE',
+    items: [first, ...localized.slice(1)],
+  });
+  if (!prepared.ok) disposeAll(localized);
+  return prepared;
 }
 
 function evaluateBody(input: CivilProductBodyInput): Result<readonly Solid[], BimError> {
@@ -201,69 +189,6 @@ function evaluateBody(input: CivilProductBodyInput): Result<readonly Solid[], Bi
       )
     );
   }
-}
-
-function bodiesCoincident(exact: ExactProductBody, parametric: ParametricProductBody): boolean {
-  const exactVolume = measureBody(exact);
-  const parametricVolume = measureBody(parametric);
-  if (
-    exactVolume === null ||
-    parametricVolume === null ||
-    !volumesClose(exactVolume, parametricVolume)
-  ) {
-    return false;
-  }
-
-  let union: ValidSolid | null = null;
-  try {
-    const fused = fuseAll([...bodySolids(exact), ...bodySolids(parametric)], {
-      optimisation: 'sameFace',
-      simplify: true,
-      strategy: 'pairwise',
-      trackEvolution: false,
-    });
-    if (!fused.ok) return false;
-    union = fused.value;
-    const measured = measureVolume(union);
-    return (
-      measured.ok &&
-      volumesClose(measured.value, exactVolume) &&
-      volumesClose(measured.value, parametricVolume)
-    );
-  } catch {
-    return false;
-  } finally {
-    union?.[Symbol.dispose]();
-  }
-}
-
-function measureBody(body: ProductBody): number | null {
-  let total = 0;
-  try {
-    for (const solid of bodySolids(body)) {
-      const measured = measureVolume(solid);
-      if (!measured.ok || !Number.isFinite(measured.value) || measured.value <= 0) return null;
-      total += measured.value;
-    }
-    return total;
-  } catch {
-    return null;
-  }
-}
-
-function volumesClose(a: number, b: number): boolean {
-  // Pure relative 1e-6, with Number.EPSILON only so both-zero stays defined.
-  // A unit-volume floor would treat disjoint sub-1 mm³ solids as coincident.
-  return (
-    Math.abs(a - b) <=
-    RELATIVE_VOLUME_TOLERANCE * Math.max(Math.abs(a), Math.abs(b), Number.EPSILON)
-  );
-}
-
-function asNonEmpty(solids: ValidSolid[]): readonly [ValidSolid, ...ValidSolid[]] {
-  const first = solids[0];
-  if (first === undefined) throw new Error('Expected a non-empty exact Product Body');
-  return [first, ...solids.slice(1)];
 }
 
 function disposeAll(solids: readonly ValidSolid[]): void {

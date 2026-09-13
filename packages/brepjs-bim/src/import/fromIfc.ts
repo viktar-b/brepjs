@@ -1,6 +1,7 @@
+import { measureProductBodyVolume } from '../types/productBody.js';
 import * as WebIFC from 'web-ifc';
 import type { Bounds3D, Result, ValidSolid } from 'brepjs';
-import { ok, err, cut, getBounds, measureVolume } from 'brepjs';
+import { ok, err, cut, getBounds } from 'brepjs';
 import type { BimError } from '../errors/bimError.js';
 import { importError } from '../errors/bimError.js';
 import type { IfcGuid } from '../identity/ifcGuid.js';
@@ -432,11 +433,13 @@ function measureCompleteBody(
     let yMax = initial.yMax;
     let zMin = initial.zMin;
     let zMax = initial.zMax;
-    let volumeMm3 = 0;
+    const measured = measureProductBodyVolume({
+      kind: 'AUTHORITATIVE',
+      items: [first, ...solids.slice(1)],
+    });
+    if (!measured.ok) throw new Error(measured.error.message);
+    const volumeMm3 = measured.value;
     for (const solid of solids) {
-      const measured = measureVolume(solid);
-      if (!measured.ok) throw new Error(measured.error.message);
-      volumeMm3 += measured.value;
       const itemBounds = getBounds(solid);
       xMin = Math.min(xMin, itemBounds.xMin);
       xMax = Math.max(xMax, itemBounds.xMax);

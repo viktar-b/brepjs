@@ -12,7 +12,7 @@ import type { RailingSpec } from '../specs/railingSpec.js';
 import type { CoveringSpec } from '../specs/coveringSpec.js';
 import type { StairSpec } from '../specs/stairSpec.js';
 import type { RampSpec } from '../specs/rampSpec.js';
-import type { WallOpeningSpec, SlabOpeningSpec } from '../types/bimTypes.js';
+import type { SlabOpeningSpec } from '../types/bimTypes.js';
 import { profileCrossSectionArea } from '../elementFns/profileFns.js';
 import { toIfcLengthM } from '../units/units.js';
 import type { PsetCategory, PsetTemplate } from '../psets/psetTemplates.js';
@@ -231,10 +231,6 @@ export function writeCustomPsets(
   }
 }
 
-// Openings whose floor offset is within this many metres of 0 are treated as
-// reaching the floor (i.e. they reduce the wall footprint), e.g. doors.
-const FLOOR_TOUCH_EPSILON_M = 1e-3;
-
 function writeQtyLength(w: IfcWriter, name: string, valueM: number): number {
   const id = w.nextId();
   w.writeLine({
@@ -329,52 +325,6 @@ function pushWeightQuantity(
   qtyIds.push(writeWeightQuantity(w, 'GrossWeight', volumeM3, densityKgM3));
 }
 
-export function writeWallBaseQuantities(
-  w: IfcWriter,
-  ownerHistoryId: number,
-  wallExpressId: number,
-  spec: WallSpec,
-  openings: readonly WallOpeningSpec[],
-  densityKgM3?: number
-): void {
-  const lengthM = toIfcLengthM(spec.length);
-  const widthM = toIfcLengthM(spec.thickness);
-  const heightM = toIfcLengthM(spec.height);
-  const grossFootprintM2 = lengthM * widthM;
-  const grossSideAreaM2 = lengthM * heightM;
-  const grossVolumeM3 = lengthM * widthM * heightM;
-
-  let sumOpeningAreaM2 = 0;
-  let sumFloorTouchingFootprintM2 = 0;
-  for (const op of openings) {
-    const opWidthM = toIfcLengthM(op.width);
-    const opHeightM = toIfcLengthM(op.height);
-    sumOpeningAreaM2 += opWidthM * opHeightM;
-    if (toIfcLengthM(op.offsetFromFloor) < FLOOR_TOUCH_EPSILON_M) {
-      sumFloorTouchingFootprintM2 += opWidthM * widthM;
-    }
-  }
-  const netSideAreaM2 = grossSideAreaM2 - sumOpeningAreaM2;
-  const netVolumeM3 = grossVolumeM3 - sumOpeningAreaM2 * widthM;
-  const netFootprintM2 = grossFootprintM2 - sumFloorTouchingFootprintM2;
-
-  const qtyIds = [
-    writeQtyLength(w, 'Length', lengthM),
-    writeQtyLength(w, 'Width', widthM),
-    writeQtyLength(w, 'Height', heightM),
-    writeQtyArea(w, 'GrossFootprintArea', grossFootprintM2),
-    writeQtyArea(w, 'NetFootprintArea', netFootprintM2),
-    writeQtyArea(w, 'GrossSideArea', grossSideAreaM2),
-    writeQtyArea(w, 'NetSideArea', netSideAreaM2),
-    writeQtyVolume(w, 'GrossVolume', grossVolumeM3),
-    writeQtyVolume(w, 'NetVolume', netVolumeM3),
-  ];
-  pushWeightQuantity(w, qtyIds, netVolumeM3, densityKgM3);
-
-  const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_WallBaseQuantities', qtyIds);
-  writeRelDefinesByProperties(w, ownerHistoryId, wallExpressId, qtoId);
-}
-
 export function writeExactWallBaseQuantities(
   w: IfcWriter,
   ownerHistoryId: number,
@@ -384,7 +334,8 @@ export function writeExactWallBaseQuantities(
     readonly widthM: number;
     readonly heightM: number;
     readonly netVolumeM3: number;
-  }
+  },
+  densityKgM3?: number
 ): void {
   const qtyIds = [
     writeQtyLength(w, 'Length', values.lengthM),
@@ -392,6 +343,9 @@ export function writeExactWallBaseQuantities(
     writeQtyLength(w, 'Height', values.heightM),
     writeQtyVolume(w, 'NetVolume', values.netVolumeM3),
   ];
+  if (densityKgM3 !== undefined && Number.isFinite(densityKgM3) && densityKgM3 > 0) {
+    qtyIds.push(writeWeightQuantity(w, 'NetWeight', values.netVolumeM3, densityKgM3));
+  }
   const qtoId = writeElementQuantity(w, ownerHistoryId, 'Qto_WallBaseQuantities', qtyIds);
   writeRelDefinesByProperties(w, ownerHistoryId, wallExpressId, qtoId);
 }
