@@ -1,168 +1,107 @@
-# Independent IFC validation
+# IFC validation and qualification
 
-brepjs-bim's internal validation (`toIfcValidated`, `checkSchema`) re-reads its own
-output with **web-ifc** — the same parser it writes with. That catches a lot, but it
-cannot catch bugs the writer and reader share. This document records validation by an
-**independent** implementation.
+## Existing checks and limitations
 
-## Toolchain
+This note separates checks implemented at upstream `4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466` from qualification proposed for the migration. Implementation evidence and historical results come from `andymai/brepjs`. The [evidence rules](docs/architecture-migration.md#evidence-and-maintenance) govern updates to these references.
 
-[**IfcOpenShell**](https://ifcopenshell.org/) (the engine behind BlenderBIM / Bonsai) is
-a separate C++/Python IFC implementation that shares no code with web-ifc. Passing its
-schema validator and geometry engine is a genuine cross-implementation check.
+The [internal schema check][schema-check] reopens exported bytes with web-ifc and inspects selected structure and GUIDs. The [round-trip check][round-trip] compares counts. Reusing the parser and comparing counts can miss invalid semantics or changed geometry. [`toIfcValidated`][validated-export] can also return bytes with post-save errors, so the presence of output alone does not establish a successful validation result.
+
+The [Python validator][python-validator] uses IfcOpenShell for parsing, EXPRESS validation with formal rules enabled, spatial-root checks, GUID checks, and shape generation. Its spatial checks assume a building model. It needs adaptation before it can qualify other facility profiles. Generating a shape establishes reconstruction for that product, not agreement with the authored shape.
+
+The [BIM CI job][bim-ci] pins an IDS conformance dataset and requires `TOTAL: 334/334 match`. This tests the IDS checker. It does not establish that a generated project satisfies a particular delivery IDS. That job does not run the Python validator or the complete normative-rule runner.
+
+## Historical upstream results
+
+The [upstream validation record][upstream-validation] reports an IFC4 sample-building pass using IfcOpenShell 0.8.5, with 77 unique GUIDs and geometry generated for 12 of 12 represented products. It also records normative-rule passes for three committed fixtures and earlier writer defects detected by independent validation.
+
+These are historical results reported in upstream documentation. This revision has not rerun them. They do not qualify newly generated output, every supported element, or another schema/profile. The same upstream record leaves receiving-application checks unverified.
 
 ## Reproduce
 
-```bash
-# 1. Generate the sample model (kernel + brepjs-bim required):
-node examples/sampleBuilding.mjs            # writes examples/sample-building.ifc
+Run the following from `packages/brepjs-bim` after building the required workspace packages and preparing the native kernel. Record the upstream source commit, generator inputs, runtime, and resolved dependency versions before comparing results. The commands below follow the pinned upstream tools; a qualification receipt must also retain the environment versions needed to repeat the run.
 
-# 2. Validate it with IfcOpenShell (independent of web-ifc):
-pip install ifcopenshell pytest              # Python 3.9–3.12; express-rule checks import pytest
-python scripts/validateIfc.py                # exit 0 = all gates pass
-```
+Generate fresh fixtures and run the independent validator:
 
-`scripts/validateIfc.py` runs five gates: parse + schema, `ifcopenshell.validate`
-(EXPRESS schema + where-rules), spatial-root presence, GlobalId validity/uniqueness, and
-geometry generation for every product with a representation.
-
-## The interop fixture
-
-`examples/interop-fixture.ifc` (generate: `node examples/interopFixture.mjs`) concentrates the
-geometry kinds most likely to break in desktop tools, where the sample building is the friendly
-baseline: gable / hip / dome roofs and a two-flight stair and posted railing (tessellated bodies),
-a curtain-wall panel grid, and circular + I-shape columns and beams (parametric profile defs).
-Validate it the same way:
-
-```bash
+```sh
+node examples/sampleBuilding.mjs
+node examples/interopFixture.mjs
+python scripts/validateIfc.py examples/sample-building.ifc
 python scripts/validateIfc.py examples/interop-fixture.ifc
 ```
 
-Its first run caught a real cross-implementation bug: `IfcTriangulatedFaceSet.Closed` was emitted
-as `.U.` (a raw JS boolean, serialized by web-ifc as UNKNOWN) on every tessellated body — web-ifc
-accepts it, IfcOpenShell's where-rules reject it. The writer now emits a typed `.T.`.
+The Python environment requires IfcOpenShell and pytest, as described in the [upstream validator][python-validator]. Keep validation of existing fixture bytes separate from validation of files regenerated by the candidate implementation. A historical fixture pass cannot substitute for a fresh export check.
 
-The first buildingSMART Validation Service run caught a second one, a level deeper: web-ifc prints
-integral-mantissa scientific reals without the decimal point ISO 10303-21 requires (`1E-05` in the
-representation context's precision), and both web-ifc and IfcOpenShell tolerate the invalid token
-while the official validator's strict STEP grammar rejects the whole file. The writer now
-normalizes bare reals post-save (`1.E-05`), with a regression test on the full export path.
+For normative rules, the [upstream setup script][gherkin-setup] provisions a pinned runner and documents its environment adjustments:
 
-The second service run reached the semantic layer and surfaced six more writer defects, all fixed:
-`IfcOwnerHistory.ChangeAction` claimed ADDED without a LastModifiedDate, the default `IfcPerson`
-carried no identification, every type object lacked the required `Name`, the curtain wall emitted
-a `CURTAIN_WALL` literal that `IfcCurtainWallTypeEnum` does not define, occurrences duplicated the
-`PredefinedType` their relating type already carried (OJT001 — the enum now rides the type object
-and the importer resolves it through `IfcRelDefinesByType`), and `Qto_*` element quantities omitted
-`MethodOfMeasurement='BaseQuantities'` (QTY001). `scripts/validateIfc.py` now runs IfcOpenShell
-with `express_rules=True`, which reproduces the service's entity-rule findings locally — the local
-gate is the QA loop, the service is confirmation.
-
-## The complete official rule catalog, locally
-
-`scripts/setupGherkinRunner.sh /path/to/workdir` builds a local instance of the exact rule engine
-behind the buildingSMART Validation Service (buildingSMART/ifc-gherkin-rules, pinned), then
-`run-gherkin.sh model.ifc` executes every normative rule — the full catalog of 100+ ALB/GEM/GRF/
-IFC/OJT/PJS/PSE/QTY/SPS/... features, not just the subset reimplemented below. All three committed
-fixtures pass it completely (950 scenarios, 0 failed, 0 undefined), including PSE001
-standard-property-set validation. The script documents the five environment fixes it applies
-(behave pin, sibling data model, two step-loading shims, a CSV-parser patch); none alter rule
-logic.
-
-## Gherkin-layer rules, locally
-
-`toIfcValidated` also runs local implementations of the Validation Service's gherkin normative
-rules that touch this writer's vocabulary: IFC102 (no deprecated IFC4 entities or attributes —
-stair-flight geometry lives in `Pset_StairFlightCommon`), QTY001 (every `Qto_*` set validated
-against the official `qto_definitions.csv`, generated into
-`src/validation/qtoDefinitions.generated.ts`), and GRF003 (a facility model warns unless
-`ProjectSpec.crs` declares a coordinate reference system, emitted as
-`IfcProjectedCRS` + `IfcMapConversion`).
-
-## IDS conformance
-
-The IDS 1.0 checker (`parseIdsXml` + `checkIdsData`) is validated against the complete official
-buildingSMART conformance suite — 334 of 334 test cases. Reproduce:
-
-```bash
-git clone --depth 1 https://github.com/buildingSMART/IDS /tmp/IDS
-npx tsx scripts/idsConformance.ts /tmp/IDS/Documentation/ImplementersDocumentation/TestCases
+```sh
+bash scripts/setupGherkinRunner.sh /path/to/validation-workdir
+/path/to/validation-workdir/run-gherkin.sh /absolute/path/to/model.ifc
 ```
 
-The audit layer validates documents against a schema table generated from IfcOpenShell's EXPRESS
-schemas (`scripts/generateIdsSchema.py` → `src/ids/idsSchema.generated.ts`, IFC2X3 + IFC4 + IFC4X3
-with per-schema masks).
+Record the runner revision, environment adjustments, applied rules, exclusions, and results. Verify that the selected catalog applies to the schema/profile being claimed.
 
-## External tool checklist
+For IDS checker conformance, provision the exact dataset revision selected by the [pinned CI workflow][bim-ci]. Set `IDS_SUITE_DIR` to its `Documentation/ImplementersDocumentation/TestCases` directory, then run:
 
-Manual gates for the 1.0 flip, run per tool against **both** fixtures
-(`examples/sample-building.ifc`, `examples/interop-fixture.ifc`). Record results below with date,
-tool version, and screenshots in `examples/interop-results/`.
-
-### buildingSMART Validation Service ([validate.buildingsmart.org](https://validate.buildingsmart.org))
-
-1. Sign in, upload both files.
-2. Wait for the report: syntax, schema, normative IA/IP rules, industry practices.
-3. Record: overall verdict per file + any rule ids flagged. Export the report PDF if offered.
-
-- [ ] sample-building.ifc — result:
-- [ ] interop-fixture.ifc — result:
-
-### Solibri Anywhere (free viewer)
-
-1. File → Open both IFC files.
-2. Check: every element visible (3 roofs, stair with 2 flights, curtain-wall grid, railing posts,
-   profiled columns/beams); no "geometry could not be created" warnings in the log.
-3. Pick two elements (a wall, the stair): confirm psets, material, and classification show in Info.
-4. Record: screenshot of the 3D view + the model tree.
-
-- [ ] sample-building.ifc — result:
-- [ ] interop-fixture.ifc — result:
-
-### Revit (trial, via IFC open)
-
-1. Open IFC (not link) both files in a blank project.
-2. Check: category mapping (walls→Walls, stair→Stairs, roofs→Roofs), no dropped elements in the
-   import log, storey/level structure intact.
-3. Record: screenshot of the 3D view + the import log summary.
-
-- [ ] sample-building.ifc — result:
-- [ ] interop-fixture.ifc — result:
-
-## Result
-
-The committed fixture `examples/sample-building.ifc` — a two-storey office with walls,
-a window, a door, floor slabs, columns, materials, psets, quantities and a Uniclass
-classification — passes cleanly:
-
-```
-IfcOpenShell 0.8.5
-[1] Parsed OK — schema IFC4
-[2] Schema validation: PASS (no EXPRESS / where-rule violations)
-[3] Spatial structure: 1 project, 1 site, 1 building, 2 storey(s)
-[4] GlobalIds: 77 unique, 0 malformed
-[5] Geometry: 12/12 products generated a shape
-
-RESULT: PASS — independently validated by IfcOpenShell
+```sh
+npx tsx scripts/idsConformance.ts "$IDS_SUITE_DIR"
 ```
 
-## Bugs this caught
+The expected `334/334` result belongs to that dataset revision. A different revision requires a reviewed expectation; do not combine a moving clone with a fixed historical count. Separately check each exported project against its chosen IDS and retain the IDS identity with the result.
 
-Two non-conformances were invisible to the web-ifc self-check and only surfaced under
-IfcOpenShell — both now fixed and regression-tested:
+## Proposed exchange qualification
 
-1. **IFC GlobalId encoding.** The 128-bit GUID was base64-packed without the 4-bit front
-   padding the buildingSMART encoding requires, so the first character could exceed the
-   legal `0–3` range. Fixed in `identity/ifcGuid.ts` (now bit-identical to the canonical
-   compression); guarded by `tests/ifcGuid.test.ts`.
-2. **STEP `FILE_NAME` header.** web-ifc emits null `author` / `organization` /
-   `authorization` fields, which violate the ISO 10303-21 `LIST [1:?] OF STRING` / `STRING`
-   types. The writer now rewrites them to conformant, attributed values; guarded by
-   `tests/ifcWriterHeader.test.ts`.
+**Status: Deferred under [ADR-0006](docs/adr/0006-ifc-exchange-adapter.md), for re-review in migration step 4.**
 
-## Not yet covered
+Keep existing IDS conformance and local IfcOpenShell checks during the initial Body and Placement work. The broader procedure below is a proposed acceptance requirement for later exchange work. It does not claim that all checks already run in CI.
 
-- Round-tripping through desktop authoring tools (Revit, ArchiCAD, Solibri) is unverified;
-  the per-tool checklists above are the remaining manual gate.
-- Validation covers the elements exercised by the sample; element types not present in
-  `examples/sampleBuilding.mjs` are covered only by the internal suite.
+Maintain one matrix entry for each claimed schema release and exchange profile. List
+facility kinds, entity/type/predefined-value combinations, relationship kinds,
+property scopes, external classification forms, and geometry representations covered.
+Record reader recognition, implemented import, implemented export, and independent
+qualification separately. Do not infer one state from another or qualify untested
+combinations by association with a passing sample.
+
+For each entry, generate fresh bytes from the candidate implementation and run:
+
+| Check                                  | Required evidence                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime export checks                  | All required checks pass and all requested supported content is emitted. No error-level validation or writer diagnostics.                                                                                                                                                                                                            |
+| Independent syntax and schema          | Strict STEP syntax plus EXPRESS attribute, enum, cardinality, and formal-rule checks. Use `scripts/validateIfc.py` with its `express_rules=True` path for the existing IfcOpenShell checks; retain a separate strict syntax check. Its current building-oriented spatial checks require adaptation before qualifying civil profiles. |
+| Normative rules and industry practices | Run the rule catalog provisioned by the upstream setup script for applicable schemas. Record the rule revision, applied rules, exclusions with reasons, and every finding. Resolve failures and record the disposition of non-normative findings.                                                                                    |
+| Project information requirements       | Check the file against the chosen IDS and record that IDS's identity. The official IDS checker conformance suite tests the checker; it does not establish that an exported project satisfies its own requirements.                                                                                                                   |
+| Semantic preservation                  | Independently read emitted identities, types and memberships, properties and origins, classifications and scopes, materials, and relationship endpoints. Compare them to the authored expectations and the public imported read model. Equal counts alone do not pass.                                                               |
+| Geometry fidelity                      | Assert expected subject/item coverage, then check reconstruction, placements, units, openings, bounds, occupied material and sampled surfaces within documented tolerances. Merely generating a shape is insufficient to establish fidelity.                                                                                         |
+| Receiving applications                 | For each claimed application/version and import workflow, record retained semantics, geometry, diagnostics, and evidence. Qualify IFC generated by consumers of the packed package before release.                                                                                                                                   |
+
+Use the [migration fixtures](docs/architecture-migration.md#ifc-semantic-preservation-and-qualification)
+for positive and negative cases. A missing check, zero-subject run, or permissive
+re-open must not become a successful qualification result. External validation can
+run locally in CI; this procedure requires no automatic upload of project files.
+
+Retain a receipt with the source commit, package artifact identity, fixture/generator
+identity, IFC SHA-256, declared schema/profile, runtime and validator versions, rule
+and IDS revisions, exact commands, expected and observed subject counts, tolerances,
+diagnostics, and report locations. Each check records pass, fail, unrun, unavailable,
+or not applicable with a reason. Failed, unrun, or unavailable required checks block
+the corresponding qualification claim; scoped passes do not qualify other profiles.
+
+## Receiving-application checks
+
+Receiving-application results remain unverified in the pinned upstream record. For each application/version claimed by a release, test fresh sample-building and interop fixtures through the declared import workflow. The [upstream fixture generator][interop-generator] exercises roofs, flights, posted railing, curtain-wall children, and profiled members; record the expected products before import.
+
+Inspect geometry and the model tree, then compare element and type identities, property scopes, materials, classifications, hierarchy, and Placement. Retain import diagnostics and screenshots or reports. A visible model alone is insufficient. Solibri viewing and Revit IFC opening are different workflows and require separate receipts. Do not infer support for another application or version from either result.
+
+## Related
+
+- [ADR-0006: Exchange contract and failure behavior](docs/adr/0006-ifc-exchange-adapter.md)
+- [ADR-0007: Import completeness and fidelity](docs/adr/0007-ifc-import-fidelity-and-item-outcomes.md)
+- [Migration acceptance scenarios](docs/architecture-migration.md#acceptance-scenarios)
+
+[schema-check]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/validation/schemaCheck.ts#L25
+[round-trip]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/validation/roundTrip.ts#L12
+[validated-export]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/serialize/toIfc.ts#L1278
+[python-validator]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/scripts/validateIfc.py#L47
+[bim-ci]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/.github/workflows/ci.yml#L286
+[upstream-validation]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/VALIDATION.md
+[gherkin-setup]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/scripts/setupGherkinRunner.sh
+[interop-generator]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/examples/interopFixture.mjs
