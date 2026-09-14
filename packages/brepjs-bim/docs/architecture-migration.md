@@ -60,7 +60,7 @@ These step-4 review drafts cover [ADR-0006](adr/0006-ifc-exchange-adapter.md), [
 | Failed geometry with retained semantic data                             | Source identity, supported type membership, property scopes, classifications, and relationships remain inspectable. Geometry failure does not erase semantics; unsupported semantic data has explicit outcomes and is not counted as preserved.                                              |
 | Missing validation or unchanged counts despite changed meaning          | Changing a classification, type membership, or property must fail semantic comparison even if entity counts match. Failed, unavailable, or unrun required checks prevent qualification. A successful internal re-open cannot override that result.                                           |
 
-After step-4 review accepts the qualification scope, CI generates new bytes from the candidate implementation for each claimed schema/profile and runs independent STEP syntax, EXPRESS, applicable normative rules, project IDS requirements, semantic comparisons, and geometry checks. Assert the expected subject coverage so an empty model or zero reconstructed products cannot pass accidentally. Keep geometry tolerances and all-item checks from the existing scenarios. Use [VALIDATION.md](../VALIDATION.md#proposed-exchange-qualification) for the matrix, commands, tool versions, and qualification receipt.
+After step-4 review accepts the qualification scope, CI generates new bytes from the candidate implementation for each claimed schema/profile and runs independent STEP syntax, EXPRESS, applicable normative rules, project IDS requirements, semantic comparisons, and geometry checks. Assert the expected subject coverage so an empty model or zero reconstructed products cannot pass accidentally. Keep geometry tolerances and all-item checks from the existing scenarios. Use the [proposed exchange qualification procedure](exchange-qualification.md) for the acceptance matrix and receipt. [VALIDATION.md](../VALIDATION.md) retains the existing upstream validation record and tool instructions.
 
 ## Migration order
 
@@ -108,7 +108,7 @@ The acceptance scenarios are future implementation gates. This documentation rev
 
 ## Evidence and maintenance
 
-Implementation evidence comes only from `andymai/brepjs`. Earlier upstream commits and closed upstream PRs remain valid historical sources. Describe external work, including IfcSign, as an external experiment without quoting its code, measurements, or review as upstream evidence.
+Implementation evidence cited by this architecture proposal comes only from `andymai/brepjs`. Existing upstream documents, including `VALIDATION.md`, retain their own references and are not rewritten to apply this proposal's citation policy. Earlier upstream commits and closed upstream PRs remain valid historical sources. Describe external work, including IfcSign, as an external experiment without quoting its code, measurements, or review as upstream evidence.
 
 | Reference                                 | Use and maintenance                                                                                                                                                                                               |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
