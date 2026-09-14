@@ -2,13 +2,17 @@
 
 **Status**: Proposed
 **Date**: 2026-09-10
-**Authors**: Viktar, with Codex
+**Authors**: viktar-b
 
 ## Context
 
-The [reviewed source](../architecture-evidence.md#reconciliation-of-the-original-eight-concerns) still requires an optional caller-supplied `parentFrame` for World geometry, dispatches Placement by class, and recovers Datum through `Translate`/`Rotate` wrappers with zero defaults. Earlier fixes for #2259 and #2270 remain resolved; these broader limitations survive them.
+At upstream `4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466`, [World geometry queries][placement] depend on a caller-supplied optional `parentFrame` and dispatch by class. The operation cannot resolve a document's full ancestor chain from the element alone. Callers must carry hierarchy knowledge into geometry queries, which makes a missing frame difficult to distinguish from an intentional local-space query.
 
-The accepted direction separates Placement from Classification and Geometry representation, resolves rigid frames first, retains unsupported reference intent, and consumes rotation pivots in authored order. This record preserves those decisions and proposes the complete document/query contract using the [BIM glossary](../../CONTEXT.md).
+[Datum recovery][datum-recovery] inspects `Translate` and `Rotate` wrappers and falls back to zero for unexpected structures. This ties reference placement to how geometry was constructed. A generator can change its wrapper structure without changing the intended physical element, yet the adapter still needs to recognize that structure.
+
+Upstream fixes [#2260](https://github.com/andymai/brepjs/pull/2260), [#2271](https://github.com/andymai/brepjs/pull/2271), and [#2273](https://github.com/andymai/brepjs/pull/2273) provide Placement and reconstruction regressions that must survive the migration. The remaining architectural work is document-owned frame resolution and explicit coordinate spaces.
+
+The [BIM glossary](../../CONTEXT.md) defines independent Placement and Datum. The initial implementation resolves rigid `LOCAL_FRAME` chains, retains unsupported reference intent, and consumes rotation pivots in authored order. The document contract below specifies reparenting, deletion, and query behavior so callers no longer reconstruct those rules independently.
 
 ## Decision
 
@@ -38,7 +42,7 @@ Deleting a record fails with a typed error identifying its dependants while it r
 
 Placement changes and deletion validate the proposed state before committing. Missing parents, cycles, invalid frames, illegal relationships, and unsupported operations leave the previous graph, Placement definitions, and retained geometry unchanged. Subsequent queries see the complete committed change, including affected descendants, with no stale resolved frames. Previously returned frame snapshots remain unchanged.
 
-Families resolution exposes Placement and tagged local geometry independently. Tagged World geometry can be cloned and inverse-localized once. Reject untagged input. Remove wrapper inference and zero recovery. A temporary migration shim must fail on unexpected structures, preserve #2270 regressions, and disappear at the Families cutover.
+Families resolution exposes Placement and tagged local geometry independently. Tagged World geometry can be cloned and inverse-localized once. Reject untagged input. Remove wrapper inference and zero recovery at the step-5 Families cutover. Until then, the temporary internal adapter must fail on unexpected structures and preserve #2270 regressions. It supports the staged migration, does not preserve retired public APIs, and must disappear at that cutover.
 
 IFC tessellates in the physical element's local frame, encodes Placement separately, and converts units once. Local coordinates reduce avoidable precision loss but do not guarantee planar or closed meshes.
 
@@ -55,14 +59,15 @@ Public-interface acceptance also resolves frames for a physical element, a spati
 - Bodyless records expose the same frame queries and Placement changes as geometry-bearing records.
 - Geometry construction can change without changing Datum recovery.
 
-### Negative / Trade-offs
+### Costs and risks
 
 - Existing callers must supply explicit coordinate-space information.
+- The document takes responsibility for graph validation and fresh descendant queries after every committed change. Deep-chain query costs require measurement before choosing a cache.
 - Reparenting requires an explicit preservation policy, and parent deletion requires callers to handle dependants first.
 - Reference-based Placement remains unsupported for some operations initially.
 - Local tessellation still needs native and exchange precision qualification.
 
-## Alternatives Considered
+## Alternatives considered
 
 ### Require callers to compose parent frames
 
@@ -83,3 +88,6 @@ This discards explicit local frames and exposes thin geometry to avoidable coord
 - [ADR-0006: IFC coordinate and unit encoding](0006-ifc-exchange-adapter.md)
 - Repository [#2259](https://github.com/andymai/brepjs/issues/2259), [#2270](https://github.com/andymai/brepjs/issues/2270), and [#2273](https://github.com/andymai/brepjs/pull/2273)
 - [Placement and precision acceptance scenarios](../architecture-migration.md#acceptance-scenarios)
+
+[placement]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/elementFns/placedGeometry.ts#L48
+[datum-recovery]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/familiesAdapter.ts#L967

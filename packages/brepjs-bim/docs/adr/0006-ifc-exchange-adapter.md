@@ -1,16 +1,26 @@
 # ADR-0006: Keep IFC exchange behind an adapter
 
-**Status**: Proposed
+**Status**: Deferred
 **Date**: 2026-09-10
-**Authors**: Viktar, with Codex
+**Authors**: viktar-b
+
+Re-review in migration step 4. Keep existing IDS conformance in CI and local IfcOpenShell validation running throughout the migration. The broader qualification requirements in this Deferred draft do not block the initial Body and Placement scope.
 
 ## Context
 
-The [reviewed source](../architecture-evidence.md#reconciliation-of-the-original-eight-concerns) mixes semantic class loops, representation encoding, and selective style application. Error-level runtime diagnostics and foreign-object declaration mismatches have also been reported by third-party projects.
+At upstream `4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466`, [serialization][export-scope] combines semantic class loops, representation encoding, and [selective style application][styles]. The posted parametric Railing path does not provide the common style pass with every generated target. New representations therefore require changes in several parts of the serializer to receive consistent encoding and appearance.
 
-Cleanup already exists. `toIfc` scopes its writer with `using`, and `save` closes its model in `finally`. An unconditional pre-save leak claim is outdated; neither diagnostics nor declaration mismatches establish measured heap growth.
+Cleanup already exists at that revision. `toIfc` scopes its writer with `using`, and [`save`][writer-lifecycle] closes its model in `finally`. The migration must preserve those scopes and cover failures introduced by new preflight and item traversal. The cited source does not establish a native memory leak.
 
-The neutral document needs an exchange adapter that owns IFC-specific policy without replacing authored geometry or defining neutral Placement types.
+### Existing validation and its limits
+
+[`checkSchema`][ifc-schema-check] reopens bytes and checks selected structure and GUIDs; [round-trip validation][ifc-roundtrip] compares counts. [`toIfcValidated`][ifc-validated-export] can return bytes alongside post-save errors. These checks cannot by themselves establish semantic preservation or geometry fidelity.
+
+The [Python validator][ifc-independent-script] enables EXPRESS rules and geometry generation. The [BIM CI job][ifc-ci] requires the pinned 334-case IDS checker conformance output, but does not invoke that Python validator or the complete normative-rule runner. Checker conformance and validation of an exported project are different claims.
+
+The [upstream validation record][upstream-validation] documents fixture-level results and receiving-application gaps. Those historical results qualify neither a new implementation nor untested schemas and profiles. [VALIDATION.md](../../VALIDATION.md) separates existing checks, fresh-run procedures, and the proposed qualification contract. This documentation revision runs no IFC or native geometry tests.
+
+The proposed adapter makes exchange policy and failure reporting explicit while retaining existing validation. That separation adds integration work and a larger qualification matrix; it does not provide broader IFC support merely by moving code.
 
 ## Decision
 
@@ -24,7 +34,7 @@ The adapter encodes the type definitions, property scopes, and external classifi
 
 Representation encoding operates independently of Classification. It borrows retained geometry and preflights every item into plain serializable data before committing its owning representation. One retained Body item becomes one IFC Body representation item. Measurement unions are temporary and are never exported. Unsupported typed intent cannot silently become Proxy.
 
-Schedule contexts, containers, physical elements, relationships, types, appearances, and quantities in dependency order. Encoding returns every styleable target, including generated and composite geometry. The common writer applies the physical element's optional appearance to all of them and creates no synthetic style for unstyled elements.
+Schedule contexts, containers, physical elements, relationships, types, appearances, and quantities in dependency order. Encoding returns every styleable target for a physical element's Body, including multi-item recipe Bodies. Assembly children are separate physical elements and use their own Bodies, Placements, and appearance assignments. The common writer applies each physical element's optional appearance to all of its targets and creates no synthetic style for unstyled elements. A `NONE` assembly has no Body style target of its own.
 
 Neutral lengths use millimetres, areas mm², and volumes mm³. Convert geometry, Placement, and quantities exactly once at the IFC boundary. Tessellate in the physical element's local frame and encode its Placement separately. Geographic CRS/map conversion is distinct from the document's World frame. Configurable output units remain separate work.
 
@@ -46,14 +56,14 @@ Acceptance also requires failed later-item writes that return no successful arti
 - Export preserves authored items and keeps document ownership intact.
 - Runtime failures have a defined result and cleanup owner.
 
-### Negative / Trade-offs
+### Costs and risks
 
 - Preflight requires temporary memory and delays representation commit.
 - Backend-specific cleanup and diagnostic behavior need native qualification.
 - New semantic classes still require schema mappings and focused exchange tests.
 - Independent qualification needs pinned tools, fresh fixtures, and explicit results for each claimed exchange profile.
 
-## Alternatives Considered
+## Alternatives considered
 
 ### Keep IFC types and runtime behavior in the document
 
@@ -73,5 +83,14 @@ This conceals incomplete exchange as success and prevents callers from assessing
 - [ADR-0001: Dependency direction](0001-independent-product-representation-and-placement.md)
 - [ADR-0003: Borrowing and material measurement](0003-geometry-ownership-and-material-operations.md), [ADR-0004: Coordinates](0004-document-resolved-placement-and-datum.md)
 - [ADR-0007: Import outcomes](0007-ifc-import-fidelity-and-item-outcomes.md), [ADR-0008: Metadata, type identity, and appearance](0008-explicit-bim-type-identity.md)
-- [Runtime evidence](../architecture-evidence.md), [exchange acceptance scenarios](../architecture-migration.md#acceptance-scenarios)
-- [buildingSMART validation layers](https://technical.buildingsmart.org/services/validation-service/), [IDS information requirements](https://www.buildingsmart.org/standards/bsi-standards/information-delivery-specification-ids/)
+- [Exchange acceptance scenarios](../architecture-migration.md#acceptance-scenarios)
+
+[styles]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/serialize/toIfc.ts#L839
+[writer-lifecycle]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/ifc-writer/ifcWriter.ts#L100
+[export-scope]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/serialize/toIfc.ts#L205
+[ifc-schema-check]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/validation/schemaCheck.ts#L25
+[ifc-roundtrip]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/validation/roundTrip.ts#L12
+[ifc-validated-export]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/src/serialize/toIfc.ts#L1278
+[ifc-independent-script]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/scripts/validateIfc.py#L47
+[ifc-ci]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/.github/workflows/ci.yml#L286
+[upstream-validation]: https://github.com/andymai/brepjs/blob/4602096ebc3c9ea0263d5b2a1b7d3b6dee24c466/packages/brepjs-bim/VALIDATION.md

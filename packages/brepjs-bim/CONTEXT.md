@@ -1,42 +1,53 @@
 # BIM domain
 
-Families describe parameterized geometry, composition, and optional domain meaning. A BIM adapter projects supported authored elements into a model; IFC export serializes its geometry, placement, semantic entities, and relationships. Families also support geometry authoring and preview independently of IFC, and a viewer mesh is not a required export intermediate.
+This page defines the proposed domain model in [ADR-0001](docs/adr/0001-independent-product-representation-and-placement.md) through [ADR-0004](docs/adr/0004-document-resolved-placement-and-datum.md). Those ADRs remain Proposed. The contracts below are implementation requirements, not a description of uniform support in the existing API.
 
-## Language
+At the [upstream revision examined in ADR-0001](docs/adr/0001-independent-product-representation-and-placement.md#context), geometry lifecycle and Placement still depend on class-specific dispatch. Authored Body adoption is limited to Wall and Railing, and callers participate in resolving parent frames. These constraints make a new classification or arbitrary authored shape require changes across several modules. The refactor moves those responsibilities into shared Body operations and the document.
 
-**Family definition**:
-A reusable, parameterized authoring description of geometry, composition, and optional domain meaning. Reusing a Family definition or its geometry does not establish a shared BIM type.
-_Example_: [Column](../brepjs-families/registry/families/column.ts) in the [Family registry](../brepjs-families/registry/families/) describes columns with different profiles and heights.
+## The model
 
-**Family invocation**:
-One use of a Family definition with supplied parameters and authoring context. It may describe a physical element, a container, or supporting geometry; nested helpers do not automatically create additional physical elements.
-_Example_: A Column invocation describes a particular column; a [Storey](../brepjs-families/registry/families/storey.ts) invocation describes a spatial container.
+A **Physical element** is one identifiable physical thing, planned or built, such as column C-01 or a particular stair. Its identity survives changes to shape and location.
 
-**Physical element**:
-One identifiable physical thing represented in a model, planned or built, such as column C-01 or a particular arch segment. Its Classification, Geometry representation, and Placement are independent aspects of that same thing.
-_Scope_: Physical elements are one kind of model record. The model also contains spatial containers, openings, and positioning references.
-_Avoid_: Product, Product occurrence.
+Each Physical element has three independent aspects:
 
-**Classification**:
-What kind of physical element something is, including its class and role, such as a member serving as an arch segment. Classification does not follow from the Family name or the shape of its Body.
-_Scope_: References to classification systems are separate assignments.
+| Term                    | Meaning                                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Classification          | What kind of element it is, including its class and role. Shape and Family names do not determine Classification. External classification-system references are separate assignments. |
+| Geometry representation | `BODY` holds its material shape. `NONE` records intentional absence with a reason. Failed geometry is an error, not `NONE`.                                                           |
+| Placement               | Its position and orientation relative to its placement parent, or authored reference intent used to resolve them.                                                                     |
 
-**BIM type definition**:
-An explicitly identified definition of shared semantic data for physical elements. Elements reference it while retaining their own identity and occurrence-specific data. Reusing a Family definition, name, Classification, or geometry does not establish a shared BIM type.
+The **document** owns records, identity, relationships, Placement definitions, and adopted geometry. It also holds spatial containers, openings, and positioning references. It validates changes before committing them and resolves the full Placement chain itself.
 
-**External classification association**:
-An assignment of a classification-system reference to a physical element or BIM type definition. References retain supplied system identity, edition, code, URI, and parent references. Multiple associations may coexist. This is separate from the model's Classification and from type membership, containment, decomposition, or Placement parenting.
+## Body and ownership
 
-**Geometry representation**:
-How geometry is described: a stored Body, generated geometry, a composition of representations, or an intentional absence of geometry. Physical elements with different classifications can use the same representation.
+A **Body** is a nonempty collection of solid items in the Physical element's local frame. Items may be disconnected or overlap. IFC Body representations can also contain geometry outside this solid-only contract.
 
-**Body**:
-The material shape of a physical element, described by one or more solid items that may be disconnected or overlap. A Body may be authored directly or generated by a recipe; this provenance and its item count do not determine its authority.
-_Scope_: This model's Body requires solid items. IFC Body representations may also describe surfaces or wireframes and do not necessarily meet this contract.
-_Rule_: An explicitly authored Body governs the material shape; conversion to recipe authority requires an explicit caller request.
+Authority, provenance, and item count are independent. `AUTHORITATIVE` retains authored items as the governing shape; `PARAMETRIC` gives that authority to an authoring recipe. Either may have one or many items. Geometry generated by a Family can be authoritative. Conversion to recipe authority requires an explicit caller request.
 
-**Placement**:
-The position and orientation of a physical element or container relative to its placement parent, or the reference-based intent used to resolve them. Local coordinates use that element's or container's frame; World coordinates use the model's common frame after the complete parent chain is resolved.
+Queries and export use the retained items. Recipe changes replace them through an explicit authoring command.
 
-**Datum**:
-The explicit reference convention for Body-local geometry, such as the center of a column's base profile. It is defined independently of the recipe used to build the Body; Placement locates that geometry in the model.
+Any supported Classification using `BODY` accepts authored items directly, without first building a disposable parametric candidate. A shaped Roof therefore needs no rectangular roof recipe.
+
+One Body module handles validation, adoption, borrowing, copying, transforms, measurement, and disposal across classifications. Successful adoption transfers ownership to the document; failure leaves caller items live and the document unchanged. Borrowers do not dispose retained items. Material volume is occupied union; item-volume sums are diagnostic only. Failed measurement must not become zero.
+
+## Placement, Datum, and assemblies
+
+Physical elements, containers, and bodyless assemblies use the same frame queries. Queries name own-local, another record's local frame, or World. The document resolves the complete ancestor chain for World; callers do not supply an optional `parentFrame`.
+
+A **Datum** is the reference convention expressed in Body-local coordinates, such as the centre of a column's base. It is independent of the recipe and adds no extra executable placement. Moving an element preserves its local Body and Datum.
+
+The initial scope resolves `LOCAL_FRAME`. Unsupported grid or linear resolution retains reference intent and returns an explicit error. Reparenting requires `KEEP_LOCAL` or `KEEP_WORLD`, with no default. Deletion fails while dependants exist, without cascading. Invalid changes leave the document unchanged.
+
+Containment, assembly decomposition, and Placement parenting are separate relationships. A curtain-wall assembly has `NONE` and Plate/Member children with their own Bodies and Placements. Decomposition alone does not move children. Stair and ramp flights can instead form one multi-item Body. Neither case needs another representation variant.
+
+## Package boundaries
+
+Authoring validates recipes, generates local geometry, and changes the document through commands. IFC owns schema mappings and exchange. Shared Body and Placement operations depend on neither IFC classes nor Families runtime types.
+
+A **Family definition** describes reusable parameterized geometry, composition, and optional domain meaning. A **Family invocation** is one use with supplied parameters and context. Families remain useful independently for geometry authoring and preview. Helper nesting does not automatically create Physical elements, and Family reuse does not establish a shared BIM type.
+
+Families projection, broader IFC exchange/import contracts, and detailed type, metadata, and appearance models remain Deferred under ADR-0005 through ADR-0008. Preserve existing identity, metadata, and relationships during the initial refactor.
+
+The [migration note](docs/architecture-migration.md#migration-order) owns the implementation order, the extension checks, and the later ADR review points. Extending the existing `ProductBody` is the starting point. Migrating its consumers, enforcing ownership, and qualifying exchange behavior remain necessary work; introducing a shared type alone does not establish those guarantees.
+
+Source observations and rationale belong in each ADR's Context. The [evidence rules](docs/architecture-migration.md#evidence-and-maintenance) require pinned upstream source for implementation claims and keep historical results separate from proposed contracts. Update this glossary when an accepted domain contract changes, rather than copying branch status or experiment results into it.
