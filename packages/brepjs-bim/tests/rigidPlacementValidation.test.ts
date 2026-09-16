@@ -1,6 +1,7 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { unwrap, measureVolume } from 'brepjs';
 import { getKernel } from '@/kernel/index.js';
+import { initKernel } from '../../../tests/setup.js';
 import { BimModel } from '../src/model/bimModel.js';
 import { placedSolids } from '../src/elementFns/placedGeometry.js';
 import { el, family, resolve, tRotate, type Element } from 'brepjs-families';
@@ -9,6 +10,10 @@ import { familiesToBim } from '../src/familiesAdapter.js';
 import { toIfc } from '../src/serialize/toIfc.js';
 import { SpfReader } from '../src/import/spfReader.js';
 import { composeWorldPlacement } from '../src/import/placement.js';
+
+beforeAll(async () => {
+  await initKernel();
+}, 30000);
 
 afterEach(() => vi.restoreAllMocks());
 

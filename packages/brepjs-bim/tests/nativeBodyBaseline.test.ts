@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { box, DisposalScope, fuseAll, getBounds, measureVolume, unwrap } from 'brepjs';
-import { currentKernel } from '../../../tests/setup.js';
+import { currentKernel, initKernel } from '../../../tests/setup.js';
 import { BimModel } from '../src/model/bimModel.js';
 import {
   placedSolids,
@@ -8,6 +8,10 @@ import {
 } from '../src/elementFns/placedGeometry.js';
 import { createOverlapFixture } from './helpers/nativeBodyFixture.js';
 import { nativeShapeCount } from './helpers/nativeArena.js';
+
+beforeAll(async () => {
+  await initKernel();
+}, 30000);
 
 afterEach(() => {
   setPlacedGeometryTestHooksForTesting(null);

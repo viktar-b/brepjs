@@ -1,11 +1,15 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { box, DisposalScope, getFaces, measureVolume, unwrap } from 'brepjs';
 import { getKernel } from '@/kernel/index.js';
 import { isOcctWasmHandle } from '@/kernel/occtWasm/helpers.js';
 import { OcctWasmAdapter } from '@/kernel/occtWasm/occtWasmAdapter.js';
-import { currentKernel } from '../../../tests/setup.js';
+import { currentKernel, initKernel } from '../../../tests/setup.js';
 import { createOverlapFixture } from './helpers/nativeBodyFixture.js';
 import { nativeShapeCount } from './helpers/nativeArena.js';
+
+beforeAll(async () => {
+  await initKernel();
+}, 30000);
 
 afterEach(() => vi.restoreAllMocks());
 

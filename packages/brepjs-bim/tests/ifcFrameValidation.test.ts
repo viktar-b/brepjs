@@ -1,10 +1,15 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { getBounds, unwrap } from 'brepjs';
 import { getKernel } from '@/kernel/index.js';
+import { initKernel } from '../../../tests/setup.js';
 import { readBodyItems } from '../src/import/geometryRead.js';
 import type { ValidationIssue } from '../src/validation/severity.js';
 import { SpfReader } from '../src/import/spfReader.js';
 import { composeWorldPlacement, readAxis2Placement3D } from '../src/import/placement.js';
+
+beforeAll(async () => {
+  await initKernel();
+}, 30000);
 
 afterEach(() => vi.restoreAllMocks());
 async function readerFor({
