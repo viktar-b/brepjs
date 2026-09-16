@@ -2,12 +2,14 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { measureVolumeProps, isValidSolid, unwrap, box } from 'brepjs';
 import { initKernel } from '../../../tests/setup.js';
 import { BimModel } from '../src/model/bimModel.js';
-import { placementToMatrix } from '../src/import/placement.js';
+import { frameFromPlacement, frameToMatrix } from '../src/placementFrame.js';
 import { placedSolids } from '../src/elementFns/placedGeometry.js';
 
-describe('placementToMatrix', () => {
+describe('frameToMatrix', () => {
   it('identity frame → identity linear + given origin', () => {
-    const m = placementToMatrix({ origin: [10, 20, 30], axisX: [1, 0, 0], axisZ: [0, 0, 1] });
+    const m = frameToMatrix(
+      unwrap(frameFromPlacement({ origin: [10, 20, 30], axisX: [1, 0, 0], axisZ: [0, 0, 1] }))
+    );
     expect(m.linear).toEqual([1, 0, 0, 0, 1, 0, 0, 0, 1]);
     expect(m.translation).toEqual([10, 20, 30]);
   });
@@ -15,7 +17,9 @@ describe('placementToMatrix', () => {
   it('90° about Z (axisX=+Y) puts the X basis vector in column 0 (row-major)', () => {
     // linear is row-major [Xx,Yx,Zx, Xy,Yy,Zy, Xz,Yz,Zz]; with axisX=(0,1,0) the
     // X column is (0,1,0) → linear[0]=0, linear[3]=1, linear[6]=0.
-    const m = placementToMatrix({ origin: [0, 0, 0], axisX: [0, 1, 0], axisZ: [0, 0, 1] });
+    const m = frameToMatrix(
+      unwrap(frameFromPlacement({ origin: [0, 0, 0], axisX: [0, 1, 0], axisZ: [0, 0, 1] }))
+    );
     expect(m.linear[0]).toBeCloseTo(0);
     expect(m.linear[3]).toBeCloseTo(1);
     expect(m.linear[6]).toBeCloseTo(0);
