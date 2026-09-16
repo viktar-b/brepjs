@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.nativeBaseline.json",
+  "include": [
+    "tests/setup.ts",
+    "tests/modelOwnership.test.ts",
+    "tests/modelOwnershipCoverage.test.ts",
+    "tests/modelRetirement.test.ts",
+    "tests/railingOwnership.test.ts",
+    "tests/modelGenerationFailures.test.ts",
+    "tests/modelTemporaryCleanup.test.ts",
+    "tests/geometryCleanupDiagnostics.test.ts"
+  ]
+}

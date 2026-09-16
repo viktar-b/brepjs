@@ -1,5 +1,6 @@
 export {
   BimModel,
+  type BodyCommitReceipt,
   type ElementIdentityOptions,
   type OpeningIdentityOptions,
 } from './model/bimModel.js';
