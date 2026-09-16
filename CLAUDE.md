@@ -121,3 +121,17 @@ For adding a new operation or kernel method, see `.claude/commands/`.
 - Arena-leak tests use occt-wasm's `getShapeCount()` oracle (`tests/wasmArenaDisposal.test.ts`, occt-wasm-gated). It counts the **whole arena**, so an undisposed intermediate in the _test itself_ reads as a false leak in the code under test — `using`-dispose every intermediate in a probe. JS-side `getDisposalStats().liveHandles` is blind to orphaned pre-downcast slots; don't rely on it for arena leaks.
 - `noUncheckedIndexedAccess` is enabled: array indexing returns `T | undefined`, add bounds checks or use `!` with eslint-disable
 - `exactOptionalPropertyTypes` is enabled: `undefined` and missing are distinct; use `prop?: T | undefined` in optional fields
+
+## Agent skills
+
+### Issue tracker
+
+For specs, tickets, and issue updates, use local Markdown under `.scratch/<feature>/`. Read [the tracker conventions](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+For triage status changes, use the five default roles in [the label mapping](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Before domain exploration, read [the multi-context documentation rules](docs/agents/domain.md) and follow [the context map](CONTEXT-MAP.md).
