@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   box,
   DisposalScope,
@@ -24,7 +24,11 @@ import { geometryError } from '../src/errors/bimError.js';
 import { setProductBodyTestHooksForTesting } from '../src/productBodyTestHooks.js';
 import { nativeShapeCount } from './helpers/nativeArena.js';
 import { createOverlapFixture } from './helpers/nativeBodyFixture.js';
-import { currentKernel } from '../../../tests/setup.js';
+import { currentKernel, initKernel } from '../../../tests/setup.js';
+
+beforeAll(async () => {
+  await initKernel();
+}, 30000);
 
 const arena = () => (currentKernel === 'occt-wasm' ? nativeShapeCount() : null);
 function expectArena(expected: number | null) {

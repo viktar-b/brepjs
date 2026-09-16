@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { box, getFaces, getKernel, measureVolume, tagFaces, unwrap } from 'brepjs';
 import {
   copyProductBody,
@@ -7,8 +7,12 @@ import {
   validateProductBody,
 } from '../src/types/productBody.js';
 import { IDENTITY_FRAME } from '../src/placementFrame.js';
-import { currentKernel } from '../../../tests/setup.js';
+import { currentKernel, initKernel } from '../../../tests/setup.js';
 import { nativeShapeCount } from './helpers/nativeArena.js';
+
+beforeAll(async () => {
+  await initKernel();
+}, 30000);
 
 const arena = () => (currentKernel === 'occt-wasm' ? nativeShapeCount() : null);
 type NativeShape = Parameters<ReturnType<typeof getKernel>['dispose']>[0];

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DisposalScope, getBounds, getKernel, measureVolume, unwrap } from 'brepjs';
 import { makeLocalIdCounter } from '../src/identity/localId.js';
 import { newIfcGuid } from '../src/identity/ifcGuid.js';
@@ -7,9 +7,13 @@ import { validateProductBody } from '../src/types/productBody.js';
 import { setProductBodyTestHooksForTesting } from '../src/productBodyTestHooks.js';
 import { createOverlapFixture } from './helpers/nativeBodyFixture.js';
 import { nativeShapeCount } from './helpers/nativeArena.js';
-import { currentKernel } from '../../../tests/setup.js';
+import { currentKernel, initKernel } from '../../../tests/setup.js';
 import type { BimElement } from '../src/types/bimTypes.js';
 import type { FrameInput } from '../src/placementFrame.js';
+
+beforeAll(async () => {
+  await initKernel();
+}, 30000);
 
 const parentFrame = { origin: [0, 20, 0], axisX: [0, 1, 0], axisZ: [0, 0, 1] } satisfies FrameInput;
 const ids = makeLocalIdCounter();

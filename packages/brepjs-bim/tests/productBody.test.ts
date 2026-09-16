@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { box, cylinder, DisposalScope, getBounds, getKernel, measureVolume, unwrap } from 'brepjs';
 import {
   bodySolids,
@@ -12,7 +12,11 @@ import {
 import { IDENTITY_FRAME, rotationFrame, translationFrame } from '../src/placementFrame.js';
 import { createOverlapFixture } from './helpers/nativeBodyFixture.js';
 import { nativeShapeCount } from './helpers/nativeArena.js';
-import { currentKernel } from '../../../tests/setup.js';
+import { currentKernel, initKernel } from '../../../tests/setup.js';
+
+beforeAll(async () => {
+  await initKernel();
+}, 30000);
 
 afterEach(() => vi.restoreAllMocks());
 
