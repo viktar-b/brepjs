@@ -57,7 +57,12 @@ import { curtainWallToGrid } from '../elementFns/curtainWallFns.js';
 import { footingToSolid, pileToSolid } from '../elementFns/foundationFns.js';
 import { railingToSolid } from '../elementFns/railingFns.js';
 import { coveringToSolid } from '../elementFns/coveringFns.js';
-import { validateProductBody, type ProductBody } from '../types/productBody.js';
+import {
+  snapshotProductBodyInput,
+  validateProductBody,
+  wrappedResourceObject,
+  type ProductBody,
+} from '../types/productBody.js';
 import {
   cleanupReport,
   type CleanupReport,
@@ -75,14 +80,16 @@ export interface BodyCommitReceipt {
 
 interface OwnedGeometry {
   readonly solid: ValidSolid;
+  readonly resource: object | undefined;
   readonly localId?: LocalId;
   readonly itemIndex: number;
 }
 
-type GeometryOwner =
+type GeometryOwner = { readonly resource: object | undefined } & (
   | { readonly state: 'RETIRING'; readonly localId?: LocalId; readonly itemIndex: number }
   | { readonly state: 'RETAINED'; readonly localId: LocalId; readonly itemIndex: number }
-  | { readonly state: 'UNCERTAIN'; readonly localId?: LocalId; readonly itemIndex: number };
+  | { readonly state: 'UNCERTAIN'; readonly localId?: LocalId; readonly itemIndex: number }
+);
 
 /** Prepared writes for one synchronous command, discarded on rejection. */
 interface ModelCommand {
@@ -93,7 +100,7 @@ interface ModelCommand {
   readonly relationships: BimRelationship[];
   readonly stableKeys: Set<string>;
   readonly adoptions: Map<ValidSolid, Extract<GeometryOwner, { state: 'RETAINED' }>>;
-  readonly generated: Set<ValidSolid>;
+  readonly generated: Map<ValidSolid, object | undefined>;
   readonly retired: OwnedGeometry[];
   readonly recipeEligibility: Map<LocalId, boolean>;
 }
@@ -187,7 +194,7 @@ export class BimModel {
       relationships: [],
       stableKeys: new Set(),
       adoptions: new Map(),
-      generated: new Set(),
+      generated: new Map(),
       retired: [],
       recipeEligibility: new Map(),
     };
@@ -207,7 +214,11 @@ export class BimModel {
         const priorCleanup = reportedGeometryCleanup(result.error, operation);
         this.#cleanupDiagnostics.push(...priorCleanup);
         const ownedCleanup = this.#retire(
-          [...command.generated].map((solid, itemIndex) => ({ solid, itemIndex })),
+          [...command.generated].map(([solid, resource], itemIndex) => ({
+            solid,
+            resource,
+            itemIndex,
+          })),
           operation
         );
         const cleanup = cleanupReport([
@@ -222,9 +233,10 @@ export class BimModel {
       }
       // Prepared data only: no native calls, accessors or callbacks may run during commit.
       for (const element of command.elements) this.#elements.set(element.localId, element);
-      for (const { solid, localId, itemIndex } of command.retired) {
+      for (const { solid, resource, localId, itemIndex } of command.retired) {
         this.#owners.set(solid, {
           state: 'RETIRING',
+          resource,
           itemIndex,
           ...(localId === undefined ? {} : { localId }),
         });
@@ -241,8 +253,8 @@ export class BimModel {
       this.#modelScope = command.modelScope;
       this.#projectId = command.projectId;
       const unused = [...command.generated]
-        .filter((solid) => !command.adoptions.has(solid))
-        .map((solid, itemIndex) => ({ solid, itemIndex }));
+        .filter(([solid]) => !command.adoptions.has(solid))
+        .map(([solid, resource], itemIndex) => ({ solid, resource, itemIndex }));
       const cleanup = this.#retire([...command.retired, ...unused], operation);
       return ok({ value: result.value, cleanup });
     } finally {
@@ -252,17 +264,71 @@ export class BimModel {
 
   #stageElement(command: ModelCommand, element: AnyBimElement): void {
     for (const [itemIndex, solid] of retainedSolids(element).entries()) {
-      this.#requireUnowned(command, solid, itemIndex);
-      command.adoptions.set(solid, { state: 'RETAINED', localId: element.localId, itemIndex });
+      const resource = this.#requireUnowned(command, solid, itemIndex);
+      command.adoptions.set(solid, {
+        state: 'RETAINED',
+        resource,
+        localId: element.localId,
+        itemIndex,
+      });
     }
     command.elements.push(element);
   }
 
-  #requireUnowned(command: ModelCommand, solid: ValidSolid, itemIndex: number): void {
-    const owner = this.#owners.get(solid) ?? command.adoptions.get(solid);
+  #captureResource(solid: unknown, itemIndex: number): Result<object | undefined, BimError> {
+    try {
+      return ok(wrappedResourceObject(solid));
+    } catch (cause) {
+      return err({
+        ...specError('BODY_VALIDATION_FAILED', 'Item resource access threw', cause),
+        metadata: { itemIndex },
+      });
+    }
+  }
+
+  #ownGenerated(command: ModelCommand, solids: readonly ValidSolid[]): void {
+    const fresh: ValidSolid[] = [];
+    // Own the entire batch before any accessor can throw, including later siblings.
+    for (const solid of solids) {
+      if (command.generated.has(solid)) continue;
+      command.generated.set(solid, undefined);
+      fresh.push(solid);
+    }
+    let failure: BimError | undefined;
+    for (const [itemIndex, solid] of fresh.entries()) {
+      const captured = this.#captureResource(solid, itemIndex);
+      if (captured.ok) command.generated.set(solid, captured.value);
+      else failure ??= captured.error;
+    }
+    if (failure !== undefined) throw new RejectedModelCommand(failure);
+  }
+
+  #prepareRetirement(element: AnyBimElement): OwnedGeometry[] {
+    return retainedSolids(element).map((solid, itemIndex) => ({
+      solid,
+      resource: this.#owners.get(solid)?.resource,
+      localId: element.localId,
+      itemIndex,
+    }));
+  }
+
+  #requireUnowned(command: ModelCommand, solid: unknown, itemIndex: number): object | undefined {
+    const owners = [...this.#owners, ...command.adoptions];
+    let owner = owners.find(([owned]) => owned === solid)?.[1];
+    // Look up the public handle first: an UNCERTAIN owner may already be disposed.
+    const captured =
+      owner === undefined ? this.#captureResource(solid, itemIndex) : ok(owner.resource);
+    if (!captured.ok) throw new RejectedModelCommand(captured.error);
+    const resource = captured.value;
+    if (owner === undefined && resource !== undefined) {
+      owner = owners.find(([, candidate]) => candidate.resource === resource)?.[1];
+    }
     if (owner !== undefined) {
       throw new RejectedModelCommand({
-        ...specError('BODY_OWNERSHIP_CONFLICT', 'The model already owns this solid handle'),
+        ...specError(
+          'BODY_OWNERSHIP_CONFLICT',
+          'The model already owns this solid handle or its wrapped resource object'
+        ),
         metadata: {
           itemIndex,
           ownerLocalId: owner.localId,
@@ -271,17 +337,20 @@ export class BimModel {
         },
       });
     }
+    return resource;
   }
 
   #retire(items: readonly OwnedGeometry[], operation: string): CleanupReport {
     const attempted = new Set<ValidSolid>();
     const diagnostics: GeometryCleanupDiagnostic[] = [];
-    for (const { solid, itemIndex, localId } of items) {
-      if (attempted.has(solid) || this.#owners.get(solid)?.state === 'UNCERTAIN') continue;
+    for (const { solid, resource, itemIndex, localId } of items) {
+      const owner = this.#owners.get(solid);
+      if (attempted.has(solid) || owner?.state === 'UNCERTAIN') continue;
       attempted.add(solid);
       // Keep responsibility before invoking user-observable cleanup; a throw has an unknown outcome.
       this.#owners.set(solid, {
         state: 'UNCERTAIN',
+        resource,
         itemIndex,
         ...(localId === undefined ? {} : { localId }),
       });
@@ -339,7 +408,12 @@ export class BimModel {
       const retained: OwnedGeometry[] = [];
       for (const [solid, owner] of this.#owners) {
         if (owner.state === 'RETAINED')
-          retained.push({ solid, localId: owner.localId, itemIndex: owner.itemIndex });
+          retained.push({
+            solid,
+            resource: owner.resource,
+            localId: owner.localId,
+            itemIndex: owner.itemIndex,
+          });
       }
       const cleanup = this.#retire(retained, 'disposeModel');
       if (cleanup.kind === 'FAILED') {
@@ -493,7 +567,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = wallToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         {
@@ -517,7 +591,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = slabToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         { category: 'SLAB', spec: snapshot, geometry: geomResult.value },
@@ -537,7 +611,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = beamToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         { category: 'BEAM', spec: snapshot, geometry: geomResult.value },
@@ -557,7 +631,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = columnToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         { category: 'COLUMN', spec: snapshot, geometry: geomResult.value },
@@ -577,7 +651,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = spaceToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         { category: 'SPACE', spec: snapshot, geometry: geomResult.value },
@@ -597,7 +671,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = roofToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         { category: 'ROOF', spec: snapshot, geometry: geomResult.value },
@@ -620,8 +694,10 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const gridResult = curtainWallToGrid(snapshot);
       if (!gridResult.ok) return err(gridResult.error);
-      for (const component of [...gridResult.value.panels, ...gridResult.value.mullions])
-        command.generated.add(component.solid);
+      this.#ownGenerated(
+        command,
+        [...gridResult.value.panels, ...gridResult.value.mullions].map(({ solid }) => solid)
+      );
       const id = this.#makeElement(
         command,
         { category: 'CURTAIN_WALL', spec: snapshot, geometry: gridResult.value },
@@ -641,7 +717,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = footingToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         { category: 'FOOTING', spec: snapshot, geometry: geomResult.value },
@@ -661,7 +737,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = pileToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         { category: 'PILE', spec: snapshot, geometry: geomResult.value },
@@ -724,7 +800,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = railingToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         {
@@ -756,7 +832,11 @@ export class BimModel {
           specError('BODY_UNSUPPORTED_CATEGORY', `Cannot replace a ${target.category} Product Body`)
         );
       }
-      const prepared = validateProductBody(input.body);
+      const captured = snapshotProductBodyInput(input.body);
+      if (!captured.ok) return captured;
+      for (const [itemIndex, solid] of captured.value.solids.entries())
+        this.#requireUnowned(command, solid, itemIndex);
+      const prepared = validateProductBody(captured.value);
       if (!prepared.ok) return prepared;
       if (target.geometry.kind === 'AUTHORITATIVE' && prepared.value.kind === 'PARAMETRIC') {
         return err(
@@ -767,9 +847,7 @@ export class BimModel {
         );
       }
       this.#stageElement(command, Object.freeze({ ...target, geometry: prepared.value }));
-      command.retired.push(
-        ...retainedSolids(target).map((solid, itemIndex) => ({ solid, itemIndex, localId }))
-      );
+      command.retired.push(...this.#prepareRetirement(target));
       command.recipeEligibility.set(localId, false);
       return ok({ localId, guid: target.guid });
     });
@@ -797,7 +875,7 @@ export class BimModel {
       if (!keyCheck.ok) return keyCheck;
       const geomResult = coveringToSolid(snapshot);
       if (!geomResult.ok) return err(geomResult.error);
-      command.generated.add(geomResult.value);
+      this.#ownGenerated(command, [geomResult.value]);
       const id = this.#makeElement(
         command,
         { category: 'COVERING', spec: snapshot, geometry: geomResult.value },
@@ -1374,20 +1452,14 @@ export class BimModel {
     wall: BimElement<'WALL'>,
     newGeometry: ValidSolid
   ): void {
-    command.generated.add(newGeometry);
+    this.#ownGenerated(command, [newGeometry]);
     const prepared = protectElement({
       ...wall,
       geometry: { kind: 'PARAMETRIC', solids: [newGeometry] },
     });
     if (!prepared.ok) throw new RejectedModelCommand(prepared.error);
     this.#stageElement(command, prepared.value);
-    command.retired.push(
-      ...retainedSolids(wall).map((solid, itemIndex) => ({
-        solid,
-        itemIndex,
-        localId: wall.localId,
-      }))
-    );
+    command.retired.push(...this.#prepareRetirement(wall));
     // Opening edits preserve the existing recipe eligibility, never restore it.
   }
 
@@ -1412,11 +1484,11 @@ export class BimModel {
     slab: BimElement<'SLAB'>,
     newGeometry: ValidSolid
   ): void {
-    command.generated.add(newGeometry);
+    this.#ownGenerated(command, [newGeometry]);
     const prepared = protectElement({ ...slab, geometry: newGeometry });
     if (!prepared.ok) throw new RejectedModelCommand(prepared.error);
     this.#stageElement(command, prepared.value);
-    command.retired.push({ solid: slab.geometry, itemIndex: 0, localId: slab.localId });
+    command.retired.push(...this.#prepareRetirement(slab));
   }
 
   getDoors(): BimElement<'DOOR'>[] {

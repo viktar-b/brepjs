@@ -86,8 +86,18 @@ function snapshot(kind: ProductBody['kind'], solids: NonEmpty<ValidSolid>): Prod
   return Object.freeze({ kind, solids: items });
 }
 
-/** Borrow only. Freezing a descriptor/collection neither clones nor transfers native handles. */
-export function validateProductBody(input: unknown): Result<ProductBody, ProductBodyError> {
+/** @internal Exact resource object identity only, without native topology queries. */
+export function wrappedResourceObject(solid: unknown): object | undefined {
+  if (typeof solid !== 'object' || solid === null || !('wrapped' in solid)) return undefined;
+  if ('disposed' in solid && solid.disposed) return undefined;
+  const wrapped: unknown = solid.wrapped;
+  return typeof wrapped === 'object' && wrapped !== null ? wrapped : undefined;
+}
+
+/** @internal Capture opaque items before any native query, so owners can reject retired aliases. */
+export function snapshotProductBodyInput(
+  input: unknown
+): Result<z.infer<typeof descriptorSchema>, ProductBodyError> {
   try {
     const parsed = descriptorSchema.safeParse(input);
     if (!parsed.success)
@@ -99,13 +109,40 @@ export function validateProductBody(input: unknown): Result<ProductBody, Product
           parsed.error
         )
       );
-    const items = validateItems(parsed.data.solids, 'validateProductBody');
-    return items.ok ? ok(snapshot(parsed.data.kind, items.value)) : items;
+    const items: unknown[] = [];
+    for (let itemIndex = 0; itemIndex < parsed.data.solids.length; itemIndex++) {
+      try {
+        items.push(parsed.data.solids[itemIndex]);
+      } catch (cause) {
+        return err(
+          bodyError(
+            'validateProductBody',
+            'BODY_VALIDATION_FAILED',
+            'Item snapshot threw',
+            cause,
+            itemIndex
+          )
+        );
+      }
+    }
+    return ok(Object.freeze({ kind: parsed.data.kind, solids: Object.freeze(items) }));
   } catch (cause) {
     return err(
       bodyError('validateProductBody', 'BODY_VALIDATION_FAILED', 'Body validation threw', cause)
     );
   }
+}
+
+/** Borrow only. Reject duplicate handles and exact wrapped resource objects.
+ * Independent copies may share topology. Other external aliases remain a caller
+ * ownership precondition; rejection does not disable an alias's disposer/finalizer.
+ * Freezing a descriptor/collection neither clones nor transfers native handles.
+ */
+export function validateProductBody(input: unknown): Result<ProductBody, ProductBodyError> {
+  const captured = snapshotProductBodyInput(input);
+  if (!captured.ok) return captured;
+  const items = validateItems(captured.value.solids, 'validateProductBody');
+  return items.ok ? ok(snapshot(captured.value.kind, items.value)) : items;
 }
 
 /** Validate the public handle contract and native solid topology before narrowing opaque input. */
@@ -136,6 +173,7 @@ function validateItems(
   if (!Array.isArray(input) || input.length === 0)
     return err(bodyError(operation, 'BODY_EMPTY_ITEMS', 'Expected a nonempty solids array'));
   const identities = new Set<ValidSolid>();
+  const resources = new Set<object>();
   const solids: ValidSolid[] = [];
   for (let itemIndex = 0; itemIndex < input.length; itemIndex++) {
     try {
@@ -161,17 +199,19 @@ function validateItems(
             itemIndex
           )
         );
-      if (identities.has(item))
+      const resource = wrappedResourceObject(item);
+      if (identities.has(item) || (resource !== undefined && resources.has(resource)))
         return err(
           bodyError(
             operation,
             'BODY_DUPLICATE_ITEM',
-            'Item duplicates an earlier handle',
+            'Item duplicates an earlier handle or its wrapped resource object',
             undefined,
             itemIndex
           )
         );
       identities.add(item);
+      if (resource !== undefined) resources.add(resource);
       solids.push(item);
     } catch (cause) {
       return err(
