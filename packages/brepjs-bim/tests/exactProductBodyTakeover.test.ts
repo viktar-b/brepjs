@@ -10,9 +10,9 @@ import { bodySolids, type ProductBody } from '../src/types/productBody.js';
 import type { LocalId } from '../src/identity/localId.js';
 import { toIfc } from '../src/serialize/toIfc.js';
 import {
-  setExactBodyItemPreparerForTesting,
-  type ExactBodyItemPreparer,
-} from '../src/serialize/exactBodyPreflight.js';
+  setProductBodyItemPreparerForTesting,
+  type ProductBodyItemPreparer,
+} from '../src/serialize/productBodyPreflight.js';
 import { setIfcWriterTestHooksForTesting } from '../src/ifc-writer/ifcWriter.js';
 import { prepareTessellation } from '../src/ifc-writer/tessellationWriter.js';
 import { fromIfc } from '../src/import/fromIfc.js';
@@ -24,7 +24,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   setPlacedGeometryTestHooksForTesting(null);
-  setExactBodyItemPreparerForTesting(null);
+  setProductBodyItemPreparerForTesting(null);
   setIfcWriterTestHooksForTesting(null);
 });
 
@@ -360,13 +360,13 @@ describe('exact Product Body IFC integration', () => {
     required(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [exactWall] }));
     required(model.takeExactProductBody(railingId, { kind: 'EXACT', solids: [exactRailing] }));
     let prepareCalls = 0;
-    const failingPreparer: ExactBodyItemPreparer = (solid) => {
+    const failingPreparer: ProductBodyItemPreparer = (solid) => {
       prepareCalls++;
       return prepareCalls === 2
         ? { ok: false, reason: 'injected later preflight failure' }
         : prepareTessellation(solid);
     };
-    setExactBodyItemPreparerForTesting(failingPreparer);
+    setProductBodyItemPreparerForTesting(failingPreparer);
     let closeCalls = 0;
     let writeCalls = 0;
     setIfcWriterTestHooksForTesting({
@@ -375,7 +375,7 @@ describe('exact Product Body IFC integration', () => {
     });
 
     const serialized = await toIfc(model, META);
-    expect(errorCode(serialized)).toBe('EXACT_BODY_TESSELLATION_FAILED');
+    expect(errorCode(serialized)).toBe('BODY_TESSELLATION_FAILED');
     expect(prepareCalls).toBe(2);
     expect(writeCalls).toBe(0);
     expect(closeCalls).toBe(1);

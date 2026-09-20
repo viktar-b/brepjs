@@ -45,6 +45,10 @@ export class SpfReader {
   // Caches GetLineIDsWithType results per type code. The model is read-only
   // during import, so this is safe and removes the per-element WASM round-trip.
   readonly #linesByType = new Map<number, number[]>();
+  #guidIndex: {
+    readonly byGuid: ReadonlyMap<string, number>;
+    readonly byExpressId: ReadonlyMap<number, string>;
+  } | null = null;
 
   private constructor(api: IfcAPI, modelId: number, schema: ImportedSchema) {
     this.#api = api;
@@ -125,10 +129,11 @@ export class SpfReader {
     if (cached !== undefined) return cached;
     const vec = this.#api.GetLineIDsWithType(this.modelId, type);
     const out: number[] = [];
-    for (let i = 0; i < vec.size(); i++) {
-      out.push(vec.get(i));
+    try {
+      for (let i = 0; i < vec.size(); i++) out.push(vec.get(i));
+    } finally {
+      deleteVector(vec);
     }
-    deleteVector(vec);
     this.#linesByType.set(type, out);
     return out;
   }
@@ -137,11 +142,12 @@ export class SpfReader {
   getAllLines(): number[] {
     const vec = this.#api.GetAllLines(this.modelId);
     const out: number[] = [];
-    for (let i = 0; i < vec.size(); i++) {
-      out.push(vec.get(i));
-    }
     // Free the WASM-heap vector; CloseModel does not reclaim it.
-    deleteVector(vec);
+    try {
+      for (let i = 0; i < vec.size(); i++) out.push(vec.get(i));
+    } finally {
+      deleteVector(vec);
+    }
     return out;
   }
 
@@ -156,21 +162,40 @@ export class SpfReader {
     return typeof t === 'number' ? t : Number((t as { value?: unknown } | undefined)?.value ?? t);
   }
 
-  /** Builds web-ifc's internal GUID→expressId index; call before guid lookups. */
+  /** Builds a JS-owned index without web-ifc's unreleased per-type native vectors. */
   buildGuidMap(): void {
-    this.#api.CreateIfcGuidToExpressIdMapping(this.modelId);
+    if (this.#guidIndex !== null) return;
+    const byGuid = new Map<string, number>();
+    const byExpressId = new Map<number, string>();
+    for (const expressId of this.getAllLines()) {
+      // Keep the SDK index's element classification; other IFC roots are not entries.
+      if (!this.#api.IsIfcElement(this.getLineType(expressId))) continue;
+      const line = this.getLine(expressId);
+      if (typeof line !== 'object' || line === null || !('GlobalId' in line)) continue;
+      const guid = line.GlobalId;
+      if (
+        typeof guid !== 'object' ||
+        guid === null ||
+        !('value' in guid) ||
+        typeof guid.value !== 'string'
+      )
+        continue;
+      byGuid.set(guid.value, expressId);
+      byExpressId.set(expressId, guid.value);
+    }
+    this.#guidIndex = { byGuid, byExpressId };
   }
 
   /** expressId for a GlobalId, or undefined. Requires {@link buildGuidMap} first. */
   expressIdFromGuid(guid: string): number | undefined {
-    const id = this.#api.GetExpressIdFromGuid(this.modelId, guid);
-    return typeof id === 'number' ? id : undefined;
+    this.buildGuidMap();
+    return this.#guidIndex?.byGuid.get(guid);
   }
 
   /** GlobalId for an express id, or undefined. Requires {@link buildGuidMap} first. */
   guidFromExpressId(expressId: number): string | undefined {
-    const guid = this.#api.GetGuidFromExpressId(this.modelId, expressId);
-    return typeof guid === 'string' ? guid : undefined;
+    this.buildGuidMap();
+    return this.#guidIndex?.byExpressId.get(expressId);
   }
 
   /**
