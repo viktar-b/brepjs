@@ -1,11 +1,11 @@
 import type { Result, ValidSolid } from 'brepjs';
-import { ok, err, cut } from 'brepjs';
+import { ok, err } from 'brepjs';
 import type { IfcGuid } from '../identity/ifcGuid.js';
 import { deriveIfcGuidSync, makeElementKey, makeRelKey } from '../identity/guidDerivation.js';
 import type { LocalId } from '../identity/localId.js';
 import { makeLocalIdCounter, type LocalIdCounter } from '../identity/localId.js';
 import type { BimError } from '../errors/bimError.js';
-import { specError, fromBrepError } from '../errors/bimError.js';
+import { specError } from '../errors/bimError.js';
 import type {
   AnyBimElement,
   BimElement,
@@ -51,6 +51,7 @@ import { beamToSolid } from '../elementFns/beamFns.js';
 import { columnToSolid } from '../elementFns/columnFns.js';
 import { openingToSolid } from '../elementFns/openingFns.js';
 import { slabOpeningToSolid } from '../elementFns/slabOpeningFns.js';
+import { cutOpeningSolid } from '../elementFns/cutOpeningSolid.js';
 import { spaceToSolid } from '../elementFns/spaceFns.js';
 import { roofToSolid } from '../elementFns/roofFns.js';
 import { curtainWallToGrid } from '../elementFns/curtainWallFns.js';
@@ -70,6 +71,7 @@ import {
 } from '../productBodyCleanup.js';
 import { protectElement, retainedSolids, type ElementFields } from './modelGeometry.js';
 import { reportedGeometryCleanup } from '../geometryCleanupDiagnostics.js';
+import { uncertainGeneratedResources } from '../geometryGeneration.js';
 
 export interface BodyCommitReceipt {
   readonly kind: 'COMMITTED';
@@ -79,7 +81,7 @@ export interface BodyCommitReceipt {
 }
 
 interface OwnedGeometry {
-  readonly solid: ValidSolid;
+  readonly solid: Disposable;
   readonly resource: object | undefined;
   readonly localId?: LocalId;
   readonly itemIndex: number;
@@ -130,13 +132,24 @@ export interface OpeningIdentityOptions extends ElementIdentityOptions {
   readonly openingStableKey?: string | undefined;
 }
 
-function exactWallBodyImmutable(): Result<never, BimError> {
-  return err(
-    specError(
-      'EXACT_WALL_BODY_IMMUTABLE',
-      'Cannot add an opening after a wall has taken an exact Product Body'
-    )
-  );
+function wallOpeningSolid(body: ProductBody): Result<ValidSolid, BimError> {
+  if (body.kind === 'AUTHORITATIVE') {
+    return err(
+      specError(
+        'AUTHORITATIVE_WALL_BODY_IMMUTABLE',
+        'Cannot add an opening to an authoritative Wall Body'
+      )
+    );
+  }
+  if (body.solids.length !== 1) {
+    return err(
+      specError(
+        'MULTI_ITEM_WALL_OPENING_UNSUPPORTED',
+        'Wall openings require a singleton PARAMETRIC Body'
+      )
+    );
+  }
+  return ok(body.solids[0]);
 }
 
 export class BimModel {
@@ -150,7 +163,7 @@ export class BimModel {
   // created; empty until init() runs.
   #modelScope = '';
   readonly #usedStableKeys = new Set<string>();
-  readonly #owners = new Map<ValidSolid, GeometryOwner>();
+  readonly #owners = new Map<Disposable, GeometryOwner>();
   readonly #cleanupDiagnostics: GeometryCleanupDiagnostic[] = [];
   readonly #recipeQuantityEligible = new Set<LocalId>();
   #phase: 'ACTIVE' | 'MUTATING' | 'DISPOSING' | 'DISPOSED' = 'ACTIVE';
@@ -211,6 +224,9 @@ export class BimModel {
         );
       }
       if (!result.ok) {
+        for (const { handle, resource, itemIndex } of uncertainGeneratedResources(result.error)) {
+          this.#owners.set(handle, { state: 'UNCERTAIN', resource, itemIndex });
+        }
         const priorCleanup = reportedGeometryCleanup(result.error, operation);
         this.#cleanupDiagnostics.push(...priorCleanup);
         const ownedCleanup = this.#retire(
@@ -341,7 +357,7 @@ export class BimModel {
   }
 
   #retire(items: readonly OwnedGeometry[], operation: string): CleanupReport {
-    const attempted = new Set<ValidSolid>();
+    const attempted = new Set<Disposable>();
     const diagnostics: GeometryCleanupDiagnostic[] = [];
     for (const { solid, resource, itemIndex, localId } of items) {
       const owner = this.#owners.get(solid);
@@ -1192,7 +1208,8 @@ export class BimModel {
           specError('DOOR_WALL_NOT_FOUND', `No wall found for localId ${snapshot.wallLocalId}`)
         );
       }
-      if (wall.geometry.kind === 'EXACT') return exactWallBodyImmutable();
+      const host = wallOpeningSolid(wall.geometry);
+      if (!host.ok) return host;
       const keyCheck = this.#checkOpeningKeys(identity);
       if (!keyCheck.ok) return keyCheck;
       if (snapshot.offsetAlongWall + snapshot.width > wall.spec.length) {
@@ -1219,7 +1236,11 @@ export class BimModel {
         offsetFromFloor: snapshot.offsetFromFloor,
       };
 
-      const cutResult = this.#cutWallGeometry(wall, openingSpec);
+      const cutResult = cutOpeningSolid({
+        host: host.value,
+        makeTool: () => openingToSolid(openingSpec, wall.spec.thickness),
+        hostKind: 'WALL',
+      });
       if (!cutResult.ok) return err(cutResult.error);
       this.#replaceWallGeometry(command, wall, cutResult.value);
 
@@ -1271,7 +1292,8 @@ export class BimModel {
           specError('WINDOW_WALL_NOT_FOUND', `No wall found for localId ${snapshot.wallLocalId}`)
         );
       }
-      if (wall.geometry.kind === 'EXACT') return exactWallBodyImmutable();
+      const host = wallOpeningSolid(wall.geometry);
+      if (!host.ok) return host;
       const keyCheck = this.#checkOpeningKeys(identity);
       if (!keyCheck.ok) return keyCheck;
       if (snapshot.offsetAlongWall + snapshot.width > wall.spec.length) {
@@ -1298,7 +1320,11 @@ export class BimModel {
         offsetFromFloor: snapshot.offsetFromFloor,
       };
 
-      const cutResult = this.#cutWallGeometry(wall, openingSpec);
+      const cutResult = cutOpeningSolid({
+        host: host.value,
+        makeTool: () => openingToSolid(openingSpec, wall.spec.thickness),
+        hostKind: 'WALL',
+      });
       if (!cutResult.ok) return err(cutResult.error);
       this.#replaceWallGeometry(command, wall, cutResult.value);
 
@@ -1407,7 +1433,11 @@ export class BimModel {
         offsetY: snapshot.offsetY,
       };
 
-      const cutResult = this.#cutSlabGeometry(slab, openingSpec);
+      const cutResult = cutOpeningSolid({
+        host: slab.geometry,
+        makeTool: () => slabOpeningToSolid(openingSpec, slab.spec.thickness),
+        hostKind: 'SLAB',
+      });
       if (!cutResult.ok) return err(cutResult.error);
       this.#replaceSlabGeometry(command, slab, cutResult.value);
 
@@ -1428,25 +1458,6 @@ export class BimModel {
     });
   }
 
-  #cutWallGeometry(
-    wall: BimElement<'WALL'>,
-    openingSpec: WallOpeningSpec
-  ): Result<ValidSolid, BimError> {
-    if (wall.geometry.kind === 'EXACT') {
-      return exactWallBodyImmutable();
-    }
-    const toolResult = openingToSolid(openingSpec, wall.spec.thickness);
-    if (!toolResult.ok) return err(toolResult.error);
-    using tool = toolResult.value;
-    const cutResult = cut(wall.geometry.solid, tool);
-    if (!cutResult.ok) {
-      return err(
-        fromBrepError(cutResult.error, 'WALL_CUT_FAILED', 'Boolean cut of wall with opening failed')
-      );
-    }
-    return ok(cutResult.value);
-  }
-
   #replaceWallGeometry(
     command: ModelCommand,
     wall: BimElement<'WALL'>,
@@ -1461,22 +1472,6 @@ export class BimModel {
     this.#stageElement(command, prepared.value);
     command.retired.push(...this.#prepareRetirement(wall));
     // Opening edits preserve the existing recipe eligibility, never restore it.
-  }
-
-  #cutSlabGeometry(
-    slab: BimElement<'SLAB'>,
-    openingSpec: SlabOpeningSpec
-  ): Result<ValidSolid, BimError> {
-    const toolResult = slabOpeningToSolid(openingSpec, slab.spec.thickness);
-    if (!toolResult.ok) return err(toolResult.error);
-    using tool = toolResult.value;
-    const cutResult = cut(slab.geometry, tool);
-    if (!cutResult.ok) {
-      return err(
-        fromBrepError(cutResult.error, 'SLAB_CUT_FAILED', 'Boolean cut of slab with opening failed')
-      );
-    }
-    return ok(cutResult.value);
   }
 
   #replaceSlabGeometry(

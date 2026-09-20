@@ -3,6 +3,8 @@
   "include": [
     "tests/setup.ts",
     "tests/modelOwnership.test.ts",
+    "tests/modelOpeningOwnership.test.ts",
+    "tests/modelOpeningFailures.test.ts",
     "tests/nativeAliasOwnership.test.ts",
     "tests/modelOwnershipCoverage.test.ts",
     "tests/modelRetirement.test.ts",
