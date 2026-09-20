@@ -1,8 +1,9 @@
-import { IfcAPI } from 'web-ifc';
+import { IfcAPI, IFCROOT } from 'web-ifc';
 import type { FlatMesh, IfcGeometry } from 'web-ifc';
 import type { BimError } from '../errors/bimError.js';
 import { importError } from '../errors/bimError.js';
 import { initIfcApi } from '../ifcRuntime.js';
+import { isValidIfcGuid } from '../identity/ifcGuid.js';
 import type { Result } from 'brepjs';
 import { ok, err } from 'brepjs';
 
@@ -35,6 +36,17 @@ const IFC_Z_UP_TRANSFORMATION: number[] = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 
 // type accepts any object and calls delete() when present — no cast, no `any`.
 function deleteVector(vec: unknown): void {
   (vec as { delete?: () => void }).delete?.();
+}
+
+/** Copies reader-owned native IDs and releases their vector even if iteration throws. */
+function readLineIds(vec: { size(): number; get(index: number): number }): number[] {
+  const ids: number[] = [];
+  try {
+    for (let i = 0; i < vec.size(); i++) ids.push(vec.get(i));
+  } finally {
+    deleteVector(vec);
+  }
+  return ids;
 }
 
 export class SpfReader {
@@ -127,28 +139,15 @@ export class SpfReader {
     // per-call leak and removes the repeated O(n) WASM round-trip.
     const cached = this.#linesByType.get(type);
     if (cached !== undefined) return cached;
-    const vec = this.#api.GetLineIDsWithType(this.modelId, type);
-    const out: number[] = [];
-    try {
-      for (let i = 0; i < vec.size(); i++) out.push(vec.get(i));
-    } finally {
-      deleteVector(vec);
-    }
+    const out = readLineIds(this.#api.GetLineIDsWithType(this.modelId, type));
     this.#linesByType.set(type, out);
     return out;
   }
 
   /** Express ids of every line in the model. */
   getAllLines(): number[] {
-    const vec = this.#api.GetAllLines(this.modelId);
-    const out: number[] = [];
     // Free the WASM-heap vector; CloseModel does not reclaim it.
-    try {
-      for (let i = 0; i < vec.size(); i++) out.push(vec.get(i));
-    } finally {
-      deleteVector(vec);
-    }
-    return out;
+    return readLineIds(this.#api.GetAllLines(this.modelId));
   }
 
   /** IFC type code for an express id. */
@@ -167,9 +166,10 @@ export class SpfReader {
     if (this.#guidIndex !== null) return;
     const byGuid = new Map<string, number>();
     const byExpressId = new Map<number, string>();
-    for (const expressId of this.getAllLines()) {
-      // Keep the SDK index's element classification; other IFC roots are not entries.
-      if (!this.#api.IsIfcElement(this.getLineType(expressId))) continue;
+    // All GlobalId-bearing roots, including relationships and type objects, with
+    // no decoding of unrelated geometry arrays. The native vector is retired here.
+    const rootIds = readLineIds(this.#api.GetLineIDsWithType(this.modelId, IFCROOT, true));
+    for (const expressId of rootIds) {
       const line = this.getLine(expressId);
       if (typeof line !== 'object' || line === null || !('GlobalId' in line)) continue;
       const guid = line.GlobalId;
@@ -177,7 +177,8 @@ export class SpfReader {
         typeof guid !== 'object' ||
         guid === null ||
         !('value' in guid) ||
-        typeof guid.value !== 'string'
+        typeof guid.value !== 'string' ||
+        !isValidIfcGuid(guid.value)
       )
         continue;
       byGuid.set(guid.value, expressId);
@@ -186,13 +187,13 @@ export class SpfReader {
     this.#guidIndex = { byGuid, byExpressId };
   }
 
-  /** expressId for a GlobalId, or undefined. Requires {@link buildGuidMap} first. */
+  /** expressId for a GlobalId, or undefined. Builds the index on first lookup. */
   expressIdFromGuid(guid: string): number | undefined {
     this.buildGuidMap();
     return this.#guidIndex?.byGuid.get(guid);
   }
 
-  /** GlobalId for an express id, or undefined. Requires {@link buildGuidMap} first. */
+  /** GlobalId for an express id, or undefined. Builds the index on first lookup. */
   guidFromExpressId(expressId: number): string | undefined {
     this.buildGuidMap();
     return this.#guidIndex?.byExpressId.get(expressId);

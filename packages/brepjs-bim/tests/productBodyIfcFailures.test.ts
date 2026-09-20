@@ -4,6 +4,7 @@ import { getKernel, unwrap, type ValidSolid } from 'brepjs';
 import { currentKernel, initKernel } from '../../../tests/setup.js';
 import { toIfc } from '../src/serialize/toIfc.js';
 import { fromIfc, setFromIfcTestHooksForTesting } from '../src/import/fromIfc.js';
+import { SpfReader } from '../src/import/spfReader.js';
 import { disposeImportedModel } from '../src/import/importedModel.js';
 import { setGeometryReadTestHooksForTesting } from '../src/import/geometryRead.js';
 import { setProductBodyItemPreparerForTesting } from '../src/serialize/productBodyPreflight.js';
@@ -319,18 +320,61 @@ describe('retained Body import failures', () => {
         const liveInputs = arena();
         const close = vi.spyOn(IfcAPI.prototype, 'CloseModel');
         const releases = trackIfcVectors(failure);
-        const result = await fromIfc(bytes);
-        expect(result.ok).toBe(false);
-        if (result.ok) {
-          disposeImportedModel(result.value);
-          throw new Error('Unexpected import success');
+        if (failure === 'all-lines') {
+          using reader = unwrap(await SpfReader.create(bytes));
+          expect(() => reader.getAllLines()).toThrow('native vector read failure');
+        } else {
+          const result = await fromIfc(bytes);
+          expect(result.ok).toBe(false);
+          if (result.ok) {
+            disposeImportedModel(result.value);
+            throw new Error('Unexpected import success');
+          }
+          expect(result.error.code).toBe('IMPORT_FAILED');
         }
-        expect(result.error.code).toBe('IMPORT_FAILED');
         expect(close).toHaveBeenCalledTimes(1);
         expect(releases.length).toBeGreaterThan(0);
         releases.forEach((release) => expect(release).toHaveBeenCalledTimes(1));
         expectLive(fixture.solids);
         expectArena(liveInputs);
+      }
+      expectArena(before);
+    }
+  );
+
+  it.each([false, true])(
+    'releases each GUID root vector once, including after a line-read failure=%s',
+    async (failRead) => {
+      const before = arena();
+      {
+        const fixture = bodyExchangeFixture('WALL', 'PARAMETRIC', 'singleton');
+        using model = fixture.model;
+        const product = model.getElement(fixture.localId);
+        if (!product) throw new Error('Missing GUID lookup fixture');
+        const bytes = unwrap(await toIfc(model, IFC_BODY_META));
+        const close = vi.spyOn(IfcAPI.prototype, 'CloseModel');
+        const releases = trackIfcVectors();
+        {
+          using reader = unwrap(await SpfReader.create(bytes));
+          if (failRead) {
+            vi.spyOn(reader, 'getLine').mockImplementationOnce(() => {
+              throw new Error('GUID root line read failed');
+            });
+            expect(() => reader.expressIdFromGuid(product.guid)).toThrow(
+              'GUID root line read failed'
+            );
+            expect(releases).toHaveLength(1);
+            releases.forEach((release) => expect(release).toHaveBeenCalledTimes(1));
+          }
+          for (let repeat = 0; repeat < 3; repeat++) {
+            const id = reader.expressIdFromGuid(product.guid);
+            if (id === undefined) throw new Error('Missing indexed GUID');
+            expect(reader.guidFromExpressId(id)).toBe(product.guid);
+          }
+        }
+        expect(releases).toHaveLength(failRead ? 2 : 1);
+        releases.forEach((release) => expect(release).toHaveBeenCalledTimes(1));
+        expect(close).toHaveBeenCalledTimes(1);
       }
       expectArena(before);
     }
