@@ -15,6 +15,13 @@ import type {
   csg,
 } from 'brepjs';
 
+interface BodyCommitReceipt {
+  readonly kind: 'COMMITTED';
+  readonly localId: LocalId;
+  readonly guid: IfcGuid;
+  readonly cleanup: CleanupReport;
+}
+
 /** Optional identity override for created elements: a stable key (e.g. a
  *  families key path) that replaces the positional GlobalId derivation. */
 interface ElementIdentityOptions {
@@ -23,6 +30,7 @@ interface ElementIdentityOptions {
 
 declare class BimModel {
   #private;
+  getGeometryCleanupDiagnostics(): readonly GeometryCleanupDiagnostic[];
   init(spec: ProjectSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
   [Symbol.dispose](): void;
   addSite(spec: SiteSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
@@ -60,20 +68,11 @@ declare class BimModel {
    */
   addRamp(spec: RampSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
   addRailing(spec: RailingSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
-  /**
-   * Atomically replaces a parametric wall or railing Body with authoritative,
-   * caller-owned exact solids. Success transfers every supplied handle to this
-   * model. Failure leaves both the model and all supplied handles unchanged.
-   */
-  takeExactProductBody(
-    localId: LocalId,
-    body: Extract<
-      ProductBody,
-      {
-        readonly kind: 'EXACT';
-      }
-    >
-  ): Result<void, BimError>;
+  /** Ownership transfers only on COMMITTED, including when retirement reports failure. */
+  replaceProductBody(input: {
+    readonly localId: LocalId;
+    readonly body: ProductBody;
+  }): Result<BodyCommitReceipt, BimError>;
   /**
    * Adds an IfcCovering. When `hostLocalId` is supplied, an
    * IfcRelCoversBldgElements linking the covering to its host (e.g. a slab it
@@ -177,6 +176,8 @@ declare class BimModel {
   placeIn(elementId: LocalId, containerId: LocalId): void;
   getProject(): BimElement<'PROJECT'> | null;
   getElement(id: LocalId): AnyBimElement | null;
+  /** Whether recipe commands still justify this element's recipe-derived quantities. */
+  isRecipeQuantityEligible(id: LocalId): boolean;
   /**
    * A serializable summary of the model's structure, rooted at the project and
    * walking the IFC spatial hierarchy (AGGREGATES: project → site → building →
@@ -262,27 +263,150 @@ declare function placedSolids(
   options?: PlacedSolidsOptions
 ): Result<readonly ValidSolid[], BimError>;
 
+interface GeometryCleanupDiagnostic {
+  readonly operation: string;
+  readonly itemIndex: number;
+  readonly resourceKind: 'SHAPE' | 'TRANSFORM';
+  readonly localId?: number;
+  readonly cause: unknown;
+}
+
+type CleanupReport =
+  | {
+      readonly kind: 'COMPLETE';
+    }
+  | {
+      readonly kind: 'FAILED';
+      readonly diagnostics: NonEmpty<GeometryCleanupDiagnostic>;
+    };
+
 type NonEmpty<T> = readonly [T, ...T[]];
 
 type ProductBody =
   | {
       readonly kind: 'PARAMETRIC';
-      readonly solid: ValidSolid;
+      readonly solids: NonEmpty<ValidSolid>;
     }
   | {
-      readonly kind: 'EXACT';
+      readonly kind: 'AUTHORITATIVE';
       readonly solids: NonEmpty<ValidSolid>;
     };
 
-/** Returns borrowed Product-local solids. The model retains ownership. */
+type ProductBodyOperation =
+  | 'validateProductBody'
+  | 'copyProductBody'
+  | 'transformProductBody'
+  | 'productBodyBounds'
+  | 'measureProductBodyMaterial';
+
+type ProductBodySpace =
+  | {
+      readonly kind: 'LOCAL';
+    }
+  | {
+      readonly kind: 'RESOLVED';
+      readonly tag: string;
+      readonly frame: RigidFrame;
+    };
+
+interface ProductBodyBounds {
+  readonly space:
+    | {
+        readonly kind: 'LOCAL';
+      }
+    | {
+        readonly kind: 'RESOLVED';
+        readonly tag: string;
+      };
+  readonly bounds: Readonly<Bounds3D>;
+}
+
+/** Borrow only. Reject duplicate handles and exact wrapped resource objects.
+ * Independent copies may share topology. Other external aliases remain a caller
+ * ownership precondition; rejection does not disable an alias's disposer/finalizer.
+ * Freezing a descriptor/collection neither clones nor transfers native handles.
+ */
+declare function validateProductBody(input: unknown): Result<ProductBody, ProductBodyError>;
+
+/** Borrow protected Product-local items. Borrowers must not dispose the retained handles. */
 declare function bodySolids(body: ProductBody): NonEmpty<ValidSolid>;
 
-/** An (origin, axisX, axisZ) frame in mm — the authoring/display side of a placement. */
+/** Owner-only cleanup. COMPLETE means no failure was observable at the BIM boundary.
+ * A FAILED release must not be retried: its native-release outcome can be unknown.
+ */
+declare function disposeProductBody(body: ProductBody): CleanupReport;
+
+/** Borrow a Body; return a fresh independently owned copy with unchanged authority/order. */
+declare function copyProductBody(body: ProductBody): Result<ProductBody, ProductBodyError>;
+
+/** Borrow inputs; even identity placement returns fresh, independently disposable items. */
+declare function transformProductBody(
+  body: ProductBody,
+  frame: RigidFrame
+): Result<ProductBody, ProductBodyError>;
+
+/** Occupied material in mm³. Borrowed imported items need no authored Body descriptor. */
+declare function measureProductBodyMaterial(
+  solids: NonEmpty<ValidSolid>
+): Result<number, ProductBodyError>;
+
+/** All-item tight bounds. A resolved tag belongs to the caller, not a document identity. */
+declare function productBodyBounds(
+  body: ProductBody | NonEmpty<ValidSolid>,
+  space?: ProductBodySpace
+): Result<ProductBodyBounds, ProductBodyError>;
+
+type Mat4x4 = readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
 interface FrameInput {
   readonly origin: Vec3;
   readonly axisX: Vec3;
   readonly axisZ: Vec3;
 }
+
+/** Construction is private; every exposed matrix is an immutable snapshot. */
+declare class RigidFrame {
+  #private;
+  private constructor();
+  get matrix(): Mat4x4;
+  static fromMatrix(input: unknown): Result<RigidFrame, BimError>;
+}
+
+declare function frameFromMatrix(input: unknown): Result<RigidFrame, BimError>;
+
+declare function frameFromPlacement(input: unknown): Result<RigidFrame, BimError>;
+
+declare function rotationFrame(
+  angleDeg: number,
+  axis?: unknown,
+  at?: unknown
+): Result<RigidFrame, BimError>;
+
+declare const IDENTITY_FRAME: RigidFrame;
+
+declare function translationFrame(v: unknown): Result<RigidFrame, BimError>;
+
+/** Right operand acts first. Revalidate the result, including translation overflow. */
+declare function frameMul(a: RigidFrame, b: RigidFrame): Result<RigidFrame, BimError>;
+
+declare function frameInverse(frame: RigidFrame): Result<RigidFrame, BimError>;
 
 declare function toIfc(model: BimModel, meta: BimModelMeta): Promise<Result<Uint8Array, BimError>>;
 
@@ -332,7 +456,7 @@ interface FromIfcOptions {
  * fatal failures — bad bytes, unsupported schema, WASM open failure — return
  * `err`. Inspect {@link ImportedModel.diagnostics} for per-element quality.
  *
- * The web-ifc model handle is always closed in a `finally` block.
+ * The web-ifc model handle is closed before handing reconstructed owners to the caller.
  */
 declare function fromIfc(
   bytes: Uint8Array,
@@ -359,13 +483,16 @@ interface ImportedGeometry {
   readonly fidelity: GeometryFidelity;
   /** Whether every IFC Body item reconstructed into an owned solid. */
   readonly completeness: ImportedBodyCompleteness;
-  /** Owned World-placed reconstructed handles. Dispose them through disposeImportedModel(). */
+  /**
+   * Owned World-placed handles, in source-item order. Opening cuts can leave zero
+   * or more independent solids per source item. Dispose through disposeImportedModel().
+   */
   readonly solids: readonly ValidSolid[];
   /** Borrowed alias for a COMPLETE one-solid Body. Otherwise null. */
   readonly solid: ValidSolid | null;
-  /** Component-wise union of all item bounds for a COMPLETE Body. Null if measurement fails. */
+  /** All surviving item bounds for a COMPLETE Body. Null for no survivors or measurement failure. */
   readonly bounds: Bounds3D | null;
-  /** Sum of item volumes in mm³ for a COMPLETE Body. Null if measurement fails. */
+  /** Occupied-union mm³ for a COMPLETE Body. Null for no survivors or measurement failure. */
   readonly volumeMm3: number | null;
   /** Combined raw triangle vertices (interleaved xyz), present for `TESSELLATED_LOSSY`. */
   readonly meshVertices?: Float32Array | undefined;
@@ -510,7 +637,7 @@ declare class SpfReader {
   /** Uppercased IFC entity name of the instance (e.g. `IFCWALL`). */
   typeNameOf(expressId: number): string;
   getLineType(expressId: number): number;
-  /** Builds web-ifc's internal GUID→expressId index; call before guid lookups. */
+  /** Builds a JS-owned index without web-ifc's unreleased per-type native vectors. */
   buildGuidMap(): void;
   /** expressId for a GlobalId, or undefined. Requires {@link buildGuidMap} first. */
   expressIdFromGuid(guid: string): number | undefined;
@@ -898,6 +1025,11 @@ interface RoofSpec {
 
 declare function parseRoofSpec(input: unknown): Result<RoofSpec, BimError>;
 
+/**
+ * Enumeration literals transcribed verbatim from `IfcCurtainWallTypeEnum` in
+ * the buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ */
 type CurtainWallPredefinedType = 'NOTDEFINED' | 'USERDEFINED';
 
 /**
@@ -1168,6 +1300,11 @@ type AssemblyPredefinedType =
   | 'USERDEFINED'
   | 'NOTDEFINED';
 
+/**
+ * Enumeration literals transcribed verbatim from `IfcAssemblyPlaceEnum` in the
+ * buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ */
 type AssemblyPlace = 'SITE' | 'FACTORY' | 'NOTDEFINED';
 
 /**
@@ -1271,6 +1408,16 @@ interface SlabOpeningInput {
 
 declare function parseSlabOpeningInput(input: unknown): Result<SlabOpeningInput, BimError>;
 
+/**
+ * IFC enumeration literals in this module are transcribed verbatim from the
+ * buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema, specifically
+ * `IfcBridgeTypeEnum`, `IfcBridgePartTypeEnum`, `IfcFacilityUsageEnum`, and
+ * `IfcEarthworksFillTypeEnum`:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ *
+ * The Families-facing civil vocabulary stays target-independent; projection
+ * into these IFC-owned keywords occurs in `familiesAdapter.ts`.
+ */
 type BridgePredefinedType =
   | 'ARCHED'
   | 'CABLE_STAYED'
@@ -1591,7 +1738,12 @@ declare function isIfcSchema(value: unknown): value is IfcSchema;
  */
 declare function schemaSupports(schema: IfcSchema, entityName: string): boolean;
 
-/** IfcAssemblyPlaceEnum values; SITE for in-place assemblies, FACTORY for prefabricated. */
+/**
+ * Enumeration literals transcribed verbatim from `IfcAssemblyPlaceEnum` in the
+ * buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ * SITE denotes in-place assemblies; FACTORY denotes prefabricated assemblies.
+ */
 type AssemblyPlaceIfc = 'SITE' | 'FACTORY' | 'NOTDEFINED';
 
 /** IfcElementAssemblyTypeEnum values (IFC4). */
@@ -1677,7 +1829,12 @@ declare function writePresentationLayer(
   itemIds: readonly number[]
 ): void;
 
-/** IfcConnectionTypeEnum values used by IfcRelConnectsPathElements path ends. */
+/**
+ * Enumeration literals transcribed verbatim from `IfcConnectionTypeEnum` in
+ * the buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ * These values identify the path ends used by `IfcRelConnectsPathElements`.
+ */
 type PathConnectionTypeIfc = 'ATSTART' | 'ATEND' | 'ATPATH' | 'NOTDEFINED';
 
 /**
@@ -1925,8 +2082,8 @@ declare function fromBrepError(inner: BrepError, code: string, message: string):
  * geometry (corner at 0,0,0).
  */
 interface CurtainWallComponent {
-  readonly origin: [number, number, number];
-  readonly size: [number, number, number];
+  readonly origin: readonly [number, number, number];
+  readonly size: readonly [number, number, number];
   readonly solid: ValidSolid;
 }
 
@@ -1997,6 +2154,11 @@ interface ProjectCrs {
   readonly scale?: number | undefined;
 }
 
+/**
+ * Enumeration literals transcribed verbatim from `IfcElementCompositionEnum`
+ * in the buildingSMART IFC 4.3 ADD2 (`IFC4X3_ADD2`) EXPRESS schema:
+ * https://standards.buildingsmart.org/IFC/RELEASE/IFC4_3/HTML/IFC4X3_ADD2.exp
+ */
 type IfcElementCompositionType = 'COMPLEX' | 'ELEMENT' | 'PARTIAL';
 
 interface SpatialPlacementSpec {
@@ -2711,9 +2873,9 @@ interface FamiliesToBimOptions {
    * returns FAMILIES_PRODUCT_BODY_EVALUATOR_REQUIRED with the element path and
    * mapped category, and does not fall back to a parametric envelope.
    * Conventional archetype walls and railings stay specification-authoritative
-   * and do not require an evaluator. When present, civil walls and railings
-   * compare the evaluated Body with their post-opening parametric Body and
-   * retain the authored Body when they differ. Supplying this option does not
+   * and do not require an evaluator. Civil walls and railings always retain
+   * independent authored items as AUTHORITATIVE, including when coincident
+   * with the post-opening candidate. Supplying this option does not
    * opt unsupported products into the proxy fallback.
    */
   readonly bodyEvaluator?: csg.Evaluator | undefined;
@@ -2769,6 +2931,12 @@ interface OpeningIdentityOptions extends ElementIdentityOptions {
 interface RoundTripReport extends ValidationReport {
   readonly firstPass: EntityCounts;
   readonly secondPass: EntityCounts;
+}
+
+interface ProductBodyError extends BimError {
+  readonly operation: ProductBodyOperation;
+  readonly itemIndex?: number;
+  readonly cleanup: CleanupReport;
 }
 
 interface CivilSpatialSpec extends SpatialPlacementSpec {

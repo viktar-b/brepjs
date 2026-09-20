@@ -15,28 +15,13 @@ import { rampFlightToSolid } from './rampFns.js';
 import { bodySolids, transformProductBody } from '../types/productBody.js';
 import { locateShapeInFrame } from '../rigidPlacement.js';
 
-export interface PlacedGeometryTestHooks {
-  readonly afterPlaced?: ((solid: ValidSolid) => void) | undefined;
-}
-
-let testHooks: PlacedGeometryTestHooks | null = null;
-
-/** Non-Body placement seam. Wall/Railing use the shared ProductBody failure seam. */
-export function setPlacedGeometryTestHooksForTesting(hooks: PlacedGeometryTestHooks | null): void {
-  testHooks = hooks;
-}
-
 // Applies an (origin, axisX, axisZ) frame to a local solid, returning a fresh
 // caller-owned solid. Orthonormal frames use the validity-preserving transform
 // path, so the result is a ValidSolid.
 function place(solid: ValidSolid, frame: RigidFrame): Result<ValidSolid, BimError> {
-  let placed: ValidSolid | null = null;
   try {
-    placed = locateShapeInFrame(solid, frame);
-    testHooks?.afterPlaced?.(placed);
-    return ok(placed);
+    return ok(locateShapeInFrame(solid, frame));
   } catch (cause) {
-    placed?.[Symbol.dispose]();
     return err(
       geometryError(
         'PLACED_GEOMETRY_FAILED',

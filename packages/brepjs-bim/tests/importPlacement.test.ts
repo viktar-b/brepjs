@@ -163,7 +163,7 @@ describe('placement round-trip', () => {
       const direct = composeWorldPlacement(reader, placementId, scale);
       if (direct === null) throw new Error('direct placement null');
 
-      for (let i = 0; i < 3; i++) {
+      for (const i of [0, 1, 2] as const) {
         expect(decomposed.origin[i]).toBeCloseTo(direct.origin[i], 4);
         expect(decomposed.axisX[i]).toBeCloseTo(direct.axisX[i], 6);
         expect(decomposed.axisZ[i]).toBeCloseTo(direct.axisZ[i], 6);
