@@ -295,7 +295,7 @@ function findFills(reader: SpfReader, elementExpressId: number): number | undefi
 
 /**
  * Reconstructs a host element's body geometry and, per IFC `IfcRelVoidsElement`
- * semantics, subtracts the reconstructed solid of every opening that voids it —
+ * semantics, subtracts each opening's Body representation from a parametric host —
  * so a wall with a door hole comes back as the cut solid, matching the source
  * model. Falls back to the uncut solid (with a diagnostic) if a cut fails.
  */
@@ -317,6 +317,7 @@ function reconstructGeometry(
   try {
     for (const openingId of voidedBy) {
       const opening = readBodyGeometry(reader, openingId, scale, diagnostics);
+      // Reference geometry describes an existing aperture, never a cutting tool.
       if (opening.kind !== 'SOLID') continue;
       using openingOwner = ownOpening(opening.solid, openingId);
       // Keep each source item's outputs together. This owner list always reflects

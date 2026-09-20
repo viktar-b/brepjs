@@ -1,7 +1,11 @@
 import type { BimModel } from '../model/bimModel.js';
 import type { BimModelMeta } from '../ifc-writer/headerWriter.js';
 import { IfcWriter } from '../ifc-writer/ifcWriter.js';
-import { writeHeader, writeMapConversion } from '../ifc-writer/headerWriter.js';
+import {
+  writeHeader,
+  writeGeometricSubContext,
+  writeMapConversion,
+} from '../ifc-writer/headerWriter.js';
 import {
   writeProject,
   writeSite,
@@ -856,6 +860,7 @@ async function serializeIfc(
 
   const openingPlacementMap = new Map<LocalId, number>();
   const openingEntityMap = new Map<LocalId, number>();
+  let referenceContextId: number | undefined;
 
   for (const rel of relationships) {
     if (rel.kind !== 'VOIDS_WALL') continue;
@@ -871,14 +876,18 @@ async function serializeIfc(
     if (openingElement === undefined || openingElement.category !== 'OPENING') continue;
     if (!isWallOpening(openingElement.spec)) continue;
 
+    // The retained Wall Body already contains its apertures. IFC Reference
+    // openings preserve the void/fill relationships without requesting a cut.
+    referenceContextId ??= writeGeometricSubContext(w, geomContextId, 'Reference');
     const { openingEntityId, openingPlacementId } = writeOpeningGeometry(
       w,
       openingElement.guid,
       openingElement.spec,
       wallElement.spec,
       wallPlacementId,
-      geomSubContextId,
-      ownerHistoryId
+      referenceContextId,
+      ownerHistoryId,
+      'Reference'
     );
     idMap.set(rel.openingLocalId, openingEntityId);
     openingPlacementMap.set(rel.openingLocalId, openingPlacementId);

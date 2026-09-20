@@ -12,7 +12,7 @@ import {
   type ProductBody,
   type NonEmpty,
 } from '../../src/types/productBody.js';
-import { addWallWithDoor, singletonWallSolid } from './openingFixture.js';
+import { DOOR, WINDOW, OPENING_WALL, singletonWallSolid } from './openingFixture.js';
 import { currentKernel } from '../../../../tests/setup.js';
 
 export const IFC_BODY_META = { applicationName: 'step1-body-fixture', applicationVersion: '1' };
@@ -127,11 +127,18 @@ function offsetBox(length: number, offset: number): ValidSolid {
 }
 
 /** Reuses ticket05's already-cut host and keeps its opening/filler records. */
-export function retainedOpeningFixture(authority: ProductBody['kind']) {
+export function retainedOpeningFixture(
+  authority: ProductBody['kind'],
+  fillerKind: 'DOOR' | 'WINDOW' = 'DOOR',
+  layout: 'disconnected' | 'aperture' = 'disconnected'
+) {
   const model = new BimModel();
   try {
     const project = unwrap(
-      model.init({ name: 'Retained opening', projectId: `opening-${authority}` })
+      model.init({
+        name: 'Retained opening',
+        projectId: `opening-${authority}-${fillerKind}-${layout}`,
+      })
     );
     const site = unwrap(model.addSite({ name: 'Site' }));
     const building = unwrap(model.addBuilding({ name: 'Building' }));
@@ -139,13 +146,26 @@ export function retainedOpeningFixture(authority: ProductBody['kind']) {
     model.aggregate(project, site);
     model.aggregate(site, building);
     model.aggregate(building, storey);
-    const { wallId, doorId } = addWallWithDoor(model);
+    const wallId = unwrap(model.addWall(OPENING_WALL, { stableKey: 'wall' }));
+    const fillerSpec = fillerKind === 'DOOR' ? DOOR : WINDOW;
+    const fillerId = unwrap(
+      model[fillerKind === 'DOOR' ? 'addDoor' : 'addWindow'](
+        { ...fillerSpec, wallLocalId: wallId },
+        { stableKey: 'filler', openingStableKey: 'opening' }
+      )
+    );
     model.placeIn(wallId, storey);
-    model.placeIn(doorId, storey);
-    using source = box(2, 1, 3);
+    model.placeIn(fillerId, storey);
+    using source =
+      layout === 'disconnected' ? box(2, 1, 3) : box(fillerSpec.width, 1, fillerSpec.height / 2);
     const solids: NonEmpty<ValidSolid> = [
       unwrap(clone(singletonWallSolid(model, wallId))),
-      translate(source, [20, 0, 0]),
+      translate(
+        source,
+        layout === 'disconnected'
+          ? [20, 0, 0]
+          : [fillerSpec.offsetAlongWall, 0, fillerSpec.offsetFromFloor]
+      ),
     ];
     const body = { kind: authority, solids };
     const replaced = model.replaceProductBody({ localId: wallId, body });
@@ -153,9 +173,19 @@ export function retainedOpeningFixture(authority: ProductBody['kind']) {
     unwrap(replaced);
     const opening = model.getAllElements().find((element) => element.category === 'OPENING');
     const wall = model.getElement(wallId);
-    const door = model.getElement(doorId);
-    if (!opening || !wall || !door) throw new Error('Missing opening fixture product');
-    return { model, wall, door, opening, solids };
+    const filler = model.getElement(fillerId);
+    if (!opening || !wall || !filler) throw new Error('Missing opening fixture product');
+    return {
+      model,
+      wall,
+      filler,
+      opening,
+      solids,
+      itemVolumes: [
+        60 - fillerSpec.width * fillerSpec.height,
+        layout === 'disconnected' ? 6 : (fillerSpec.width * fillerSpec.height) / 2,
+      ],
+    };
   } catch (cause) {
     model[Symbol.dispose]();
     throw cause;
@@ -178,6 +208,25 @@ const styledItem = z.object({ Item: reference, Styles: z.array(reference).nonemp
 const surfaceStyle = z.object({ Name: label, Styles: z.array(reference).nonempty() });
 const rendering = z.object({ SurfaceColour: reference, Transparency: scalar });
 const colour = z.object({ Red: scalar, Green: scalar, Blue: scalar });
+
+export function emittedOpening(reader: SpfReader, guid: string) {
+  const expressId = reader.expressIdFromGuid(guid);
+  if (expressId === undefined) throw new Error('Missing IFC opening');
+  const product = productLine.parse(reader.getLine(expressId));
+  const shape = productShape.parse(reader.getLine(product.Representation.value));
+  return shape.Representations.map(({ value }) => {
+    const rep = representation.extend({ ContextOfItems: reference }).parse(reader.getLine(value));
+    const context = z
+      .object({ ContextIdentifier: label })
+      .parse(reader.getLine(rep.ContextOfItems.value));
+    return {
+      identifier: rep.RepresentationIdentifier,
+      type: rep.RepresentationType,
+      contextIdentifier: context.ContextIdentifier,
+      itemIds: rep.Items.map((item) => item.value),
+    };
+  });
+}
 
 export function emittedStyle(reader: SpfReader, styleId: number) {
   const style = surfaceStyle.parse(reader.getLine(styleId));

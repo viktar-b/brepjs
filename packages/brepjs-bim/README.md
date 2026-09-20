@@ -74,6 +74,17 @@ Nominal recipe quantities require current model recipe eligibility; public Body 
 clears that eligibility even if the new tag is `PARAMETRIC`. Failed measurements omit the affected
 quantity and appear in `toIfcValidated()` as `WALL_QUANTITY_OMITTED` issues.
 
+Wall openings export as IFC `Reference` geometry because the retained Wall Body already
+contains its cuts. Void/fill relationships and opening placements remain intact. IFC4 defines
+Reference openings as non-subtractive; gross recipe exports such as Slab openings still use
+subtractive `Body` geometry. The importer keeps Reference opening records and relationships
+without treating their reference shape as a display Body or cutting tool.
+
+IfcOpenShell 0.8.5 still subtracts Reference openings in its default geometry engine, even with
+a separate Reference context. If a replacement Body adds material inside a retained opening's
+region, that engine can remove the added material. Schema validation and shape generation alone
+do not detect this difference; check the representation semantics and retained item geometry.
+
 Step 1 retains class-specific geometry storage outside Wall/Railing and the transitional
 `model/modelGeometry.ts` ownership enumerator. Converging those records and renaming
 `ProductBody` to `Body` belong to [step 2](docs/architecture-migration.md#migration-order).

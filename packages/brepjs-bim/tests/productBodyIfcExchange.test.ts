@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as WebIFC from 'web-ifc';
 import { getBounds, getKernel, unwrap, type Bounds3D } from 'brepjs';
+import * as brepjs from 'brepjs';
 import { currentKernel, initKernel } from '../../../tests/setup.js';
 import { toIfc } from '../src/serialize/toIfc.js';
 import { fromIfc } from '../src/import/fromIfc.js';
@@ -13,6 +14,7 @@ import {
   bodyExchangeFixture,
   coordinateBounds,
   emittedBody,
+  emittedOpening,
   emittedStyle,
   recordIfcBodyFixture,
   retainedOpeningFixture,
@@ -170,12 +172,20 @@ describe('retained Product Body IFC exchange', () => {
         const fixture = retainedOpeningFixture(authority);
         using model = fixture.model;
         const liveInputs = currentKernel === 'occt-wasm' ? nativeShapeCount() : null;
-        const cut = vi.spyOn(getKernel(), 'cut');
+        const cut = vi.spyOn(brepjs, 'cut');
         const sourceReleases = fixture.solids.map((solid) => vi.spyOn(solid, Symbol.dispose));
         const bytes = unwrap(await toIfc(model, IFC_BODY_META));
         using reader = unwrap(await SpfReader.create(bytes));
         const exported = emittedBody(reader, fixture.wall.guid);
         expect(exported.items).toHaveLength(2);
+        expect(emittedOpening(reader, fixture.opening.guid)).toEqual([
+          {
+            identifier: 'Reference',
+            type: 'SweptSolid',
+            contextIdentifier: 'Reference',
+            itemIds: [expect.any(Number)],
+          },
+        ]);
         const reconstructedIds: number[] = [];
         const releases: ReturnType<typeof vi.fn>[] = [];
         setGeometryReadTestHooksForTesting({
@@ -188,7 +198,7 @@ describe('retained Product Body IFC exchange', () => {
         try {
           const host = imported.elements.find(({ guid }) => guid === fixture.wall.guid);
           const opening = imported.elements.find(({ guid }) => guid === fixture.opening.guid);
-          const filler = imported.elements.find(({ guid }) => guid === fixture.door.guid);
+          const filler = imported.elements.find(({ guid }) => guid === fixture.filler.guid);
           if (!host || !opening || !filler) throw new Error('Opening identities were lost');
           expect(host.category).toBe('WALL');
           expect(opening.category).toBe('OPENING');
@@ -214,7 +224,7 @@ describe('retained Product Body IFC exchange', () => {
             authority,
             guid: fixture.wall.guid,
             openingGuid: fixture.opening.guid,
-            fillerGuid: fixture.door.guid,
+            fillerGuid: fixture.filler.guid,
             exported,
             imported: {
               hostId: host.expressId,
