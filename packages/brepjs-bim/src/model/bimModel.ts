@@ -1560,6 +1560,11 @@ export class BimModel {
     return this.#elements.get(id) ?? null;
   }
 
+  /** Whether recipe commands still justify this element's recipe-derived quantities. */
+  isRecipeQuantityEligible(id: LocalId): boolean {
+    return this.#recipeQuantityEligible.has(id);
+  }
+
   /**
    * A serializable summary of the model's structure, rooted at the project and
    * walking the IFC spatial hierarchy (AGGREGATES: project → site → building →
