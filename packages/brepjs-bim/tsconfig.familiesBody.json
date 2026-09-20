@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.nativeBaseline.json",
+  "include": [
+    "tests/setup.ts",
+    "tests/familiesAdapter.test.ts",
+    "tests/familiesProductBody.test.ts",
+    "tests/familiesBodyOwnership.test.ts",
+    "tests/familiesBodyPlacement.test.ts",
+    "tests/typedCivilExactBody.test.ts"
+  ]
+}
