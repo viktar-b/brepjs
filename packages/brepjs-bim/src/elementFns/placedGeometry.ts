@@ -3,34 +3,25 @@ import type { ValidSolid, Result } from 'brepjs';
 import type { AnyBimElement } from '../types/bimTypes.js';
 import type { BimError } from '../errors/bimError.js';
 import { geometryError } from '../errors/bimError.js';
-import type { FrameInput } from '../import/placement.js';
+import {
+  frameFromPlacement,
+  frameMul,
+  IDENTITY_FRAME,
+  type RigidFrame,
+  type FrameInput,
+} from '../placementFrame.js';
 import { stairFlightToSolid } from './stairFns.js';
 import { rampFlightToSolid } from './rampFns.js';
-import { bodySolids } from '../types/productBody.js';
+import { bodySolids, transformProductBody } from '../types/productBody.js';
 import { locateShapeInFrame } from '../rigidPlacement.js';
-
-export interface PlacedGeometryTestHooks {
-  readonly afterPlaced?: ((solid: ValidSolid) => void) | undefined;
-}
-
-let testHooks: PlacedGeometryTestHooks | null = null;
-
-/** Package-internal deterministic failure seam for placement ownership tests. */
-export function setPlacedGeometryTestHooksForTesting(hooks: PlacedGeometryTestHooks | null): void {
-  testHooks = hooks;
-}
 
 // Applies an (origin, axisX, axisZ) frame to a local solid, returning a fresh
 // caller-owned solid. Orthonormal frames use the validity-preserving transform
 // path, so the result is a ValidSolid.
-function place(solid: ValidSolid, frame: FrameInput): Result<ValidSolid, BimError> {
-  let placed: ValidSolid | null = null;
+function place(solid: ValidSolid, frame: RigidFrame): Result<ValidSolid, BimError> {
   try {
-    placed = locateShapeInFrame(solid, frame);
-    testHooks?.afterPlaced?.(placed);
-    return ok(placed);
+    return ok(locateShapeInFrame(solid, frame));
   } catch (cause) {
-    placed?.[Symbol.dispose]();
     return err(
       geometryError(
         'PLACED_GEOMETRY_FAILED',
@@ -59,10 +50,8 @@ function placeWithinParent(
   localFrame: FrameInput,
   parentFrame: FrameInput | undefined
 ): Result<ValidSolid, BimError> {
-  const local = place(solid, localFrame);
-  if (!local.ok || parentFrame === undefined) return local;
-  using localSolid = local.value;
-  return place(localSolid, parentFrame);
+  const frame = resolvedPlacement(localFrame, parentFrame);
+  return frame.ok ? place(solid, frame.value) : frame;
 }
 
 /**
@@ -88,19 +77,15 @@ export function placedSolids(
   options: PlacedSolidsOptions = {}
 ): Result<readonly ValidSolid[], BimError> {
   const parentFrame = options.parentFrame;
+  const checked = validatePlacements(el, parentFrame);
+  if (!checked.ok) return checked;
   switch (el.category) {
     case 'WALL':
     case 'RAILING': {
-      const out: ValidSolid[] = [];
-      for (const solid of bodySolids(el.geometry)) {
-        const placed = placeWithinParent(solid, el.spec, parentFrame);
-        if (!placed.ok) {
-          disposeAll(out);
-          return placed;
-        }
-        out.push(placed.value);
-      }
-      return ok(out);
+      const frame = resolvedPlacement(el.spec, parentFrame);
+      if (!frame.ok) return frame;
+      const placed = transformProductBody(el.geometry, frame.value);
+      return placed.ok ? ok(bodySolids(placed.value)) : placed;
     }
     case 'SLAB':
     case 'BEAM':
@@ -168,11 +153,15 @@ export function placedSolids(
       const out: ValidSolid[] = [];
       for (const c of [...el.geometry.panels, ...el.geometry.mullions]) {
         // Two-level: place by the component-local origin, then by the wall frame.
-        const componentLocal = place(c.solid, {
-          origin: c.origin,
-          axisX: [1, 0, 0],
-          axisZ: [0, 0, 1],
-        });
+        const componentLocal = placeWithinParent(
+          c.solid,
+          {
+            origin: c.origin,
+            axisX: [1, 0, 0],
+            axisZ: [0, 0, 1],
+          },
+          undefined
+        );
         if (!componentLocal.ok) {
           disposeAll(out);
           return componentLocal;
@@ -190,4 +179,38 @@ export function placedSolids(
     default:
       return ok([]);
   }
+}
+
+function resolvedPlacement(local: unknown, parent?: FrameInput): Result<RigidFrame, BimError> {
+  const localFrame = frameFromPlacement(local);
+  if (!localFrame.ok) return localFrame;
+  if (parent === undefined) return localFrame;
+  const parentFrame = frameFromPlacement(parent);
+  return parentFrame.ok ? frameMul(parentFrame.value, localFrame.value) : parentFrame;
+}
+
+/** Validate every component and parent before allocating even the first output. */
+function validatePlacements(el: AnyBimElement, parent?: FrameInput): Result<void, BimError> {
+  const parentFrame = parent === undefined ? ok(IDENTITY_FRAME) : frameFromPlacement(parent);
+  if (!parentFrame.ok) return parentFrame;
+  const inputs: unknown[] = [];
+  if (el.category === 'STAIR' || el.category === 'RAMP') inputs.push(...el.spec.flights);
+  else if ('origin' in el.spec && 'axisX' in el.spec && 'axisZ' in el.spec) inputs.push(el.spec);
+  for (const input of inputs) {
+    const frame = resolvedPlacement(input, parent);
+    if (!frame.ok) return frame;
+    if (el.category === 'CURTAIN_WALL') {
+      for (const c of [...el.geometry.panels, ...el.geometry.mullions]) {
+        const component = frameFromPlacement({
+          origin: c.origin,
+          axisX: [1, 0, 0],
+          axisZ: [0, 0, 1],
+        });
+        if (!component.ok) return component;
+        const combined = frameMul(frame.value, component.value);
+        if (!combined.ok) return combined;
+      }
+    }
+  }
+  return ok(undefined);
 }

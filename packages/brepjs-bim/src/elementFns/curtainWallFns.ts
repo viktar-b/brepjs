@@ -4,6 +4,18 @@ import { ok, err } from 'brepjs';
 import type { CurtainWallSpec } from '../specs/curtainWallSpec.js';
 import type { BimError } from '../errors/bimError.js';
 import { fromBrepError, geometryError } from '../errors/bimError.js';
+import { reportedGeometryCleanup } from '../geometryCleanupDiagnostics.js';
+import {
+  cleanupOwnedResources,
+  cleanupReport,
+  type OwnedBodyResource,
+} from '../productBodyCleanup.js';
+
+interface CurtainGenerationScope {
+  itemIndex: number;
+  readonly temporaries: OwnedBodyResource[];
+  readonly outputs: OwnedBodyResource[];
+}
 
 /**
  * A placed box component of the curtain wall. `origin` is the corner of the box
@@ -13,8 +25,8 @@ import { fromBrepError, geometryError } from '../errors/bimError.js';
  * geometry (corner at 0,0,0).
  */
 export interface CurtainWallComponent {
-  readonly origin: [number, number, number];
-  readonly size: [number, number, number];
+  readonly origin: readonly [number, number, number];
+  readonly size: readonly [number, number, number];
   readonly solid: ValidSolid;
 }
 
@@ -27,7 +39,14 @@ export interface CurtainWallGrid {
 // Builds a single axis-aligned box solid with one corner at the local origin,
 // extending by [sizeX, sizeY, sizeZ]. Returned solid is unplaced template
 // geometry; placement is applied IFC-side.
-function boxSolid(sizeX: number, sizeY: number, sizeZ: number): Result<ValidSolid, BimError> {
+function boxSolid(
+  scope: CurtainGenerationScope,
+  sizeX: number,
+  sizeY: number,
+  sizeZ: number
+): Result<ValidSolid, BimError> {
+  const itemIndex = scope.outputs.length;
+  scope.itemIndex = itemIndex;
   const profileResult = polygon([
     [0, 0, 0],
     [sizeX, 0, 0],
@@ -43,7 +62,8 @@ function boxSolid(sizeX: number, sizeY: number, sizeZ: number): Result<ValidSoli
       )
     );
   }
-  using profile = profileResult.value;
+  const profile = profileResult.value;
+  scope.temporaries.push({ resource: profile, itemIndex });
   const solidResult = extrude(profile, [0, 0, sizeZ]);
   if (!solidResult.ok) {
     return err(
@@ -51,8 +71,8 @@ function boxSolid(sizeX: number, sizeY: number, sizeZ: number): Result<ValidSoli
     );
   }
   const solid = solidResult.value;
+  scope.outputs.push({ resource: solid, itemIndex });
   if (!isValidSolid(solid)) {
-    solid[Symbol.dispose]();
     return err(
       geometryError(
         'CURTAIN_WALL_INVALID_SOLID',
@@ -61,12 +81,6 @@ function boxSolid(sizeX: number, sizeY: number, sizeZ: number): Result<ValidSoli
     );
   }
   return ok(solid);
-}
-
-// Disposes every solid in the partially-built grid so a mid-build failure does
-// not leak WASM handles.
-function disposeComponents(components: CurtainWallComponent[]): void {
-  for (const c of components) c.solid[Symbol.dispose]();
 }
 
 /**
@@ -80,7 +94,10 @@ function disposeComponents(components: CurtainWallComponent[]): void {
  * its placement origin so the IFC writer can emit one IfcLocalPlacement per
  * component.
  */
-export function curtainWallToGrid(spec: CurtainWallSpec): Result<CurtainWallGrid, BimError> {
+function buildCurtainWallGrid(
+  spec: CurtainWallSpec,
+  scope: CurtainGenerationScope
+): Result<CurtainWallGrid, BimError> {
   const { width, height, columns, rows, panelThickness, mullionWidth, mullionDepth } = spec;
 
   const cellWidth = width / columns;
@@ -105,10 +122,8 @@ export function curtainWallToGrid(spec: CurtainWallSpec): Result<CurtainWallGrid
 
   for (let c = 0; c < columns; c++) {
     for (let r = 0; r < rows; r++) {
-      const solidResult = boxSolid(panelWidth, panelThickness, panelHeight);
+      const solidResult = boxSolid(scope, panelWidth, panelThickness, panelHeight);
       if (!solidResult.ok) {
-        disposeComponents(panels);
-        disposeComponents(mullions);
         return err(solidResult.error);
       }
       panels.push({
@@ -121,10 +136,8 @@ export function curtainWallToGrid(spec: CurtainWallSpec): Result<CurtainWallGrid
 
   // Vertical mullions: full-height bars on each of the (columns + 1) grid lines.
   for (let c = 0; c <= columns; c++) {
-    const solidResult = boxSolid(mullionWidth, mullionDepth, height);
+    const solidResult = boxSolid(scope, mullionWidth, mullionDepth, height);
     if (!solidResult.ok) {
-      disposeComponents(panels);
-      disposeComponents(mullions);
       return err(solidResult.error);
     }
     mullions.push({
@@ -137,10 +150,8 @@ export function curtainWallToGrid(spec: CurtainWallSpec): Result<CurtainWallGrid
   // Horizontal mullions (transoms): full-width bars on each of the (rows + 1)
   // grid lines.
   for (let r = 0; r <= rows; r++) {
-    const solidResult = boxSolid(width, mullionDepth, mullionWidth);
+    const solidResult = boxSolid(scope, width, mullionDepth, mullionWidth);
     if (!solidResult.ok) {
-      disposeComponents(panels);
-      disposeComponents(mullions);
       return err(solidResult.error);
     }
     mullions.push({
@@ -151,4 +162,40 @@ export function curtainWallToGrid(spec: CurtainWallSpec): Result<CurtainWallGrid
   }
 
   return ok({ panels, mullions });
+}
+
+/** Generate owned components, releasing every partial output on failure or failed temporary cleanup. */
+export function curtainWallToGrid(spec: CurtainWallSpec): Result<CurtainWallGrid, BimError> {
+  const scope: CurtainGenerationScope = { temporaries: [], outputs: [], itemIndex: 0 };
+  const context = { operation: 'curtainWallToGrid' };
+  let result: Result<CurtainWallGrid, BimError>;
+  try {
+    result = buildCurtainWallGrid(spec, scope);
+  } catch (cause) {
+    result = err(
+      geometryError('CURTAIN_WALL_BUILD_FAILED', 'Curtain wall generation threw', cause)
+    );
+  }
+  const cleanup = cleanupOwnedResources(
+    result.ok ? scope.temporaries : [...scope.temporaries, ...scope.outputs],
+    context
+  );
+  const diagnostics = [
+    ...(result.ok
+      ? []
+      : reportedGeometryCleanup(result.error, context.operation, { itemIndex: scope.itemIndex })),
+    ...(cleanup.kind === 'FAILED' ? cleanup.diagnostics : []),
+  ];
+  if (!result.ok)
+    return err({
+      ...result.error,
+      metadata: { ...result.error.metadata, cleanup: cleanupReport(diagnostics) },
+    });
+  if (diagnostics.length === 0) return result;
+  const outputCleanup = cleanupOwnedResources(scope.outputs, context);
+  if (outputCleanup.kind === 'FAILED') diagnostics.push(...outputCleanup.diagnostics);
+  return err({
+    ...geometryError('CURTAIN_WALL_CLEANUP_FAILED', 'Curtain wall temporary cleanup failed'),
+    metadata: { cleanup: cleanupReport(diagnostics) },
+  });
 }

@@ -1,16 +1,28 @@
-import { locate, type AnyShape, type Dimension, type TransformOp } from 'brepjs';
-import { placementToMatrix, type FrameInput, type Vec3 } from './import/placement.js';
+import {
+  composeTransforms,
+  locate,
+  type AnyShape,
+  type Dimension,
+  type TransformOp,
+  type ComposedTransform,
+} from 'brepjs';
+import { frameToMatrix, type RigidFrame, type Vec3 } from './placementFrame.js';
 
 const RAD_TO_DEG = 180 / Math.PI;
 const ROTATION_EPSILON = 1e-12;
 
 /** Applies a rigid placement as a location so the source BRep is not rebuilt. */
-export function locateShapeInFrame<T extends AnyShape<Dimension>>(shape: T, frame: FrameInput): T {
+export function locateShapeInFrame<T extends AnyShape<Dimension>>(shape: T, frame: RigidFrame): T {
   return locate(shape, placementOps(frame));
 }
 
-function placementOps(frame: FrameInput): readonly TransformOp[] {
-  const matrix = placementToMatrix(frame);
+/** The caller owns this temporary and must observe any failure from its cleanup. */
+export function composeFrameTransform(frame: RigidFrame): ComposedTransform {
+  return composeTransforms(placementOps(frame));
+}
+
+function placementOps(frame: RigidFrame): readonly TransformOp[] {
+  const matrix = frameToMatrix(frame);
   const rotation = rotationOp(matrix.linear);
   const translation: TransformOp = { type: 'translate', v: matrix.translation };
   return rotation === null ? [translation] : [rotation, translation];

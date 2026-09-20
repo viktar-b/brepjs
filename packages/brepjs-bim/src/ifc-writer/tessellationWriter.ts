@@ -4,7 +4,7 @@ import type { ValidSolid } from 'brepjs';
 import type { IfcWriter } from './ifcWriter.js';
 import { toIfcLengthM } from '../units/units.js';
 import { writeAxis2Placement3D } from './headerWriter.js';
-import type { FrameInput } from '../import/placement.js';
+import type { FrameInput } from '../placementFrame.js';
 import type { NonEmpty } from '../types/productBody.js';
 
 export interface TessellationResult {
@@ -35,7 +35,7 @@ export type TessellationPreparation =
   | { readonly ok: true; readonly value: PreparedTessellation }
   | { readonly ok: false; readonly reason: string; readonly cause?: unknown };
 
-export interface ExactBodyRepresentationIds {
+export interface ProductBodyRepresentationIds {
   readonly localPlacementId: number;
   readonly productDefinitionShapeId: number;
   readonly bodyItemIds: readonly number[];
@@ -151,13 +151,13 @@ export function writePreparedTessellationBody(
   return { productDefinitionShapeId, bodyItemIds };
 }
 
-export function writeExactBodyGeometry(
+export function writeProductBodyGeometry(
   w: IfcWriter,
   placement: FrameInput,
   items: NonEmpty<PreparedTessellation>,
   geomSubContextId: number,
   parentPlacementId: number | null
-): ExactBodyRepresentationIds {
+): ProductBodyRepresentationIds {
   const placement3DId = writeAxis2Placement3D(
     w,
     [
