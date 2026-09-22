@@ -58,6 +58,7 @@ apps/playground/dist/
 # Scratch: OpenSCAD reference clone, example screenshots, candidate scratch, etc.
 tmp/
 **/tmp/
+.scratch/
 
 # Generated example/render outputs (SVG/HTML produced by running examples)
 examples/output/
