@@ -27,6 +27,7 @@ import { familiesToBim } from '../src/familiesAdapter.js';
 import { fromIfc } from '../src/import/fromIfc.js';
 import { disposeImportedModel } from '../src/import/importedModel.js';
 import { toIfc } from '../src/serialize/toIfc.js';
+import { recordIfcBodyFixture } from './helpers/ifcBodyFixture.js';
 import { bodySolids } from '../src/types/productBody.js';
 import type { BimCategory } from '../src/types/bimTypes.js';
 
@@ -174,6 +175,12 @@ describe('authoritative exact Bodies on typed civil Products', () => {
         expectBodyClose(placed, authored, 3, 'eager projection');
 
         const bytes = unwrap(await toIfc(model, IFC_METADATA));
+        recordIfcBodyFixture(`families-authored-${bodyCase.category}`, bytes, {
+          guid: element.guid,
+          category: bodyCase.category,
+          itemVolumes: placed.map((solid) => unwrap(measureVolume(solid))),
+          bounds: getBounds(authored),
+        });
         await expectIfcOccurrence(bytes, element.guid, bodyCase);
         const imported = unwrap(await fromIfc(bytes));
         try {

@@ -1,8 +1,8 @@
 /**
  * brepjs-families -> BimModel adapter. Consumes a resolved element tree and
  * feeds each element's PRE-DESUGARED props into parametric specs. Civil wall
- * and railing Products additionally compare the evaluated authored Body with
- * that spec Body and retain an exact Body when they diverge. GlobalIds derive
+ * and railing Products retain the evaluated authored Body as EXACT
+ * after generating the candidate and applying openings. GlobalIds derive
  * from families key paths (stable under reordering), not insertion order.
  *
  * Scope: building Storey containers; civil Site/Bridge/recursive Bridge Part
@@ -77,9 +77,9 @@ import {
 import { specError, type BimError } from './errors/bimError.js';
 import type { FillsOpeningRel } from './types/relationships.js';
 import { disposeProductBody } from './types/productBody.js';
+import { prepareCivilProductBody } from './familiesProductBody.js';
 import { reportedGeometryCleanup } from './geometryCleanupDiagnostics.js';
 import { cleanupReport } from './productBodyCleanup.js';
-import { selectCivilProductBody } from './familiesProductBody.js';
 
 export interface FamiliesToBimOptions {
   readonly project: ProjectSpec;
@@ -92,9 +92,9 @@ export interface FamiliesToBimOptions {
    * returns FAMILIES_PRODUCT_BODY_EVALUATOR_REQUIRED with the element path and
    * mapped category, and does not fall back to a parametric envelope.
    * Conventional archetype walls and railings stay specification-authoritative
-   * and do not require an evaluator. When present, civil walls and railings
-   * compare the evaluated Body with their post-opening parametric Body and
-   * retain the authored Body when they differ. Supplying this option does not
+   * and do not require an evaluator. Civil walls and railings always retain
+   * independent authored items as EXACT, including when coincident
+   * with the post-opening candidate. Supplying this option does not
    * opt unsupported products into the proxy fallback.
    */
   readonly bodyEvaluator?: csg.Evaluator | undefined;
@@ -1321,27 +1321,26 @@ function installCivilProductBody(
       )
     );
   }
-  const selected = selectCivilProductBody({
+  const prepared = prepareCivilProductBody({
     element: el,
     category,
     evaluator,
     productWorldFrame,
-    parametricBody: target.geometry,
   });
-  if (!selected.ok) return selected;
-  if (selected.value.kind === 'PARAMETRIC') return ok(undefined);
-
-  const takeover = model.takeExactProductBody(localId, selected.value.body);
-  if (takeover.ok) return ok(undefined);
-  const cleanup = disposeProductBody(selected.value.body);
+  if (!prepared.ok) return prepared;
+  const adopted = model.takeExactProductBody(localId, prepared.value);
+  // Successful takeover transfers ownership even if retiring the old candidate failed.
+  // The model keeps that diagnostic and owns the new Body through later errors.
+  if (adopted.ok) return ok(undefined);
+  const cleanup = disposeProductBody(prepared.value);
   return err({
-    ...takeover.error,
+    ...adopted.error,
     metadata: {
-      ...takeover.error.metadata,
+      ...adopted.error.metadata,
       keyPath: el.keyPath,
       category,
       cleanup: cleanupReport([
-        ...reportedGeometryCleanup(takeover.error, 'installCivilProductBody'),
+        ...reportedGeometryCleanup(adopted.error, 'installCivilProductBody'),
         ...(cleanup.kind === 'FAILED' ? cleanup.diagnostics : []),
       ]),
     },

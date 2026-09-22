@@ -83,3 +83,5 @@ Model commands validate and stage geometry, identities, and relationships before
 The model rejects retained, pending, and uncertain handles and aliases exposing the same native resource object. Independent copies remain valid. Arbitrary native aliases represented by different resource objects and cross-model ownership remain caller responsibilities. Failed releases are recorded and never retried. Disposal attempts every owned resource before throwing an aggregate; repeated disposal makes no further release attempts.
 
 Recipe creations are eligible for nominal recipe quantities. EXACT takeover clears eligibility, and successful recipe opening edits preserve it. Shared copy and placement operations return independent owned items; borrowed Body reads do not transfer ownership. The public Body remains a PARAMETRIC singleton or a nonempty EXACT collection.
+
+Civil Families Wall and Railing projection retains every authored item as `EXACT`, even when its geometry coincides with a recipe. Evaluator geometry stays borrowed; the adapter copies each item into Product-local coordinates and transfers it through transactional takeover after registering openings.
