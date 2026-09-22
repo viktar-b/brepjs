@@ -62,7 +62,7 @@ function singleWrapperChild(retained: ValidSolid): Result<void, BimError> {
   } else {
     const rawChildren = kernel.iterShapes(retained.wrapped, 'solid');
     const cleanup = cleanupOwnedResources(
-      rawChildren.map((raw, itemIndex) => ({
+      rawChildren.map((raw: { delete(): void }, itemIndex) => ({
         resource: { [Symbol.dispose]: () => kernel.dispose(raw) },
         itemIndex,
       })),

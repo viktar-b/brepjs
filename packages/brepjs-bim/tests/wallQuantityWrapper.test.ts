@@ -16,7 +16,7 @@ it('rejects a split recipe wrapper before a later child cast can strand native r
   const { model, localId } = recipeWallFixture();
   const kernel = getKernel();
   const release = kernel.dispose.bind(kernel);
-  let leaked: ReturnType<typeof kernel.downcast> | undefined;
+  let leaked: unknown;
   try {
     unwrap(
       model.addDoor({
@@ -32,10 +32,10 @@ it('rejects a split recipe wrapper before a later child cast can strand native r
     if (wall?.category !== 'WALL') throw new Error('Missing Wall');
     const downcast = kernel.downcast.bind(kernel);
     let casts = 0;
-    vi.spyOn(kernel, 'downcast').mockImplementation((raw, type) => {
+    vi.spyOn(kernel, 'downcast').mockImplementation((raw, type): unknown => {
       if (type === 'solid') {
         if (++casts === 2) throw new Error('later child cast');
-        const output = downcast(raw, type);
+        const output: unknown = downcast(raw, type);
         leaked = output;
         return output;
       }
@@ -49,7 +49,7 @@ it('rejects a split recipe wrapper before a later child cast can strand native r
     vi.restoreAllMocks();
     model[Symbol.dispose]();
     // Red-phase repair only: the injected later cast prevented cache registration.
-    if (leaked !== undefined) release(leaked);
+    if (leaked !== undefined) release(nativeResource(leaked));
   }
   if (baseline !== null) expect(nativeShapeCount()).toBe(baseline);
 });
@@ -80,8 +80,8 @@ it.each(['before', 'after'] as const)(
       const live = currentKernel === 'occt-wasm' ? nativeShapeCount() : null;
       Object.defineProperty(kernel, 'subShapeCount', { value: undefined, configurable: true });
       const iter = kernel.iterShapes.bind(kernel);
-      let children: ReturnType<typeof kernel.iterShapes> = [];
-      vi.spyOn(kernel, 'iterShapes').mockImplementation((raw, type) => {
+      let children: readonly unknown[] = [];
+      vi.spyOn(kernel, 'iterShapes').mockImplementation((raw, type): unknown[] => {
         const output = iter(raw, type);
         if (raw === parent.wrapped && type === 'solid') children = output;
         return output;
@@ -136,8 +136,8 @@ it('reclaims the sole child when its native cast fails without releasing the ret
     const live = currentKernel === 'occt-wasm' ? nativeShapeCount() : null;
     const kernel = getKernel();
     const downcast = kernel.downcast.bind(kernel);
-    let failed: Parameters<typeof kernel.dispose>[0] | undefined;
-    vi.spyOn(kernel, 'downcast').mockImplementation((raw, type) => {
+    let failed: unknown;
+    vi.spyOn(kernel, 'downcast').mockImplementation((raw, type): unknown => {
       if (type === 'solid') {
         failed = raw;
         throw new Error('sole child cast');
@@ -159,3 +159,17 @@ it('reclaims the sole child when its native cast fails without releasing the ret
   }
   if (baseline !== null) expect(nativeShapeCount()).toBe(baseline);
 });
+
+function nativeResource(value: unknown): { delete(): void } {
+  if (!isNativeResource(value)) throw new Error('Expected native resource');
+  return value;
+}
+
+function isNativeResource(value: unknown): value is { delete(): void } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'delete' in value &&
+    typeof value.delete === 'function'
+  );
+}
