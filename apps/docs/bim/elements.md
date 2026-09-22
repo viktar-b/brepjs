@@ -75,3 +75,11 @@ IfcOpenShell 0.8.5 still subtracts Reference openings in its default geometry en
 a separate Reference context. If a replacement Body adds material inside a retained opening's
 region, that engine can remove the added material. Schema validation and shape generation alone
 do not detect this difference; check the representation semantics and retained item geometry.
+
+### Transactional model geometry
+
+Model commands validate and stage geometry, identities, and relationships before committing. Inputs stay caller-owned on failure. Successful `takeExactProductBody(localId, body)` transfers every EXACT item even if retiring the old recipe solid fails; it returns `ok(undefined)`. Read `model.getGeometryCleanupDiagnostics()` for cleanup failures. Never dispose the transferred inputs after success.
+
+The model rejects retained, pending, and uncertain handles and aliases exposing the same native resource object. Independent copies remain valid. Arbitrary native aliases represented by different resource objects and cross-model ownership remain caller responsibilities. Failed releases are recorded and never retried. Disposal attempts every owned resource before throwing an aggregate; repeated disposal makes no further release attempts.
+
+Recipe creations are eligible for nominal recipe quantities. EXACT takeover clears eligibility, and successful recipe opening edits preserve it. Shared copy and placement operations return independent owned items; borrowed Body reads do not transfer ownership. The public Body remains a PARAMETRIC singleton or a nonempty EXACT collection.

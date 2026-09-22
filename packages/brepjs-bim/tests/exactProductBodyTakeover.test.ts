@@ -1,13 +1,20 @@
-import type { BimElement } from '../src/types/bimTypes.js';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { box, cut, cylinder, measureVolume, translate, type ValidSolid } from 'brepjs';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  box,
+  clone,
+  cut,
+  cylinder,
+  getSolids,
+  isValidSolid,
+  measureVolume,
+  translate,
+} from 'brepjs';
 import { initKernel } from '../../../tests/setup.js';
 import { BimModel } from '../src/model/bimModel.js';
-import {
-  placedSolids,
-  setPlacedGeometryTestHooksForTesting,
-} from '../src/elementFns/placedGeometry.js';
-import { bodySolids, type ProductBody } from '../src/types/productBody.js';
+import { placedSolids } from '../src/elementFns/placedGeometry.js';
+import { bodySolids } from '../src/types/productBody.js';
+import { setProductBodyTestHooksForTesting } from '../src/productBodyTestHooks.js';
+import type { BimElement } from '../src/types/bimTypes.js';
 import type { LocalId } from '../src/identity/localId.js';
 import { toIfc } from '../src/serialize/toIfc.js';
 import {
@@ -24,9 +31,10 @@ beforeAll(async () => {
 }, 30_000);
 
 afterEach(() => {
-  setPlacedGeometryTestHooksForTesting(null);
+  setProductBodyTestHooksForTesting(null);
   setProductBodyItemPreparerForTesting(null);
   setIfcWriterTestHooksForTesting(null);
+  vi.restoreAllMocks();
 });
 
 const FRAME = {
@@ -51,28 +59,23 @@ const RAILING_SPEC = {
   materialName: 'Steel',
 };
 
-type ExactProductBody = Extract<ProductBody, { readonly kind: 'EXACT' }>;
-
 describe('BimModel.takeExactProductBody', () => {
   it('atomically transfers every exact handle and disposes the superseded Body once', () => {
-    const model = new BimModel();
+    using model = new BimModel();
     const wallId = required(model.addWall(WALL_SPEC));
     const wallBefore = requiredElement(model, wallId, 'WALL');
     const oldSolid = bodySolids(wallBefore.geometry)[0];
-    let oldDisposals = 0;
-    oldSolid.onDispose(() => oldDisposals++);
+    const oldRelease = vi.spyOn(oldSolid, Symbol.dispose);
 
     const first = box(100, 100, 100);
     const source = box(50, 50, 50);
     const second = translate(source, [200, 0, 0]);
     source[Symbol.dispose]();
-    const exactDisposals: [number, number] = [0, 0];
-    first.onDispose(() => exactDisposals[0]++);
-    second.onDispose(() => exactDisposals[1]++);
+    const releases = [vi.spyOn(first, Symbol.dispose), vi.spyOn(second, Symbol.dispose)];
 
     const takeover = model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [first, second] });
     expect(takeover.ok).toBe(true);
-    expect(oldDisposals).toBe(1);
+    expect(oldRelease).toHaveBeenCalledTimes(1);
     expect(first.disposed).toBe(false);
     expect(second.disposed).toBe(false);
     expect(requiredElement(model, wallId, 'WALL').geometry).toEqual({
@@ -81,11 +84,11 @@ describe('BimModel.takeExactProductBody', () => {
     });
 
     model[Symbol.dispose]();
-    expect(exactDisposals).toEqual([1, 1]);
+    releases.forEach((release) => expect(release).toHaveBeenCalledTimes(1));
   });
 
   it('rejects missing and unsupported targets without taking caller inputs', () => {
-    const model = new BimModel();
+    using model = new BimModel();
     const slabId = required(
       model.addSlab({
         length: 1_000,
@@ -116,33 +119,39 @@ describe('BimModel.takeExactProductBody', () => {
   });
 
   it('rejects empty, duplicate, disposed, and invalid collections before mutation', () => {
-    const model = new BimModel();
+    using model = new BimModel();
     const wallId = required(model.addWall(WALL_SPEC));
     const original = requiredElement(model, wallId, 'WALL').geometry;
 
-    const emptyBody = { kind: 'EXACT', solids: [] } as unknown as ExactProductBody;
-    expect(errorCode(model.takeExactProductBody(wallId, emptyBody))).toBe('EXACT_BODY_EMPTY');
+    expect(
+      Reflect.apply(model.takeExactProductBody.bind(model), model, [
+        wallId,
+        { kind: 'EXACT', solids: [] },
+      ])
+    ).toMatchObject({ ok: false, error: { code: 'BODY_INVALID_DESCRIPTOR' } });
 
     using duplicate = box(30, 30, 30);
     expect(
       errorCode(
         model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [duplicate, duplicate] })
       )
-    ).toBe('EXACT_BODY_DUPLICATE_SOLID');
+    ).toBe('BODY_DUPLICATE_ITEM');
 
     const disposed = box(40, 40, 40);
-    let disposedCalls = 0;
-    disposed.onDispose(() => disposedCalls++);
+    const disposedRelease = vi.spyOn(disposed, Symbol.dispose);
     disposed[Symbol.dispose]();
     expect(
       errorCode(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [disposed] }))
-    ).toBe('EXACT_BODY_SOLID_DISPOSED');
-    expect(disposedCalls).toBe(1);
+    ).toBe('BODY_INVALID_ITEM');
+    expect(disposedRelease).toHaveBeenCalledTimes(1);
 
-    const invalid = { disposed: false } as unknown as ValidSolid;
+    const invalid = { disposed: false };
     expect(
-      errorCode(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [invalid] }))
-    ).toBe('EXACT_BODY_SOLID_INVALID');
+      Reflect.apply(model.takeExactProductBody.bind(model), model, [
+        wallId,
+        { kind: 'EXACT', solids: [invalid] },
+      ])
+    ).toMatchObject({ ok: false, error: { code: 'BODY_INVALID_ITEM', itemIndex: 0 } });
     expect(requiredElement(model, wallId, 'WALL').geometry).toBe(original);
     model[Symbol.dispose]();
   });
@@ -176,29 +185,28 @@ describe('BimModel.takeExactProductBody', () => {
   });
 
   it('rejects reuse of the model-owned parametric solid', () => {
-    const model = new BimModel();
+    using model = new BimModel();
     const wallId = required(model.addWall(WALL_SPEC));
     const original = requiredElement(model, wallId, 'WALL').geometry;
     if (original.kind !== 'PARAMETRIC') throw new Error('Expected a parametric wall Body');
-    let originalDisposals = 0;
-    original.solid.onDispose(() => originalDisposals++);
+    const originalRelease = vi.spyOn(original.solid, Symbol.dispose);
 
     const takeover = model.takeExactProductBody(wallId, {
       kind: 'EXACT',
       solids: [original.solid],
     });
 
-    expect(errorCode(takeover)).toBe('EXACT_BODY_SOLID_OWNERSHIP_CONFLICT');
+    expect(errorCode(takeover)).toBe('BODY_OWNERSHIP_CONFLICT');
     expect(requiredElement(model, wallId, 'WALL').geometry).toBe(original);
     expect(original.solid.disposed).toBe(false);
     model[Symbol.dispose]();
-    expect(originalDisposals).toBe(1);
+    expect(originalRelease).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('exact wall mutation and multi-solid placement', () => {
   it('rejects later doors and windows without changing Body or relationships', () => {
-    const model = new BimModel();
+    using model = new BimModel();
     const wallId = required(model.addWall(WALL_SPEC));
     const exact = box(1_000, 100, 500);
     required(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [exact] }));
@@ -232,7 +240,7 @@ describe('exact wall mutation and multi-solid placement', () => {
   });
 
   it('returns one independent caller-owned placed copy per exact Body item', () => {
-    const model = new BimModel();
+    using model = new BimModel();
     const railingId = required(model.addRailing(RAILING_SPEC));
     const first = box(100, 20, 20);
     const second = box(100, 30, 30);
@@ -249,7 +257,7 @@ describe('exact wall mutation and multi-solid placement', () => {
   });
 
   it('preserves curved exact-Body volume through rotated placement', () => {
-    const model = new BimModel();
+    using model = new BimModel();
     const angle = Math.PI / 6;
     const wallId = required(
       model.addWall({
@@ -260,7 +268,14 @@ describe('exact wall mutation and multi-solid placement', () => {
     );
     using outer = box(1_200, 100, 500);
     using cutter = cylinder(125, 200, { at: [300, -50, 250], axis: [0, 1, 0] });
-    const exact = required(cut(outer, cutter));
+    using cutShape = required(cut(outer, cutter));
+    // A Boolean may return a compound wrapper around its single solid.
+    const items = getSolids(cutShape);
+    expect(items).toHaveLength(1);
+    const [item] = items;
+    if (item === undefined || !isValidSolid(item))
+      throw new Error('Expected one valid curved solid');
+    const exact = required(clone(item));
     const localVolume = required(measureVolume(exact));
     required(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [exact] }));
 
@@ -277,24 +292,23 @@ describe('exact wall mutation and multi-solid placement', () => {
   });
 
   it('disposes all partial placement outputs while preserving stored exact inputs', () => {
-    const model = new BimModel();
+    using model = new BimModel();
     const railingId = required(model.addRailing(RAILING_SPEC));
     const first = box(100, 20, 20);
     const second = box(100, 30, 30);
     required(model.takeExactProductBody(railingId, { kind: 'EXACT', solids: [first, second] }));
-    const placedDisposals = [0, 0];
-    let placedIndex = 0;
-    setPlacedGeometryTestHooksForTesting({
-      afterPlaced: (solid) => {
-        const current = placedIndex++;
-        solid.onDispose(() => placedDisposals[current] = (placedDisposals[current] ?? 0) + 1);
-        if (current === 1) throw new Error('injected later placement failure');
+    const placedReleases: ReturnType<typeof vi.fn>[] = [];
+    setProductBodyTestHooksForTesting({
+      afterAllocate: ({ solid }) => {
+        placedReleases.push(vi.spyOn(solid, Symbol.dispose));
+        if (placedReleases.length === 2) throw new Error('injected later placement failure');
       },
     });
 
     const placed = placedSolids(requiredElement(model, railingId, 'RAILING'));
-    expect(errorCode(placed)).toBe('PLACED_GEOMETRY_FAILED');
-    expect(placedDisposals).toEqual([1, 1]);
+    expect(errorCode(placed)).toBe('BODY_OPERATION_FAILED');
+    expect(placedReleases).toHaveLength(2);
+    placedReleases.forEach((release) => expect(release).toHaveBeenCalledTimes(1));
     expect(first.disposed).toBe(false);
     expect(second.disposed).toBe(false);
     model[Symbol.dispose]();
@@ -303,7 +317,7 @@ describe('exact wall mutation and multi-solid placement', () => {
 
 describe('exact Product Body IFC integration', () => {
   it('round-trips a two-item exact railing without changing IFC classification', async () => {
-    const model = initializedModel();
+    using model = initializedModel();
     const railingId = required(model.addRailing(RAILING_SPEC));
     const first = box(1_000, 20, 20);
     const source = box(1_000, 20, 20);
@@ -325,7 +339,7 @@ describe('exact Product Body IFC integration', () => {
   });
 
   it('keeps overlapping exact wall items separate and writes union NetVolume', async () => {
-    const model = initializedModel();
+    using model = initializedModel();
     const wallId = required(model.addWall(WALL_SPEC));
     const first = box(100, 100, 100);
     const source = box(100, 100, 100);
@@ -353,7 +367,7 @@ describe('exact Product Body IFC integration', () => {
   });
 
   it('preflights every exact Body before writing IFC lines', async () => {
-    const model = initializedModel();
+    using model = initializedModel();
     const wallId = required(model.addWall(WALL_SPEC));
     const railingId = required(model.addRailing(RAILING_SPEC));
     const exactWall = box(100, 100, 100);

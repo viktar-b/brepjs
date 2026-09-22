@@ -23,6 +23,7 @@ interface ElementIdentityOptions {
 
 declare class BimModel {
   #private;
+  getGeometryCleanupDiagnostics(): readonly GeometryCleanupDiagnostic[];
   init(spec: ProjectSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
   [Symbol.dispose](): void;
   addSite(spec: SiteSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
@@ -60,11 +61,7 @@ declare class BimModel {
    */
   addRamp(spec: RampSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
   addRailing(spec: RailingSpec, options?: ElementIdentityOptions): Result<LocalId, BimError>;
-  /**
-   * Atomically replaces a parametric wall or railing Body with authoritative,
-   * caller-owned exact solids. Success transfers every supplied handle to this
-   * model. Failure leaves both the model and all supplied handles unchanged.
-   */
+  /** Success transfers every input even when retirement fails; query cleanup diagnostics separately. */
   takeExactProductBody(
     localId: LocalId,
     body: Extract<
@@ -177,6 +174,8 @@ declare class BimModel {
   placeIn(elementId: LocalId, containerId: LocalId): void;
   getProject(): BimElement<'PROJECT'> | null;
   getElement(id: LocalId): AnyBimElement | null;
+  /** Whether recipe commands still justify this element's recipe-derived quantities. */
+  isRecipeQuantityEligible(id: LocalId): boolean;
   /**
    * A serializable summary of the model's structure, rooted at the project and
    * walking the IFC spatial hierarchy (AGGREGATES: project → site → building →
@@ -274,7 +273,7 @@ type ProductBody =
       readonly solids: NonEmpty<ValidSolid>;
     };
 
-/** Returns borrowed Product-local solids. The model retains ownership. */
+/** Borrow protected Product-local items. Borrowers must not dispose the retained handles. */
 declare function bodySolids(body: ProductBody): NonEmpty<ValidSolid>;
 
 interface FrameInput {
@@ -1957,8 +1956,8 @@ declare function fromBrepError(inner: BrepError, code: string, message: string):
  * geometry (corner at 0,0,0).
  */
 interface CurtainWallComponent {
-  readonly origin: [number, number, number];
-  readonly size: [number, number, number];
+  readonly origin: readonly [number, number, number];
+  readonly size: readonly [number, number, number];
   readonly solid: ValidSolid;
 }
 

@@ -1,3 +1,4 @@
+import type { BimElement } from '../src/types/bimTypes.js';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { csg, getSolids, isSolid, measureVolume, unwrap, type Solid } from 'brepjs';
 import {
@@ -134,7 +135,7 @@ describe('Families civil Product Body authority', () => {
   it('selects EXACT when two sub-1 mm³ volumes disagree relatively', () => {
     const root = oneProduct(TinyUnequalWall({ key: 'wall' }));
     using evaluator = new csg.Evaluator();
-    let candidateVolumes: readonly [number, number] | null = null;
+    const candidateVolumes: (readonly [number, number])[] = [];
     setFamiliesProductBodyTestHooksForTesting({
       beforeCoincidence: (exact, parametric) => {
         const exactSolid = bodySolids(exact)[0];
@@ -142,19 +143,20 @@ describe('Families civil Product Body authority', () => {
         if (exactSolid === undefined || parametricSolid === undefined) {
           throw new Error('Expected coincidence solids');
         }
-        candidateVolumes = [
+        candidateVolumes.push([
           unwrap(measureVolume(exactSolid)),
           unwrap(measureVolume(parametricSolid)),
-        ];
+        ]);
       },
     });
     const projected = unwrap(familiesToBim(root, { project: PROJECT, bodyEvaluator: evaluator }));
     using model = projected.model;
     const wall = requiredElement(model, projected.idByKeyPath.get('level/wall'), 'WALL');
     expect(wall.geometry.kind).toBe('EXACT');
-    expect(candidateVolumes).not.toBeNull();
-    if (candidateVolumes === null) throw new Error('Expected coincidence volumes');
-    const [authoredVolume, parametricVolume] = candidateVolumes;
+    expect(candidateVolumes).toHaveLength(1);
+    const [measured] = candidateVolumes;
+    if (measured === undefined) throw new Error('Expected coincidence volumes');
+    const [authoredVolume, parametricVolume] = measured;
     expect(authoredVolume).toBeLessThan(1);
     expect(parametricVolume).toBeLessThan(1);
     expect(Math.abs(authoredVolume - parametricVolume)).toBeLessThan(1e-6);
@@ -169,7 +171,10 @@ describe('Families civil Product Body authority', () => {
     });
     expect(errorCode(result)).toBe('FAMILIES_PRODUCT_BODY_EVALUATOR_REQUIRED');
     if (!result.ok) {
-      expect(result.error.metadata).toEqual({ keyPath: 'level/railing', category: 'RAILING' });
+      expect(result.error.metadata).toMatchObject({
+        keyPath: 'level/railing',
+        category: 'RAILING',
+      });
     }
   });
 
@@ -212,11 +217,15 @@ describe('Families civil Product Body authority', () => {
     const copyDisposals = [0, 0];
     const localizedDisposals = [0, 0];
     setFamiliesProductBodyTestHooksForTesting({
-      afterCopy: (itemIndex, solid) => solid.onDispose(() => copyDisposals[itemIndex]++),
+      afterCopy: (itemIndex, solid) =>
+        solid.onDispose(() => (copyDisposals[itemIndex] = (copyDisposals[itemIndex] ?? 0) + 1)),
       beforeLocalize: (itemIndex) => {
         if (itemIndex === 1) throw new Error('injected later localization failure');
       },
-      afterLocalized: (itemIndex, solid) => solid.onDispose(() => localizedDisposals[itemIndex]++),
+      afterLocalized: (itemIndex, solid) =>
+        solid.onDispose(
+          () => (localizedDisposals[itemIndex] = (localizedDisposals[itemIndex] ?? 0) + 1)
+        ),
     });
 
     const result = familiesToBim(root, { project: PROJECT, bodyEvaluator: evaluator });
@@ -297,16 +306,16 @@ function observeSources(evaluator: csg.Evaluator, element: ResolvedElement): num
   const sources: readonly Solid[] = isSolid(evaluated) ? [evaluated] : getSolids(evaluated);
   const disposals = sources.map(() => 0);
   sources.forEach((solid, itemIndex) => {
-    solid.onDispose(() => disposals[itemIndex]++);
+    solid.onDispose(() => (disposals[itemIndex] = (disposals[itemIndex] ?? 0) + 1));
   });
   return disposals;
 }
 
-function requiredElement<C extends 'WALL' | 'RAILING'>(
+function requiredElement(
   model: BimModel,
   localId: LocalId | undefined,
-  category: C
-): Extract<ReturnType<BimModel['getAllElements']>[number], { category: C }> {
+  category: 'WALL' | 'RAILING'
+): BimElement<'WALL'> | BimElement<'RAILING'> {
   if (localId === undefined) throw new Error(`Expected ${category} local id`);
   const element = model.getElement(localId);
   if (element === null || element.category !== category) {

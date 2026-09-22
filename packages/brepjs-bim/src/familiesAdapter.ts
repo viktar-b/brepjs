@@ -77,6 +77,8 @@ import {
 import { specError, type BimError } from './errors/bimError.js';
 import type { FillsOpeningRel } from './types/relationships.js';
 import { disposeProductBody } from './types/productBody.js';
+import { reportedGeometryCleanup } from './geometryCleanupDiagnostics.js';
+import { cleanupReport } from './productBodyCleanup.js';
 import { selectCivilProductBody } from './familiesProductBody.js';
 
 export interface FamiliesToBimOptions {
@@ -1330,8 +1332,20 @@ function installCivilProductBody(
   if (selected.value.kind === 'PARAMETRIC') return ok(undefined);
 
   const takeover = model.takeExactProductBody(localId, selected.value.body);
-  if (!takeover.ok) disposeProductBody(selected.value.body);
-  return takeover;
+  if (takeover.ok) return ok(undefined);
+  const cleanup = disposeProductBody(selected.value.body);
+  return err({
+    ...takeover.error,
+    metadata: {
+      ...takeover.error.metadata,
+      keyPath: el.keyPath,
+      category,
+      cleanup: cleanupReport([
+        ...reportedGeometryCleanup(takeover.error, 'installCivilProductBody'),
+        ...(cleanup.kind === 'FAILED' ? cleanup.diagnostics : []),
+      ]),
+    },
+  });
 }
 
 interface ProjectionWalkState {
@@ -1362,24 +1376,40 @@ export function familiesToBim(
   options: FamiliesToBimOptions
 ): Result<FamiliesBimResult, BimError> {
   const model = new BimModel();
-  let transferred = false;
+  let projected: Result<FamiliesBimResult, BimError>;
   try {
     preflightFamilyFrames(root, IDENTITY_FRAME, IDENTITY_FRAME, 0);
-    const projected = projectFamiliesToBim(root, options, model);
-    transferred = projected.ok;
-    return projected;
+    projected = projectFamiliesToBim(root, options, model);
   } catch (cause) {
-    if (cause instanceof FrameProjectionError) return err(cause.error);
-    return err(
-      specError(
-        'FAMILIES_PROJECTION_FAILED',
-        `familiesToBim: unexpected projection failure at '${root.keyPath}'`,
-        cause
-      )
+    projected = err(
+      cause instanceof FrameProjectionError
+        ? cause.error
+        : specError(
+            'FAMILIES_PROJECTION_FAILED',
+            `familiesToBim: unexpected projection failure at '${root.keyPath}'`,
+            cause
+          )
     );
-  } finally {
-    if (!transferred) model[Symbol.dispose]();
   }
+  if (projected.ok) return projected;
+  try {
+    model[Symbol.dispose]();
+  } catch {
+    // The model records each failed attempt before throwing and never retries it.
+    // Preserve the projection error; attach cleanup diagnostics below.
+  }
+  const cleanup = reportedGeometryCleanup(
+    {
+      ...projected.error,
+      cause: projected.error,
+      metadata: { cleanup: cleanupReport(model.getGeometryCleanupDiagnostics()) },
+    },
+    'familiesToBim'
+  );
+  return err({
+    ...projected.error,
+    metadata: { ...projected.error.metadata, cleanup: cleanupReport(cleanup) },
+  });
 }
 
 /** Validate the existing Families placement tree before any eager recipe or evaluator work. */
