@@ -166,7 +166,7 @@ describe('authoritative exact Bodies on typed civil Products', () => {
       const element = required(model.getElement(localId), 'projected element');
       expect(element.category).toBe(bodyCase.category);
       if (element.category !== bodyCase.category) throw new Error('Projected category mismatch');
-      expect(element.geometry.kind).toBe('EXACT');
+      expect(element.geometry.kind).toBe('AUTHORITATIVE');
       expect(bodySolids(element.geometry)).toHaveLength(bodyCase.authoredSolidCount);
 
       const placed = unwrap(placedSolids(element));

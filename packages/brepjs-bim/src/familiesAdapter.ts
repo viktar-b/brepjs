@@ -1,7 +1,7 @@
 /**
  * brepjs-families -> BimModel adapter. Consumes a resolved element tree and
  * feeds each element's PRE-DESUGARED props into parametric specs. Civil wall
- * and railing Products retain the evaluated authored Body as EXACT
+ * and railing Products retain the evaluated authored Body as AUTHORITATIVE
  * after generating the candidate and applying openings. GlobalIds derive
  * from families key paths (stable under reordering), not insertion order.
  *
@@ -93,7 +93,7 @@ export interface FamiliesToBimOptions {
    * mapped category, and does not fall back to a parametric envelope.
    * Conventional archetype walls and railings stay specification-authoritative
    * and do not require an evaluator. Civil walls and railings always retain
-   * independent authored items as EXACT, including when coincident
+   * independent authored items as AUTHORITATIVE, including when coincident
    * with the post-opening candidate. Supplying this option does not
    * opt unsupported products into the proxy fallback.
    */
@@ -1328,8 +1328,8 @@ function installCivilProductBody(
     productWorldFrame,
   });
   if (!prepared.ok) return prepared;
-  const adopted = model.takeExactProductBody(localId, prepared.value);
-  // Successful takeover transfers ownership even if retiring the old candidate failed.
+  const adopted = model.replaceProductBody({ localId, body: prepared.value });
+  // COMMITTED transfers ownership even if retiring the old candidate failed.
   // The model keeps that diagnostic and owns the new Body through later errors.
   if (adopted.ok) return ok(undefined);
   const cleanup = disposeProductBody(prepared.value);

@@ -1,4 +1,3 @@
-import { bodySolids } from '../src/types/productBody.js';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { box, getFaces, getKernel, measureVolume, tagFaces, unwrap } from 'brepjs';
 import {
@@ -43,7 +42,7 @@ it.each(['copy', 'transform', 'union'] as const)(
     {
       using a = box(1, 1, 1);
       using b = box(1, 1, 1, { at: [2, 0, 0] });
-      const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+      const body = unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, b] }));
       const live = arena();
       const kernel = getKernel();
       const downcast = kernel.downcast.bind(kernel);
@@ -67,7 +66,7 @@ it.each(['copy', 'transform', 'union'] as const)(
             ? copyProductBody(body)
             : operation === 'transform'
               ? transformProductBody(body, IDENTITY_FRAME)
-              : measureProductBodyMaterial(bodySolids(body));
+              : measureProductBodyMaterial(body.solids);
         expect(result).toMatchObject({
           ok: false,
           error: {
@@ -105,7 +104,7 @@ describe.each([false, true])('metadata operation also fails: %s', (primaryFailur
         const face = getFaces(b)[0];
         if (face === undefined) throw new Error('Expected fixture face');
         tagFaces(b, [face], 'retained');
-        const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+        const body = unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, b] }));
         const live = arena();
         const kernel = getKernel();
         const release = kernel.dispose.bind(kernel);
@@ -169,7 +168,7 @@ describe.each(['copy', 'transform', 'union'] as const)('%s raw-result cleanup', 
       {
         using a = box(1, 1, 1);
         using b = box(1, 1, 1, { at: [2, 0, 0] });
-        const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+        const body = unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, b] }));
         const live = arena();
         const kernel = getKernel();
         const downcast = kernel.downcast.bind(kernel);
@@ -198,7 +197,7 @@ describe.each(['copy', 'transform', 'union'] as const)('%s raw-result cleanup', 
               ? copyProductBody(body)
               : operation === 'transform'
                 ? transformProductBody(body, IDENTITY_FRAME)
-                : measureProductBodyMaterial(bodySolids(body));
+                : measureProductBodyMaterial(body.solids);
           expect(result).toMatchObject({ ok: false, error: { cleanup: { kind: 'FAILED' } } });
           if (result.ok || result.error.cleanup.kind !== 'FAILED')
             throw new Error('Expected cleanup failure');

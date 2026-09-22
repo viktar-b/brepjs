@@ -1,4 +1,3 @@
-import { bodySolids } from '../src/types/productBody.js';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { csg, err, getKernel, type ValidSolid } from 'brepjs';
 import { el, family } from 'brepjs-families';
@@ -223,19 +222,18 @@ describe('Families Body adoption ownership', () => {
       const candidates: Release[] = [];
       const outstanding = fault === 'before-release' ? 1 : 0;
       // eslint-disable-next-line @typescript-eslint/unbound-method -- Invoked below with the explicit model receiver via .call().
-      const replace = BimModel.prototype.takeExactProductBody;
-      vi.spyOn(BimModel.prototype, 'takeExactProductBody').mockImplementation(function (
+      const replace = BimModel.prototype.replaceProductBody;
+      vi.spyOn(BimModel.prototype, 'replaceProductBody').mockImplementation(function (
         this: BimModel,
-        localId,
-        body
+        input
       ) {
-        body.solids.forEach((solid, index) =>
+        input.body.solids.forEach((solid, index) =>
           candidates.push(releaseProbe(solid, index === 0 ? fault : 'complete', recoveries))
         );
         setProductBodyTestHooksForTesting({
           before: ({ step }) => (step === 'validate' ? err(FAILURE) : undefined),
         });
-        return replace.call(this, localId, body);
+        return replace.call(this, input);
       });
       try {
         {
@@ -274,7 +272,7 @@ describe('Families Body adoption ownership', () => {
 
   for (const later of ['success', 'error', 'throw'] as const) {
     it.each(['before-release', 'after-release'] as const)(
-      `keeps transferred ownership through ${later} with retirement failure %s`,
+      `keeps COMMITTED ownership through ${later} with retirement failure %s`,
       (fault) => {
         const baseline = arena();
         const recoveries: (() => void)[] = [];
@@ -282,22 +280,22 @@ describe('Families Body adoption ownership', () => {
         const retired: Release[] = [];
         const outstanding = fault === 'before-release' ? 1 : 0;
         // eslint-disable-next-line @typescript-eslint/unbound-method -- Invoked below with the explicit model receiver via .call().
-        const replace = BimModel.prototype.takeExactProductBody;
-        vi.spyOn(BimModel.prototype, 'takeExactProductBody').mockImplementation(function (
+        const replace = BimModel.prototype.replaceProductBody;
+        vi.spyOn(BimModel.prototype, 'replaceProductBody').mockImplementation(function (
           this: BimModel,
-          localId,
-          body
+          input
         ) {
-          const target = this.getElement(localId);
+          const target = this.getElement(input.localId);
           if (target?.category !== 'RAILING') throw new Error('Missing candidate');
-          retired.push(releaseProbe(bodySolids(target.geometry)[0], fault, recoveries));
-          body.solids.forEach((solid) => adopted.push(releaseProbe(solid, 'complete', recoveries)));
-          const receipt = replace.call(this, localId, body);
+          retired.push(releaseProbe(target.geometry.solids[0], fault, recoveries));
+          input.body.solids.forEach((solid) =>
+            adopted.push(releaseProbe(solid, 'complete', recoveries))
+          );
+          const receipt = replace.call(this, input);
           expect(receipt).toMatchObject({
             ok: true,
-            value: undefined,
+            value: { kind: 'COMMITTED', cleanup: { kind: 'FAILED' } },
           });
-          expect(this.getGeometryCleanupDiagnostics()).toHaveLength(1);
           return receipt;
         });
         if (later === 'throw')
@@ -333,7 +331,7 @@ describe('Families Body adoption ownership', () => {
                   metadata: {
                     cleanup: {
                       kind: 'FAILED',
-                      diagnostics: [expect.objectContaining({ operation: 'takeExactProductBody' })],
+                      diagnostics: [expect.objectContaining({ operation: 'replaceProductBody' })],
                     },
                   },
                 },
@@ -368,7 +366,7 @@ describe('Families Body adoption ownership', () => {
         afterCivilProductBody: (model, id) => {
           const target = model.getElement(id);
           if (target?.category !== 'RAILING') throw new Error('Missing adopted Body');
-          bodySolids(target.geometry).forEach((solid, index) =>
+          target.geometry.solids.forEach((solid, index) =>
             adopted.push(releaseProbe(solid, index === 0 ? fault : 'complete', recoveries))
           );
           throw THROWN;

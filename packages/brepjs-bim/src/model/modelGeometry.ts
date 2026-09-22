@@ -2,7 +2,7 @@ import { err, isValidSolid, ok, type Result, type ValidSolid } from 'brepjs';
 import { specError, type BimError } from '../errors/bimError.js';
 import type { CurtainWallComponent } from '../elementFns/curtainWallFns.js';
 import type { AnyBimElement, BimCategory, BimElement } from '../types/bimTypes.js';
-import { bodySolids, validateProductBody } from '../types/productBody.js';
+import { validateProductBody } from '../types/productBody.js';
 
 export type ElementFields = {
   [C in BimCategory]: Pick<BimElement<C>, 'category' | 'spec' | 'geometry'>;
@@ -13,7 +13,7 @@ export function retainedSolids(element: ElementFields): readonly ValidSolid[] {
   switch (element.category) {
     case 'WALL':
     case 'RAILING':
-      return bodySolids(element.geometry);
+      return element.geometry.solids;
     case 'CURTAIN_WALL':
       return [...element.geometry.panels, ...element.geometry.mullions].map(({ solid }) => solid);
     default:
@@ -40,7 +40,7 @@ export function protectElement(element: AnyBimElement): Result<AnyBimElement, Bi
   // These adders accept opaque caller-owned handles. isValidSolid alone assumes
   // a Solid already; use the complete native-solid boundary before transfer.
   if (element.category === 'PROXY' || element.category === 'EARTHWORKS_FILL') {
-    const body = validateProductBody({ kind: 'EXACT', solids: [element.geometry] });
+    const body = validateProductBody({ kind: 'AUTHORITATIVE', solids: [element.geometry] });
     return body.ok ? ok(Object.freeze(element)) : body;
   }
   let itemIndex = 0;

@@ -663,19 +663,18 @@ describe('archetype routing', () => {
     using evaluator = new csg.Evaluator();
     let candidateVolumes: readonly [number, number] | null = null;
     // eslint-disable-next-line @typescript-eslint/unbound-method -- Invoked below with the explicit model receiver via .call().
-    const replace = BimModel.prototype.takeExactProductBody;
-    vi.spyOn(BimModel.prototype, 'takeExactProductBody').mockImplementation(function (
+    const replace = BimModel.prototype.replaceProductBody;
+    vi.spyOn(BimModel.prototype, 'replaceProductBody').mockImplementation(function (
       this: BimModel,
-      localId,
-      body
+      input
     ) {
-      const candidate = this.getElement(localId);
+      const candidate = this.getElement(input.localId);
       if (candidate?.category !== 'WALL') throw new Error('Expected post-opening candidate');
       candidateVolumes = [
-        unwrap(measureVolume(body.solids[0])),
-        unwrap(measureVolume(bodySolids(candidate.geometry)[0])),
+        unwrap(measureVolume(input.body.solids[0])),
+        unwrap(measureVolume(candidate.geometry.solids[0])),
       ];
-      return replace.call(this, localId, body);
+      return replace.call(this, input);
     });
     const result = unwrap(familiesToBim(tree, { project: PROJECT, bodyEvaluator: evaluator }));
     using model = result.model;
@@ -692,7 +691,7 @@ describe('archetype routing', () => {
     if (candidateVolumes === null) throw new Error('Expected authored and post-opening volumes');
     expect(candidateVolumes[0]).toBeCloseTo(expectedVolume, 3);
     expect(candidateVolumes[1]).toBeCloseTo(expectedVolume, 3);
-    expect(wall.geometry.kind).toBe('EXACT');
+    expect(wall.geometry.kind).toBe('AUTHORITATIVE');
     expect(unwrap(measureVolume(bodySolids(wall.geometry)[0]))).toBeCloseTo(expectedVolume, 3);
     expect(model.getAllRelationships().filter(({ kind }) => kind === 'VOIDS_WALL')).toHaveLength(1);
     expect(model.getAllRelationships().filter(({ kind }) => kind === 'FILLS_OPENING')).toHaveLength(

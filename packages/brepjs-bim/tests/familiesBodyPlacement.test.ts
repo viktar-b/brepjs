@@ -127,7 +127,7 @@ describe('retained Families Body placement and openings', () => {
           const product = model.getElement(id);
           if (product?.category !== 'WALL' && product?.category !== 'RAILING')
             throw new Error('Wrong product');
-          expect(product.geometry.kind).toBe('EXACT');
+          expect(product.geometry.kind).toBe('AUTHORITATIVE');
           expect(bodySolids(product.geometry)).toHaveLength(2);
           const placed = unwrap(
             placedSolids(product, {
@@ -240,16 +240,15 @@ describe('retained Families Body placement and openings', () => {
       expect(getKernel().volume(bodySolids(expected.geometry)[0].wrapped)).toBeCloseTo(53, 8);
       const inputs = currentKernel === 'occt-wasm' ? nativeShapeCount() : null;
       // eslint-disable-next-line @typescript-eslint/unbound-method -- Invoked below with the explicit model receiver via .call().
-      const replace = BimModel.prototype.takeExactProductBody;
-      vi.spyOn(BimModel.prototype, 'takeExactProductBody').mockImplementation(function (
+      const replace = BimModel.prototype.replaceProductBody;
+      vi.spyOn(BimModel.prototype, 'replaceProductBody').mockImplementation(function (
         this: BimModel,
-        localId,
-        body
+        input
       ) {
-        const candidate = this.getElement(localId);
+        const candidate = this.getElement(input.localId);
         if (candidate?.category !== 'WALL') throw new Error('Missing post-opening candidate');
         expect(getKernel().volume(bodySolids(candidate.geometry)[0].wrapped)).toBeCloseTo(53, 8);
-        return replace.call(this, localId, body);
+        return replace.call(this, input);
       });
       const { model, idByKeyPath } = unwrap(
         familiesToBim(root, { project: BODY_PROJECT, bodyEvaluator: evaluator })
@@ -259,7 +258,7 @@ describe('retained Families Body placement and openings', () => {
         if (id === undefined) throw new Error('Missing wall');
         const wall = model.getElement(id);
         if (wall?.category !== 'WALL') throw new Error('Missing wall');
-        expect(wall.geometry.kind).toBe('EXACT');
+        expect(wall.geometry.kind).toBe('AUTHORITATIVE');
         expect(bodySolids(wall.geometry)).toHaveLength(1);
         expect(getKernel().volume(bodySolids(wall.geometry)[0].wrapped)).toBeCloseTo(53, 8);
         expectBounds(

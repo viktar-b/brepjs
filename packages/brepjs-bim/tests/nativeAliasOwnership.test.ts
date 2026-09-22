@@ -1,5 +1,3 @@
-import { singletonWallSolid } from './helpers/openingFixture.js';
-import { bodySolids } from '../src/types/productBody.js';
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import * as brepjs from 'brepjs';
 import {
@@ -74,7 +72,7 @@ it('rejects a later Body item wrapping the exact same native object without rele
     expect(fixture.alias === first).toBe(false);
     expect(fixture.alias.wrapped === first.wrapped).toBe(true);
     expect(
-      validateProductBody({ kind: 'EXACT', solids: [first, sibling, fixture.alias] })
+      validateProductBody({ kind: 'AUTHORITATIVE', solids: [first, sibling, fixture.alias] })
     ).toMatchObject({
       ok: false,
       error: { code: 'BODY_DUPLICATE_ITEM', itemIndex: 2 },
@@ -97,7 +95,7 @@ it.each(['Proxy', 'EarthworksFill'] as const)(
       const wallId = unwrap(model.addWall(WALL));
       const wall = model.getElement(wallId);
       if (wall?.category !== 'WALL') throw new Error('Expected Wall');
-      const source = bodySolids(wall.geometry)[0];
+      const source = wall.geometry.solids[0];
       using fixture = aliasFixture(source);
       const aliasRelease = vi.spyOn(fixture.alias, Symbol.dispose);
       const elements = model.getAllElements();
@@ -149,7 +147,7 @@ it.each(['before', 'after'] as const)(
       const id = unwrap(model.addWall(WALL));
       const wall = model.getElement(id);
       if (wall?.category !== 'WALL') throw new Error('Expected Wall');
-      const source = bodySolids(wall.geometry)[0];
+      const source = wall.geometry.solids[0];
       using fixture = aliasFixture(source);
       const release = source[Symbol.dispose].bind(source);
       const cause = new Error(`Failure ${failurePoint} native release`);
@@ -159,11 +157,18 @@ it.each(['before', 'after'] as const)(
       });
       try {
         const next = box(2, 2, 2);
-        unwrap(model.takeExactProductBody(id, { kind: 'EXACT', solids: [next] }));
-        expect(model.getGeometryCleanupDiagnostics()).toMatchObject([
-          { localId: id, itemIndex: 0, cause },
-        ]);
-        const otherId = unwrap(model.addWall(WALL));
+        const receipt = unwrap(
+          model.replaceProductBody({
+            localId: id,
+            body: { kind: 'AUTHORITATIVE', solids: [next] },
+          })
+        );
+        expect(receipt).toMatchObject({
+          kind: 'COMMITTED',
+          localId: id,
+          guid: wall.guid,
+          cleanup: { kind: 'FAILED', diagnostics: [{ localId: id, itemIndex: 0, cause }] },
+        });
         expect(source.disposed).toBe(failurePoint === 'after');
         const originalRead = vi.spyOn(source, 'wrapped', 'get').mockImplementation(() => {
           throw new Error('Must use the resource identity captured before cleanup');
@@ -181,7 +186,10 @@ it.each(['before', 'after'] as const)(
           },
         };
         expect(
-          model.takeExactProductBody(otherId, { kind: 'EXACT', solids: [fixture.alias] })
+          model.replaceProductBody({
+            localId: id,
+            body: { kind: 'AUTHORITATIVE', solids: [fixture.alias] },
+          })
         ).toMatchObject(conflict);
         expect(model.addProxy({ name: 'Uncertain alias', solid: fixture.alias })).toMatchObject(
           conflict
@@ -230,7 +238,10 @@ it('reports a later item resource-access failure without committing or releasing
     });
     const live = arena();
     expect(
-      model.takeExactProductBody(id, { kind: 'EXACT', solids: [first, second] })
+      model.replaceProductBody({
+        localId: id,
+        body: { kind: 'AUTHORITATIVE', solids: [first, second] },
+      })
     ).toMatchObject({
       ok: false,
       error: { code: 'BODY_VALIDATION_FAILED', cause, metadata: { itemIndex: 1 } },
@@ -252,12 +263,21 @@ it.each(['target Body', 'Proxy', 'EarthworksFill'] as const)(
     {
       using model = new BimModel();
       const id = unwrap(model.addWall(WALL));
-      const source = ownerKind === 'target Body' ? singletonWallSolid(model, id) : box(2, 2, 2);
+      const source = box(2, 2, 2);
       let ownerId = id;
-      const ownerItemIndex = 0;
-      if (ownerKind === 'Proxy') {
+      let ownerItemIndex = 0;
+      if (ownerKind === 'target Body') {
+        const first = box(1, 1, 1);
+        unwrap(
+          model.replaceProductBody({
+            localId: id,
+            body: { kind: 'PARAMETRIC', solids: [first, source] },
+          })
+        );
+        ownerItemIndex = 1;
+      } else if (ownerKind === 'Proxy') {
         ownerId = unwrap(model.addProxy({ name: 'Source', solid: source }));
-      } else if (ownerKind === 'EarthworksFill') {
+      } else {
         ownerId = unwrap(
           model.addEarthworksFill({ name: 'Source', solid: source, materialName: 'Test' })
         );
@@ -269,7 +289,10 @@ it.each(['target Body', 'Proxy', 'EarthworksFill'] as const)(
       const relationships = model.getAllRelationships();
       const live = arena();
       expect(
-        model.takeExactProductBody(id, { kind: 'EXACT', solids: [sibling, fixture.alias] })
+        model.replaceProductBody({
+          localId: id,
+          body: { kind: 'AUTHORITATIVE', solids: [sibling, fixture.alias] },
+        })
       ).toMatchObject({
         ok: false,
         error: {
@@ -281,14 +304,8 @@ it.each(['target Body', 'Proxy', 'EarthworksFill'] as const)(
       expect(model.getAllRelationships()).toEqual(relationships);
       expect(release).not.toHaveBeenCalled();
       expect(getKernel().volume(sibling.wrapped)).toBeCloseTo(27, 8);
-      expect(getKernel().volume(source.wrapped)).toBeCloseTo(
-        ownerKind === 'target Body' ? 6 : 8,
-        8
-      );
-      expect(getKernel().volume(fixture.alias.wrapped)).toBeCloseTo(
-        ownerKind === 'target Body' ? 6 : 8,
-        8
-      );
+      expect(getKernel().volume(source.wrapped)).toBeCloseTo(8, 8);
+      expect(getKernel().volume(fixture.alias.wrapped)).toBeCloseTo(8, 8);
       expectArena(live);
     }
     expectArena(baseline);
@@ -302,7 +319,7 @@ it('accepts independent clone and placement owners that remain natively usable a
     const id = unwrap(model.addWall(WALL));
     const wall = model.getElement(id);
     if (wall?.category !== 'WALL') throw new Error('Expected Wall');
-    const source = bodySolids(wall.geometry)[0];
+    const source = wall.geometry.solids[0];
     const independent = unwrap(clone(source));
     const placed = locate(source, []);
     expect(independent.wrapped === source.wrapped).toBe(false);
@@ -310,15 +327,20 @@ it('accepts independent clone and placement owners that remain natively usable a
     // Legacy OCCT shares topology even though each wrapper owns a separate native handle.
     if (currentKernel === 'occt')
       expect(getKernel().isSame(source.wrapped, independent.wrapped)).toBe(true);
-    expect(validateProductBody({ kind: 'EXACT', solids: [source, independent, placed] }).ok).toBe(
-      true
-    );
+    expect(
+      validateProductBody({ kind: 'AUTHORITATIVE', solids: [source, independent, placed] }).ok
+    ).toBe(true);
     unwrap(model.addProxy({ name: 'Clone', solid: independent }));
     unwrap(model.addEarthworksFill({ name: 'Placement', solid: placed, materialName: 'Test' }));
     const replacement = box(3, 3, 3);
     expect(
-      unwrap(model.takeExactProductBody(id, { kind: 'EXACT', solids: [replacement] }))
-    ).toBeUndefined();
+      unwrap(
+        model.replaceProductBody({
+          localId: id,
+          body: { kind: 'AUTHORITATIVE', solids: [replacement] },
+        })
+      )
+    ).toMatchObject({ kind: 'COMMITTED', cleanup: { kind: 'COMPLETE' } });
     expect(source.disposed).toBe(true);
     // Use uncached native queries. measureVolume can return a cached value for a dangling alias.
     expect(getKernel().volume(independent.wrapped)).toBeCloseTo(6, 8);
@@ -335,7 +357,7 @@ it('captures resource identity before publishing the replacement and rejects ret
     const id = unwrap(model.addWall(WALL));
     const original = model.getElement(id);
     if (original?.category !== 'WALL') throw new Error('Expected Wall');
-    const source = bodySolids(original.geometry)[0];
+    const source = original.geometry.solids[0];
     using fixture = aliasFixture(source);
     const next = box(2, 2, 2);
     const guards = [source, next].map((solid) => {
@@ -352,11 +374,16 @@ it('captures resource identity before publishing the replacement and rejects ret
       callbackBody = model.getElement(id)?.geometry;
       reentrant = model.addProxy({ name: 'Retiring alias', solid: fixture.alias });
     });
-    const receipt = unwrap(model.takeExactProductBody(id, { kind: 'EXACT', solids: [next] }));
+    const receipt = unwrap(
+      model.replaceProductBody({
+        localId: id,
+        body: { kind: 'AUTHORITATIVE', solids: [next] },
+      })
+    );
     for (const guard of guards) guard.mockRestore();
-    expect(receipt).toBeUndefined();
+    expect(receipt).toMatchObject({ kind: 'COMMITTED', cleanup: { kind: 'COMPLETE' } });
     expect(callbackBody).toBe(model.getElement(id)?.geometry);
-    expect(callbackBody).toMatchObject({ kind: 'EXACT', solids: [next] });
+    expect(callbackBody).toMatchObject({ kind: 'AUTHORITATIVE', solids: [next] });
     expect(reentrant).toMatchObject({ ok: false, error: { code: 'MODEL_BUSY' } });
     expect(getKernel().volume(next.wrapped)).toBeCloseTo(8, 8);
   }

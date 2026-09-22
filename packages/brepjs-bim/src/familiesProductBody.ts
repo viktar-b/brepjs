@@ -36,11 +36,11 @@ export interface CivilProductBodyInput {
 
 /**
  * Borrow evaluator parents, then copy and inverse-localize in item order.
- * Every successful result is EXACT and caller-owned until successful takeover.
+ * Every successful result is AUTHORITATIVE and caller-owned until COMMITTED.
  */
 export function prepareCivilProductBody(
   input: CivilProductBodyInput
-): Result<Extract<ProductBody, { kind: 'EXACT' }>, BimError> {
+): Result<Extract<ProductBody, { kind: 'AUTHORITATIVE' }>, BimError> {
   const extracted: OwnedBodyResource[] = [];
   const prepared = prepareItems(input, extracted);
   const cleanup = cleanupOwnedResources(extracted, { operation: 'prepareCivilProductBody' });
@@ -72,7 +72,7 @@ export function prepareCivilProductBody(
 function prepareItems(
   input: CivilProductBodyInput,
   extracted: OwnedBodyResource[]
-): Result<Extract<ProductBody, { kind: 'EXACT' }>, BimError> {
+): Result<Extract<ProductBody, { kind: 'AUTHORITATIVE' }>, BimError> {
   const inverse = frameInverse(input.productWorldFrame);
   if (!inverse.ok)
     return err(
@@ -89,7 +89,7 @@ function prepareItems(
     return err(
       productBodyError(input, 'FAMILIES_PRODUCT_BODY_EMPTY', 'evaluated to no solid Body items')
     );
-  const borrowed = validateProductBody({ kind: 'EXACT', solids: evaluated.value });
+  const borrowed = validateProductBody({ kind: 'AUTHORITATIVE', solids: evaluated.value });
   if (!borrowed.ok)
     return err(
       productBodyError(
@@ -140,7 +140,7 @@ function prepareItems(
       )
     );
   }
-  return ok(Object.freeze({ kind: 'EXACT', solids: bodySolids(localized.value) }));
+  return ok(Object.freeze({ kind: 'AUTHORITATIVE', solids: bodySolids(localized.value) }));
 }
 
 function evaluateBody(

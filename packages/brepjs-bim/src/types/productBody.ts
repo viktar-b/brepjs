@@ -30,8 +30,8 @@ export type { CleanupReport, GeometryCleanupDiagnostic } from '../productBodyCle
 export type NonEmpty<T> = readonly [T, ...T[]];
 
 export type ProductBody =
-  | { readonly kind: 'PARAMETRIC'; readonly solid: ValidSolid }
-  | { readonly kind: 'EXACT'; readonly solids: NonEmpty<ValidSolid> };
+  | { readonly kind: 'PARAMETRIC'; readonly solids: NonEmpty<ValidSolid> }
+  | { readonly kind: 'AUTHORITATIVE'; readonly solids: NonEmpty<ValidSolid> };
 
 export type ProductBodyOperation =
   | 'validateProductBody'
@@ -55,15 +55,12 @@ export interface ProductBodyBounds {
   readonly bounds: Readonly<Bounds3D>;
 }
 
-const descriptorSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('PARAMETRIC'), solid: z.unknown() }),
-  z.object({
-    kind: z.literal('EXACT'),
-    solids: z
-      .custom<readonly unknown[]>((value) => Array.isArray(value))
-      .refine((value) => value.length > 0),
-  }),
-]);
+const descriptorSchema = z.object({
+  kind: z.enum(['PARAMETRIC', 'AUTHORITATIVE']),
+  solids: z
+    .custom<readonly unknown[]>((value) => Array.isArray(value))
+    .refine((value) => value.length > 0),
+});
 
 function bodyError(
   operation: ProductBodyOperation,
@@ -86,9 +83,7 @@ function bodyError(
 
 function snapshot(kind: ProductBody['kind'], solids: NonEmpty<ValidSolid>): ProductBody {
   const items: NonEmpty<ValidSolid> = Object.freeze([solids[0], ...solids.slice(1)]);
-  return kind === 'PARAMETRIC'
-    ? Object.freeze({ kind, solid: items[0] })
-    : Object.freeze({ kind, solids: items });
+  return Object.freeze({ kind, solids: items });
 }
 
 /** @internal Exact resource object identity only, without native topology queries. */
@@ -114,11 +109,10 @@ export function snapshotProductBodyInput(
           parsed.error
         )
       );
-    const inputItems = parsed.data.kind === 'PARAMETRIC' ? [parsed.data.solid] : parsed.data.solids;
     const items: unknown[] = [];
-    for (let itemIndex = 0; itemIndex < inputItems.length; itemIndex++) {
+    for (let itemIndex = 0; itemIndex < parsed.data.solids.length; itemIndex++) {
       try {
-        items.push(inputItems[itemIndex]);
+        items.push(parsed.data.solids[itemIndex]);
       } catch (cause) {
         return err(
           bodyError(
@@ -131,11 +125,7 @@ export function snapshotProductBodyInput(
         );
       }
     }
-    return ok(
-      parsed.data.kind === 'PARAMETRIC'
-        ? Object.freeze({ kind: parsed.data.kind, solid: items[0] })
-        : Object.freeze({ kind: parsed.data.kind, solids: Object.freeze(items) })
-    );
+    return ok(Object.freeze({ kind: parsed.data.kind, solids: Object.freeze(items) }));
   } catch (cause) {
     return err(
       bodyError('validateProductBody', 'BODY_VALIDATION_FAILED', 'Body validation threw', cause)
@@ -151,10 +141,7 @@ export function snapshotProductBodyInput(
 export function validateProductBody(input: unknown): Result<ProductBody, ProductBodyError> {
   const captured = snapshotProductBodyInput(input);
   if (!captured.ok) return captured;
-  const items = validateItems(
-    captured.value.kind === 'PARAMETRIC' ? [captured.value.solid] : captured.value.solids,
-    'validateProductBody'
-  );
+  const items = validateItems(captured.value.solids, 'validateProductBody');
   return items.ok ? ok(snapshot(captured.value.kind, items.value)) : items;
 }
 
@@ -240,7 +227,6 @@ function validateItems(
 
 /** Borrow protected Product-local items. Borrowers must not dispose the retained handles. */
 export function bodySolids(body: ProductBody): NonEmpty<ValidSolid> {
-  if (body.kind === 'PARAMETRIC') return Object.freeze([body.solid]);
   return Object.isFrozen(body.solids)
     ? body.solids
     : Object.freeze([body.solids[0], ...body.solids.slice(1)]);
@@ -364,7 +350,7 @@ export function copyProductBody(body: ProductBody): Result<ProductBody, ProductB
   const prepared = validateProductBody(body);
   if (!prepared.ok) return err({ ...prepared.error, operation: 'copyProductBody' });
   return ownedOperation('copyProductBody', (scope) => {
-    const copied = allocateItems(bodySolids(prepared.value), scope, scope.outputs);
+    const copied = allocateItems(prepared.value.solids, scope, scope.outputs);
     return copied.ok ? ok(snapshot(prepared.value.kind, copied.value)) : copied;
   });
 }
@@ -382,7 +368,7 @@ export function transformProductBody(
   const prepared = validateProductBody(body);
   if (!prepared.ok) return err({ ...prepared.error, operation: 'transformProductBody' });
   return ownedOperation('transformProductBody', (scope) => {
-    const placed = allocateItems(bodySolids(prepared.value), scope, scope.outputs, checked.value);
+    const placed = allocateItems(prepared.value.solids, scope, scope.outputs, checked.value);
     return placed.ok ? ok(snapshot(prepared.value.kind, placed.value)) : placed;
   });
 }
@@ -500,6 +486,6 @@ function validateBoundsItems(
   if (Array.isArray(input)) return validateItems(input, 'productBodyBounds');
   const prepared = validateProductBody(input);
   return prepared.ok
-    ? ok(bodySolids(prepared.value))
+    ? ok(prepared.value.solids)
     : err({ ...prepared.error, operation: 'productBodyBounds' });
 }

@@ -181,7 +181,7 @@ it.each(['before', 'after'] as const)(
       const face = brepjs.getFaces(b)[0];
       if (face === undefined) throw new Error('Expected fixture face');
       brepjs.tagFaces(b, [face], 'retained');
-      const body = brepjs.unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+      const body = brepjs.unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, b] }));
       const live = arena();
       const kernel = brepjs.getKernel();
       const release = kernel.dispose.bind(kernel);

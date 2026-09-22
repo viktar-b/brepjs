@@ -120,7 +120,7 @@ for (const kind of ['Door', 'Window', 'Slab'] as const) {
   });
 }
 
-it.each(['EXACT'] as const)(
+it.each(['PARAMETRIC', 'AUTHORITATIVE'] as const)(
   'replacing an already-cut Wall with %s Body preserves openings without cutting again',
   (kind) => {
     const baseline = arena();
@@ -133,10 +133,9 @@ it.each(['EXACT'] as const)(
       const old = singletonWallSolid(model, wallId);
       const copied = brepjs.unwrap(brepjs.clone(old));
       const cut = vi.spyOn(brepjs, 'cut');
-      expect(model.takeExactProductBody(wallId, { kind, solids: [copied] })).toMatchObject({
-        ok: true,
-        value: undefined,
-      });
+      expect(
+        model.replaceProductBody({ localId: wallId, body: { kind, solids: [copied] } })
+      ).toMatchObject({ ok: true, value: { kind: 'COMMITTED', localId: wallId } });
       expect(cut).not.toHaveBeenCalled();
       expect(singletonWallSolid(model, wallId)).toBe(copied);
       expect(brepjs.getKernel().volume(copied.wrapped)).toBeCloseTo(54, 7);
@@ -146,6 +145,19 @@ it.each(['EXACT'] as const)(
       );
       expect(model.getAllRelationships()).toEqual(relationships);
       expect(old.disposed).toBe(true);
+      if (kind === 'PARAMETRIC') {
+        const windowId = brepjs.unwrap(model.addWindow({ ...WINDOW, wallLocalId: wallId }));
+        expect(brepjs.getKernel().volume(singletonWallSolid(model, wallId).wrapped)).toBeCloseTo(
+          53,
+          7
+        );
+        expect(model.getElement(windowId)).toMatchObject({
+          category: 'WINDOW',
+          spec: { materialName: 'Glass' },
+        });
+        expect(model.getAllRelationships()).toEqual(expect.arrayContaining(relationships));
+        expect(model.getElement(doorId)).toBe(door);
+      }
     } finally {
       model[Symbol.dispose]();
     }
@@ -246,12 +258,13 @@ it('cuts a singleton recipe Wall and commits door identities, material and owner
 });
 
 const unsupportedBodies: ReadonlyArray<{
-  kind: 'EXACT';
+  kind: ProductBody['kind'];
   multiple: boolean;
   code: string;
 }> = [
-  { kind: 'EXACT', multiple: false, code: 'EXACT_WALL_BODY_IMMUTABLE' },
-  { kind: 'EXACT', multiple: true, code: 'EXACT_WALL_BODY_IMMUTABLE' },
+  { kind: 'AUTHORITATIVE', multiple: false, code: 'AUTHORITATIVE_WALL_BODY_IMMUTABLE' },
+  { kind: 'AUTHORITATIVE', multiple: true, code: 'AUTHORITATIVE_WALL_BODY_IMMUTABLE' },
+  { kind: 'PARAMETRIC', multiple: true, code: 'MULTI_ITEM_WALL_OPENING_UNSUPPORTED' },
 ];
 
 for (const method of ['addDoor', 'addWindow'] as const) {
@@ -264,10 +277,8 @@ for (const method of ['addDoor', 'addWindow'] as const) {
         const id = brepjs.unwrap(model.addWall(OPENING_WALL));
         const supportedId = brepjs.unwrap(model.addWall(OPENING_WALL));
         const first = brepjs.box(10, 1, 6);
-        const solids: Extract<ProductBody, { kind: 'EXACT' }>['solids'] = multiple
-          ? [first, brepjs.box(1, 1, 1)]
-          : [first];
-        brepjs.unwrap(model.takeExactProductBody(id, { kind, solids }));
+        const solids: ProductBody['solids'] = multiple ? [first, brepjs.box(1, 1, 1)] : [first];
+        brepjs.unwrap(model.replaceProductBody({ localId: id, body: { kind, solids } }));
         const before = model.getAllElements();
         const relationships = model.getAllRelationships();
         const nativeBefore = arena();

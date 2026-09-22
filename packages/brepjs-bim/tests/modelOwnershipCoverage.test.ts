@@ -1,4 +1,3 @@
-import { bodySolids } from '../src/types/productBody.js';
 import { beforeAll, afterEach, expect, it, vi } from 'vitest';
 import {
   box,
@@ -116,18 +115,20 @@ it('rejects missing or unsupported targets before reading the incoming Body', ()
   const site = unwrap(model.addSite({ name: 'Site' }));
   using input = box(1, 1, 1);
   let reads = 0;
-  const body = {
-    kind: 'EXACT',
-    get solids() {
-      reads++;
-      return [input] as const;
-    },
-  } satisfies ProductBody;
+  const body = { kind: 'AUTHORITATIVE', solids: [input] } satisfies ProductBody;
   for (const [id, code] of [
-    [makeLocalIdCounter(1000).next(), 'EXACT_BODY_TARGET_NOT_FOUND'],
-    [site, 'EXACT_BODY_UNSUPPORTED_CATEGORY'],
+    [makeLocalIdCounter(1000).next(), 'BODY_TARGET_NOT_FOUND'],
+    [site, 'BODY_UNSUPPORTED_CATEGORY'],
   ] as const) {
-    expect(model.takeExactProductBody(id, body)).toMatchObject({ ok: false, error: { code } });
+    expect(
+      model.replaceProductBody({
+        localId: id,
+        get body() {
+          reads++;
+          return body;
+        },
+      })
+    ).toMatchObject({ ok: false, error: { code } });
   }
   expect(reads).toBe(0);
   expect(input.disposed).toBe(false);
@@ -160,9 +161,9 @@ it('leaves earlier live inputs unregistered when a later item has an ownership c
     if (before?.category !== 'WALL') throw new Error('Expected Wall');
     const first = box(1, 1, 1);
     expect(
-      model.takeExactProductBody(id, {
-        kind: 'EXACT',
-        solids: [first, bodySolids(before.geometry)[0]],
+      model.replaceProductBody({
+        localId: id,
+        body: { kind: 'PARAMETRIC', solids: [first, before.geometry.solids[0]] },
       })
     ).toMatchObject({ ok: false, error: { metadata: { itemIndex: 1 } } });
     expect(first.disposed).toBe(false);
@@ -214,7 +215,7 @@ it.each(creators)(
     expect(Object.isFrozen(element)).toBe(true);
     let items: readonly ValidSolid[];
     if (element.category === 'WALL' || element.category === 'RAILING')
-      items = bodySolids(element.geometry);
+      items = element.geometry.solids;
     else if (element.category === 'CURTAIN_WALL') {
       expect(Object.isFrozen(element.geometry)).toBe(true);
       expect(Object.isFrozen(element.geometry.panels)).toBe(true);
@@ -230,10 +231,12 @@ it.each(creators)(
     else throw new Error('Expected retained geometry');
     const attempts = items.map((solid) => vi.spyOn(solid, Symbol.dispose));
     for (const item of items) {
-      expect(model.takeExactProductBody(target, { kind: 'EXACT', solids: [item] })).toMatchObject({
-        ok: false,
-        error: { code: 'BODY_OWNERSHIP_CONFLICT' },
-      });
+      expect(
+        model.replaceProductBody({
+          localId: target,
+          body: { kind: 'AUTHORITATIVE', solids: [item] },
+        })
+      ).toMatchObject({ ok: false, error: { code: 'BODY_OWNERSHIP_CONFLICT' } });
       expect(model.addProxy({ name: 'Reuse', solid: item })).toMatchObject({
         ok: false,
         error: { code: 'BODY_OWNERSHIP_CONFLICT' },
@@ -252,46 +255,49 @@ it.each(creators)(
   }
 );
 
-it.each(['EXACT'] as const)('retains protected %s item order through model queries', (kind) => {
-  for (const offset of [0, 0.5, 3]) {
-    const baseline = arena();
-    {
-      using model = new BimModel();
-      const id = unwrap(model.addWall(WALL));
-      const first = box(1, 1, 1, { at: [0.5, 0.5, 0.5] });
-      const second = box(1, 1, 1, { at: [offset + 0.5, 0.5, 0.5] });
-      const input = { kind, solids: [first, second] } satisfies ProductBody;
-      unwrap(model.takeExactProductBody(id, input));
-      input.solids.reverse();
-      input.solids.pop();
-      Reflect.set(input, 'kind', 'INVALID');
-      const element = model.getElement(id);
-      if (element?.category !== 'WALL') throw new Error('Expected Wall');
-      expect(element.geometry.kind).toBe(kind);
-      expect(Reflect.set(element, 'geometry', null)).toBe(false);
-      expect(Reflect.set(element.geometry, 'kind', 'INVALID')).toBe(false);
-      expect(Reflect.set(bodySolids(element.geometry), 0, second)).toBe(false);
-      expect(Object.isFrozen(first)).toBe(false);
-      expect(bodySolids(element.geometry)).toEqual([first, second]);
-      expect(unwrap(measureProductBodyMaterial(bodySolids(element.geometry)))).toBeCloseTo(
-        offset < 1 ? 1 + offset : 2,
-        8
-      );
-      const bounds = unwrap(productBodyBounds(element.geometry, { kind: 'LOCAL' }));
-      expect(bounds.bounds.xMin).toBeCloseTo(0, 6);
-      expect(bounds.bounds.xMax).toBeCloseTo(1 + offset, 6);
-      const placed = unwrap(placedSolids(element));
-      try {
-        expect(placed).toHaveLength(2);
-        for (const item of placed) expect(bodySolids(element.geometry)).not.toContain(item);
-      } finally {
-        for (const item of placed) item[Symbol.dispose]();
+it.each(['PARAMETRIC', 'AUTHORITATIVE'] as const)(
+  'retains protected %s item order through model queries',
+  (kind) => {
+    for (const offset of [0, 0.5, 3]) {
+      const baseline = arena();
+      {
+        using model = new BimModel();
+        const id = unwrap(model.addWall(WALL));
+        const first = box(1, 1, 1, { at: [0.5, 0.5, 0.5] });
+        const second = box(1, 1, 1, { at: [offset + 0.5, 0.5, 0.5] });
+        const input = { kind, solids: [first, second] } satisfies ProductBody;
+        unwrap(model.replaceProductBody({ localId: id, body: input }));
+        input.solids.reverse();
+        input.solids.pop();
+        Reflect.set(input, 'kind', 'INVALID');
+        const element = model.getElement(id);
+        if (element?.category !== 'WALL') throw new Error('Expected Wall');
+        expect(element.geometry.kind).toBe(kind);
+        expect(Reflect.set(element, 'geometry', null)).toBe(false);
+        expect(Reflect.set(element.geometry, 'kind', 'INVALID')).toBe(false);
+        expect(Reflect.set(element.geometry.solids, 0, second)).toBe(false);
+        expect(Object.isFrozen(first)).toBe(false);
+        expect(element.geometry.solids).toEqual([first, second]);
+        expect(unwrap(measureProductBodyMaterial(element.geometry.solids))).toBeCloseTo(
+          offset < 1 ? 1 + offset : 2,
+          8
+        );
+        const bounds = unwrap(productBodyBounds(element.geometry, { kind: 'LOCAL' }));
+        expect(bounds.bounds.xMin).toBeCloseTo(0, 6);
+        expect(bounds.bounds.xMax).toBeCloseTo(1 + offset, 6);
+        const placed = unwrap(placedSolids(element));
+        try {
+          expect(placed).toHaveLength(2);
+          for (const item of placed) expect(element.geometry.solids).not.toContain(item);
+        } finally {
+          for (const item of placed) item[Symbol.dispose]();
+        }
+        expect(model.getWalls()[0]?.geometry.solids).toEqual([first, second]);
       }
-      expect(bodySolids(element.geometry)).toEqual([first, second]);
+      expectArena(baseline);
     }
-    expectArena(baseline);
   }
-});
+);
 
 it('preserves identity, descriptive spec, style, placement and relationship objects across replacement', () => {
   using model = new BimModel();
@@ -306,7 +312,12 @@ it('preserves identity, descriptive spec, style, placement and relationship obje
   model.setSurfaceStyle(id, style);
   const before = model.getElement(id);
   const relations = model.getAllRelationships();
-  unwrap(model.takeExactProductBody(id, { kind: 'EXACT', solids: [box(4, 5, 6)] }));
+  unwrap(
+    model.replaceProductBody({
+      localId: id,
+      body: { kind: 'AUTHORITATIVE', solids: [box(4, 5, 6)] },
+    })
+  );
   const after = model.getElement(id);
   expect(after).toMatchObject({ guid: before?.guid, localId: id });
   expect(after?.spec).toBe(before?.spec);
@@ -364,23 +375,22 @@ it('rejects malformed runtime Bodies and later native validation throws without 
   const live = arena();
   const invalid: unknown[] = [
     null,
-    { kind: 'UNKNOWN', solids: [first] },
-    { kind: 'EXACT', solids: [] },
-    { kind: 'EXACT', solids: [first, first] },
-    { kind: 'EXACT', solids: [first, disposed] },
-    { kind: 'EXACT', solids: [first, {}] },
-    { kind: 'EXACT', solids: [first, wire] },
+    { kind: 'EXACT', solids: [first] },
+    { kind: 'PARAMETRIC', solids: [] },
+    { kind: 'PARAMETRIC', solids: [first, first] },
+    { kind: 'PARAMETRIC', solids: [first, disposed] },
+    { kind: 'PARAMETRIC', solids: [first, {}] },
+    { kind: 'PARAMETRIC', solids: [first, wire] },
     {
-      kind: 'EXACT',
+      kind: 'AUTHORITATIVE',
       get solids() {
         throw new Error('Body snapshot');
       },
     },
   ];
   for (const body of invalid) {
-    const result: unknown = Reflect.apply(model.takeExactProductBody.bind(model), model, [
-      id,
-      body,
+    const result: unknown = Reflect.apply(model.replaceProductBody.bind(model), model, [
+      { localId: id, body },
     ]);
     expect(result).toMatchObject({ ok: false });
     expect(model.getElement(id)).toBe(original);
@@ -394,10 +404,12 @@ it('rejects malformed runtime Bodies and later native validation throws without 
     if (raw === second.wrapped) throw cause;
     return shapeType(raw);
   });
-  expect(model.takeExactProductBody(id, { kind: 'EXACT', solids: [first, second] })).toMatchObject({
-    ok: false,
-    error: { itemIndex: 1, cause },
-  });
+  expect(
+    model.replaceProductBody({
+      localId: id,
+      body: { kind: 'AUTHORITATIVE', solids: [first, second] },
+    })
+  ).toMatchObject({ ok: false, error: { itemIndex: 1, cause } });
   fault.mockRestore();
   const throwingItems = [first, second];
   Object.defineProperty(throwingItems, 1, {
@@ -405,9 +417,8 @@ it('rejects malformed runtime Bodies and later native validation throws without 
       throw cause;
     },
   });
-  const rejected: unknown = Reflect.apply(model.takeExactProductBody.bind(model), model, [
-    id,
-    { kind: 'EXACT', solids: throwingItems },
+  const rejected: unknown = Reflect.apply(model.replaceProductBody.bind(model), model, [
+    { localId: id, body: { kind: 'AUTHORITATIVE', solids: throwingItems } },
   ]);
   expect(rejected).toMatchObject({ ok: false, error: { itemIndex: 1, cause } });
   expect(model.getElement(id)).toBe(original);

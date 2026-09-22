@@ -1,5 +1,6 @@
 import type { Result, ValidSolid } from 'brepjs';
 import { ok, err } from 'brepjs';
+import type { IfcGuid } from '../identity/ifcGuid.js';
 import { deriveIfcGuidSync, makeElementKey, makeRelKey } from '../identity/guidDerivation.js';
 import type { LocalId } from '../identity/localId.js';
 import { makeLocalIdCounter, type LocalIdCounter } from '../identity/localId.js';
@@ -72,6 +73,13 @@ import { protectElement, retainedSolids, type ElementFields } from './modelGeome
 import { reportedGeometryCleanup } from '../geometryCleanupDiagnostics.js';
 import { uncertainGeneratedResources } from '../geometryGeneration.js';
 
+export interface BodyCommitReceipt {
+  readonly kind: 'COMMITTED';
+  readonly localId: LocalId;
+  readonly guid: IfcGuid;
+  readonly cleanup: CleanupReport;
+}
+
 interface OwnedGeometry {
   readonly solid: Disposable;
   readonly resource: object | undefined;
@@ -125,12 +133,23 @@ export interface OpeningIdentityOptions extends ElementIdentityOptions {
 }
 
 function wallOpeningSolid(body: ProductBody): Result<ValidSolid, BimError> {
-  if (body.kind === 'EXACT') {
+  if (body.kind === 'AUTHORITATIVE') {
     return err(
-      specError('EXACT_WALL_BODY_IMMUTABLE', 'Cannot add an opening to an exact Wall Body')
+      specError(
+        'AUTHORITATIVE_WALL_BODY_IMMUTABLE',
+        'Cannot add an opening to an authoritative Wall Body'
+      )
     );
   }
-  return ok(body.solid);
+  if (body.solids.length !== 1) {
+    return err(
+      specError(
+        'MULTI_ITEM_WALL_OPENING_UNSUPPORTED',
+        'Wall openings require a singleton PARAMETRIC Body'
+      )
+    );
+  }
+  return ok(body.solids[0]);
 }
 
 export class BimModel {
@@ -570,7 +589,7 @@ export class BimModel {
         {
           category: 'WALL',
           spec: snapshot,
-          geometry: { kind: 'PARAMETRIC', solid: geomResult.value },
+          geometry: { kind: 'PARAMETRIC', solids: [geomResult.value] },
         },
         identity?.stableKey
       );
@@ -803,7 +822,7 @@ export class BimModel {
         {
           category: 'RAILING',
           spec: snapshot,
-          geometry: { kind: 'PARAMETRIC', solid: geomResult.value },
+          geometry: { kind: 'PARAMETRIC', solids: [geomResult.value] },
         },
         identity?.stableKey
       );
@@ -813,45 +832,46 @@ export class BimModel {
     });
   }
 
-  /** Success transfers every input even when retirement fails; query cleanup diagnostics separately. */
-  takeExactProductBody(
-    localId: LocalId,
-    body: Extract<ProductBody, { readonly kind: 'EXACT' }>
-  ): Result<void, BimError> {
-    const result = this.#mutate('takeExactProductBody', (command) => {
+  /** Ownership transfers only on COMMITTED, including when retirement reports failure. */
+  replaceProductBody(input: {
+    readonly localId: LocalId;
+    readonly body: ProductBody;
+  }): Result<BodyCommitReceipt, BimError> {
+    const result = this.#mutate('replaceProductBody', (command) => {
+      const { localId } = input;
       const target = this.#elements.get(localId);
-      if (target === undefined)
+      if (target === undefined) {
+        return err(specError('BODY_TARGET_NOT_FOUND', `No element found for localId ${localId}`));
+      }
+      if (target.category !== 'WALL' && target.category !== 'RAILING') {
         return err(
-          specError('EXACT_BODY_TARGET_NOT_FOUND', `No element found for localId ${localId}`)
+          specError('BODY_UNSUPPORTED_CATEGORY', `Cannot replace a ${target.category} Product Body`)
         );
-      if (target.category !== 'WALL' && target.category !== 'RAILING')
-        return err(
-          specError(
-            'EXACT_BODY_UNSUPPORTED_CATEGORY',
-            `Cannot replace a ${target.category} Product Body`
-          )
-        );
-      if (target.geometry.kind === 'EXACT')
-        return err(
-          specError(
-            'EXACT_BODY_ALREADY_EXACT',
-            `Element ${localId} already has an exact Product Body`
-          )
-        );
-      const captured = snapshotProductBodyInput(body);
+      }
+      const captured = snapshotProductBodyInput(input.body);
       if (!captured.ok) return captured;
-      if (captured.value.kind !== 'EXACT')
-        return err(specError('BODY_INVALID_DESCRIPTOR', 'Expected an EXACT Body'));
       for (const [itemIndex, solid] of captured.value.solids.entries())
         this.#requireUnowned(command, solid, itemIndex);
       const prepared = validateProductBody(captured.value);
       if (!prepared.ok) return prepared;
+      if (target.geometry.kind === 'AUTHORITATIVE' && prepared.value.kind === 'PARAMETRIC') {
+        return err(
+          specError(
+            'BODY_AUTHORITY_TRANSITION',
+            'An authored Body cannot revert to recipe authority'
+          )
+        );
+      }
       this.#stageElement(command, Object.freeze({ ...target, geometry: prepared.value }));
       command.retired.push(...this.#prepareRetirement(target));
       command.recipeEligibility.set(localId, false);
-      return ok(undefined);
+      return ok({ localId, guid: target.guid });
     });
-    return result.ok ? ok(undefined) : result;
+    return result.ok
+      ? ok(
+          Object.freeze({ kind: 'COMMITTED', ...result.value.value, cleanup: result.value.cleanup })
+        )
+      : result;
   }
 
   /**
@@ -1446,7 +1466,7 @@ export class BimModel {
     this.#ownGenerated(command, [newGeometry]);
     const prepared = protectElement({
       ...wall,
-      geometry: { kind: 'PARAMETRIC', solid: newGeometry },
+      geometry: { kind: 'PARAMETRIC', solids: [newGeometry] },
     });
     if (!prepared.ok) throw new RejectedModelCommand(prepared.error);
     this.#stageElement(command, prepared.value);

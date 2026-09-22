@@ -1,4 +1,3 @@
-import { bodySolids } from '../../src/types/productBody.js';
 import { unwrap } from 'brepjs';
 import type { BimModel } from '../../src/model/bimModel.js';
 import type { WallSpec } from '../../src/specs/wallSpec.js';
@@ -65,10 +64,10 @@ export function openingHost(model: BimModel, kind: OpeningCommand) {
 
 export function singletonWallSolid(model: BimModel, id: LocalId) {
   const wall = model.getElement(id);
-  if (wall?.category !== 'WALL' || bodySolids(wall.geometry).length !== 1) {
+  if (wall?.category !== 'WALL' || wall.geometry.solids.length !== 1) {
     throw new Error('Expected a singleton Wall Body');
   }
-  return bodySolids(wall.geometry)[0];
+  return wall.geometry.solids[0];
 }
 
 /** The caller owns the model and all geometry created by this fixture. */

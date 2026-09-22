@@ -66,7 +66,10 @@ describe('native Body baseline', () => {
       );
       const first = box(1, 1, 1);
       const second = box(1, 1, 1, { at: [0.5, 0, 0] });
-      const adopted = model.takeExactProductBody(id, { kind: 'EXACT', solids: [first, second] });
+      const adopted = model.replaceProductBody({
+        localId: id,
+        body: { kind: 'AUTHORITATIVE', solids: [first, second] },
+      });
       if (!adopted.ok) {
         first[Symbol.dispose]();
         second[Symbol.dispose]();

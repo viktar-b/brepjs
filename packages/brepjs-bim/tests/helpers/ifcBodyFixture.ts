@@ -9,6 +9,7 @@ import type { WallSpec } from '../../src/specs/wallSpec.js';
 import type { SpfReader } from '../../src/import/spfReader.js';
 import {
   disposeProductBody,
+  type ProductBody,
   type NonEmpty,
 } from '../../src/types/productBody.js';
 import { DOOR, WINDOW, OPENING_WALL, singletonWallSolid } from './openingFixture.js';
@@ -19,7 +20,7 @@ export type BodyLayout = 'singleton' | 'disconnected' | 'overlapping';
 
 export function bodyExchangeFixture(
   category: 'WALL' | 'RAILING',
-  authority: 'EXACT',
+  authority: ProductBody['kind'],
   layout: BodyLayout
 ) {
   const model = new BimModel();
@@ -69,7 +70,7 @@ export function bodyExchangeFixture(
             ),
           ];
     const body = { kind: authority, solids };
-    const adopted = model.takeExactProductBody(localId, body);
+    const adopted = model.replaceProductBody({ localId, body });
     if (!adopted.ok) disposeProductBody(body);
     unwrap(adopted);
     const styled = layout !== 'singleton';
@@ -127,7 +128,7 @@ function offsetBox(length: number, offset: number): ValidSolid {
 
 /** Reuses ticket05's already-cut host and keeps its opening/filler records. */
 export function retainedOpeningFixture(
-  authority: 'EXACT',
+  authority: ProductBody['kind'],
   fillerKind: 'DOOR' | 'WINDOW' = 'DOOR',
   layout: 'disconnected' | 'aperture' = 'disconnected'
 ) {
@@ -167,7 +168,7 @@ export function retainedOpeningFixture(
       ),
     ];
     const body = { kind: authority, solids };
-    const replaced = model.takeExactProductBody(wallId, body);
+    const replaced = model.replaceProductBody({ localId: wallId, body });
     if (!replaced.ok) disposeProductBody(body);
     unwrap(replaced);
     const opening = model.getAllElements().find((element) => element.category === 'OPENING');

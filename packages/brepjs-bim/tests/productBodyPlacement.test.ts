@@ -1,4 +1,3 @@
-import { bodySolids } from '../src/types/productBody.js';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DisposalScope, getBounds, getKernel, measureVolume, unwrap } from 'brepjs';
 import { makeLocalIdCounter } from '../src/identity/localId.js';
@@ -24,7 +23,7 @@ afterEach(() => {
 });
 
 for (const category of ['WALL', 'RAILING'] as const) {
-  describe.each(['EXACT'] as const)(`${category} %s placedSolids`, (kind) => {
+  describe.each(['PARAMETRIC', 'AUTHORITATIVE'] as const)(`${category} %s placedSolids`, (kind) => {
     it('preserves all retained items and applies element and parent frames once', () => {
       const before = currentKernel === 'occt-wasm' ? nativeShapeCount() : null;
       {
@@ -51,7 +50,7 @@ for (const category of ['WALL', 'RAILING'] as const) {
         try {
           expect(output).toHaveLength(2);
           output.forEach((solid, i) => {
-            expect(solid).not.toBe(bodySolids(geometry)[i]);
+            expect(solid).not.toBe(geometry.solids[i]);
             const bounds = getBounds(solid);
             expect(bounds.xMin).toBeCloseTo(-1 - i * 0.5, 6);
             expect(bounds.xMax).toBeCloseTo(-i * 0.5, 6);
@@ -64,7 +63,7 @@ for (const category of ['WALL', 'RAILING'] as const) {
           output.forEach((solid) => solid[Symbol.dispose]());
         }
         expect(geometry.kind).toBe(kind);
-        expect(bodySolids(geometry)).toEqual([a, b]);
+        expect(geometry.solids).toEqual([a, b]);
         expect(unwrap(measureVolume(a))).toBeCloseTo(1, 8);
         if (live !== null) expect(nativeShapeCount()).toBe(live);
       }

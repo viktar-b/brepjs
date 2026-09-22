@@ -1,4 +1,3 @@
-import { bodySolids } from '../src/types/productBody.js';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   box,
@@ -40,7 +39,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-for (const kind of ['EXACT'] as const) {
+for (const kind of ['PARAMETRIC', 'AUTHORITATIVE'] as const) {
   describe.each(['copy', 'transform'] as const)(`${kind} %s failure cleanup`, (operation) => {
     for (const phase of ['before', 'after'] as const) {
       it.each(['error', 'throw'] as const)(
@@ -51,7 +50,7 @@ for (const kind of ['EXACT'] as const) {
             using scope = new DisposalScope();
             const { a, b } = createOverlapFixture(scope);
             const body = unwrap(validateProductBody({ kind, solids: [a, b] }));
-            const releases = bodySolids(body).map((solid) => vi.spyOn(solid, Symbol.dispose));
+            const releases = body.solids.map((solid) => vi.spyOn(solid, Symbol.dispose));
             const outputs: ReturnType<typeof vi.spyOn>[] = [];
             const primary = geometryError('INJECTED_NATIVE_FAILURE', 'later item');
             const fail = () => {
@@ -85,7 +84,7 @@ for (const kind of ['EXACT'] as const) {
             expect(outputs).toHaveLength(phase === 'before' ? 1 : 2);
             for (const release of outputs) expect(release).toHaveBeenCalledTimes(1);
             for (const release of releases) expect(release).not.toHaveBeenCalled();
-            expect(bodySolids(body)).toEqual([a, b]);
+            expect(body.solids).toEqual([a, b]);
             expect(body.kind).toBe(kind);
             expect(unwrap(measureVolume(a))).toBeCloseTo(1, 8);
             expect(unwrap(measureVolume(b))).toBeCloseTo(1, 8);
@@ -114,7 +113,7 @@ it.each(['error', 'throw'] as const)(
         }
       },
     });
-    expect(validateProductBody({ kind: 'EXACT', solids: [a, b] })).toMatchObject({
+    expect(validateProductBody({ kind: 'PARAMETRIC', solids: [a, b] })).toMatchObject({
       ok: false,
       error: { operation: 'validateProductBody', itemIndex: 1, code: 'BODY_VALIDATION_FAILED' },
     });
@@ -127,7 +126,7 @@ it('rejects native non-solids, invalid solids, sparse arrays, and throwing JavaS
   using a = box(1, 1, 1);
   using b = box(1, 1, 1);
   const face = getFaces(a)[0];
-  expect(validateProductBody({ kind: 'EXACT', solids: [a, face] })).toMatchObject({
+  expect(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, face] })).toMatchObject({
     ok: false,
     error: { itemIndex: 1, code: 'BODY_INVALID_ITEM' },
   });
@@ -135,12 +134,12 @@ it('rejects native non-solids, invalid solids, sparse arrays, and throwing JavaS
   vi.spyOn(getKernel(), 'isValid').mockImplementation((shape) =>
     shape === b.wrapped ? false : isValid(shape)
   );
-  expect(validateProductBody({ kind: 'EXACT', solids: [a, b] })).toMatchObject({
+  expect(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, b] })).toMatchObject({
     ok: false,
     error: { itemIndex: 1, code: 'BODY_INVALID_ITEM' },
   });
   const sparse = [a].concat(new Array<ValidSolid>(1));
-  expect(validateProductBody({ kind: 'EXACT', solids: sparse })).toMatchObject({
+  expect(validateProductBody({ kind: 'AUTHORITATIVE', solids: sparse })).toMatchObject({
     ok: false,
     error: { itemIndex: 1 },
   });
@@ -150,7 +149,7 @@ it('rejects native non-solids, invalid solids, sparse arrays, and throwing JavaS
       throw new Error('item getter');
     },
   });
-  expect(validateProductBody({ kind: 'EXACT', solids: items })).toMatchObject({
+  expect(validateProductBody({ kind: 'AUTHORITATIVE', solids: items })).toMatchObject({
     ok: false,
     error: { itemIndex: 1, code: 'BODY_VALIDATION_FAILED' },
   });
@@ -174,7 +173,7 @@ it.each(['copy', 'transform'] as const)(
     {
       using scope = new DisposalScope();
       const { a, b } = createOverlapFixture(scope);
-      const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+      const body = unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, b] }));
       const primary = geometryError('PRIMARY', 'operation failed');
       const cleanupCauses = [new Error('cleanup 0'), new Error('cleanup 1')];
       const releases: ReturnType<typeof vi.spyOn>[] = [];
@@ -215,7 +214,7 @@ it.each(['before', 'after'] as const)(
     const baseline = arena();
     const a = box(1, 1, 1),
       b = box(1, 1, 1);
-    const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+    const body = unwrap(validateProductBody({ kind: 'PARAMETRIC', solids: [a, b] }));
     const realDispose = a[Symbol.dispose].bind(a);
     const cause = new Error(`failure ${when} release`);
     const first = vi.spyOn(a, Symbol.dispose).mockImplementation(() => {
@@ -257,8 +256,8 @@ for (const stage of ['union-before', 'union-after', 'measure'] as const) {
       {
         using scope = new DisposalScope();
         const { a, b } = createOverlapFixture(scope);
-        const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
-        const releases = bodySolids(body).map((solid) => vi.spyOn(solid, Symbol.dispose));
+        const body = unwrap(validateProductBody({ kind: 'PARAMETRIC', solids: [a, b] }));
+        const releases = body.solids.map((solid) => vi.spyOn(solid, Symbol.dispose));
         const temporaryReleases: ReturnType<typeof vi.spyOn>[] = [];
         const fail = () => {
           const cause = geometryError('INJECTED', stage);
@@ -279,7 +278,7 @@ for (const stage of ['union-before', 'union-after', 'measure'] as const) {
           },
         });
         const live = arena();
-        expect(measureProductBodyMaterial(bodySolids(body))).toMatchObject({
+        expect(measureProductBodyMaterial(body.solids)).toMatchObject({
           ok: false,
           error: { operation: 'measureProductBodyMaterial', cleanup: { kind: 'COMPLETE' } },
         });
@@ -314,7 +313,7 @@ it.each(['measure', 'bounds'] as const)(
   (operation) => {
     using scope = new DisposalScope();
     const { a, b } = createOverlapFixture(scope);
-    const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+    const body = unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, b] }));
     const releases: ReturnType<typeof vi.spyOn>[] = [];
     setProductBodyTestHooksForTesting({
       afterAllocate({ solid }) {
@@ -330,7 +329,7 @@ it.each(['measure', 'bounds'] as const)(
     const live = arena();
     const result =
       operation === 'measure'
-        ? measureProductBodyMaterial(bodySolids(body))
+        ? measureProductBodyMaterial(body.solids)
         : productBodyBounds(body, { kind: 'RESOLVED', tag: 'caller-space', frame: IDENTITY_FRAME });
     expect(result).toMatchObject({
       ok: false,
@@ -338,7 +337,7 @@ it.each(['measure', 'bounds'] as const)(
     });
     releases.forEach((release) => expect(release).toHaveBeenCalledTimes(1));
     expectArena(live);
-    expect(bodySolids(body)).toEqual([a, b]);
+    expect(body.solids).toEqual([a, b]);
   }
 );
 
@@ -375,7 +374,7 @@ it.each(['copy', 'transform'] as const)(
   (operation) => {
     using scope = new DisposalScope();
     const { a, b } = createOverlapFixture(scope);
-    const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+    const body = unwrap(validateProductBody({ kind: 'PARAMETRIC', solids: [a, b] }));
     const kernel = getKernel();
     if (operation === 'copy') {
       const realCopy = kernel.copyShape.bind(kernel);
@@ -468,7 +467,7 @@ it('reports nonfinite bounds instead of returning an incomplete query', () => {
 
 it('rejects an unvalidated frame before allocating any geometry', () => {
   using solid = box(1, 1, 1);
-  const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [solid] }));
+  const body = unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [solid] }));
   const copy = vi.spyOn(getKernel(), 'copyShape');
   const locate = vi.spyOn(getKernel(), 'locate');
   expect(
@@ -481,7 +480,7 @@ it('rejects an unvalidated frame before allocating any geometry', () => {
 it('releases otherwise successful outputs when native transform cleanup throws', () => {
   using scope = new DisposalScope();
   const { a, b } = createOverlapFixture(scope);
-  const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+  const body = unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [a, b] }));
   const kernel = getKernel();
   const compose = kernel.composeTransform.bind(kernel);
   const cleanupCause = new Error('native transform cleanup after release');
@@ -522,7 +521,7 @@ it('releases otherwise successful outputs when native transform cleanup throws',
 it('reports an outstanding partial output when failure cleanup throws before native release', () => {
   using scope = new DisposalScope();
   const { a, b } = createOverlapFixture(scope);
-  const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+  const body = unwrap(validateProductBody({ kind: 'PARAMETRIC', solids: [a, b] }));
   const live = arena();
   const outputs: ValidSolid[] = [];
   const releases: ReturnType<typeof vi.spyOn>[] = [];
@@ -569,7 +568,7 @@ it('reports an outstanding partial output when failure cleanup throws before nat
 it('preserves the primary failure alongside transform and output cleanup diagnostics', () => {
   using scope = new DisposalScope();
   const { a, b } = createOverlapFixture(scope);
-  const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [a, b] }));
+  const body = unwrap(validateProductBody({ kind: 'PARAMETRIC', solids: [a, b] }));
   const compose = getKernel().composeTransform.bind(getKernel());
   const transformCause = new Error('transform release');
   const outputCause = new Error('output release');
@@ -620,7 +619,11 @@ it('preserves the primary failure alongside transform and output cleanup diagnos
 
 it('rejects malformed Body descriptors in bounds instead of bypassing authority validation', () => {
   using solid = box(1, 1, 1);
-  for (const input of [null, { kind: 'UNKNOWN', solids: [solid] }, { kind: 'EXACT', solids: [] }]) {
+  for (const input of [
+    null,
+    { kind: 'EXACT', solids: [solid] },
+    { kind: 'AUTHORITATIVE', solids: [] },
+  ]) {
     expect(Reflect.apply(productBodyBounds, undefined, [input])).toMatchObject({
       ok: false,
       error: { operation: 'productBodyBounds' },
@@ -633,7 +636,7 @@ it('cleans a placed output and temporary faces when metadata propagation throws 
   const face = getFaces(source)[0];
   if (!face) throw new Error('Expected face');
   tagFaces(source, [face], 'kept');
-  const body = unwrap(validateProductBody({ kind: 'EXACT', solids: [source] }));
+  const body = unwrap(validateProductBody({ kind: 'AUTHORITATIVE', solids: [source] }));
   const live = arena();
   vi.spyOn(getKernel(), 'hashCode').mockImplementation(() => {
     throw new Error('metadata after allocation');

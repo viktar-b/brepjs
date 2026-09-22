@@ -21,7 +21,7 @@ const WALL: WallSpec = {
 };
 
 it.each(['before', 'after'] as const)(
-  'commits EXACT takeover despite retirement failure %s native release',
+  'commits AUTHORITATIVE takeover despite retirement failure %s native release',
   (point) => {
     const baseline = currentKernel === 'occt-wasm' ? nativeShapeCount() : null;
     const model = new BimModel();
@@ -57,19 +57,21 @@ it.each(['before', 'after'] as const)(
       throw cause;
     });
     try {
-      expect(model.takeExactProductBody(id, { kind: 'EXACT', solids: [next] })).toEqual({
+      expect(
+        model.replaceProductBody({ localId: id, body: { kind: 'AUTHORITATIVE', solids: [next] } })
+      ).toMatchObject({
         ok: true,
-        value: undefined,
+        value: { kind: 'COMMITTED', localId: id, cleanup: { kind: 'FAILED' } },
       });
       expect(callbackRead).toBe(model.getElement(id)?.geometry);
-      expect(callbackRead).toMatchObject({ kind: 'EXACT', solids: [next] });
+      expect(callbackRead).toMatchObject({ kind: 'AUTHORITATIVE', solids: [next] });
       expect(reentrant).toMatchObject({ ok: false, error: { code: 'MODEL_BUSY' } });
       expect(metadataMutation).toMatchObject({ cause: { code: 'MODEL_BUSY' } });
       expect(specReads).toBe(0);
       expect(model.getSurfaceStyle(id)).toBeNull();
       expect(model.isRecipeQuantityEligible(id)).toBe(false);
       expect(model.getGeometryCleanupDiagnostics()).toMatchObject([
-        { operation: 'takeExactProductBody', localId: id, itemIndex: 0, cause },
+        { operation: 'replaceProductBody', localId: id, itemIndex: 0, cause },
       ]);
       if (point === 'before')
         expect(model.addProxy({ name: 'uncertain alias', solid: old })).toMatchObject({

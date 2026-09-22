@@ -1,4 +1,3 @@
-import { bodySolids } from '../src/types/productBody.js';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   csg,
@@ -49,10 +48,10 @@ describe('Families civil Product Body authority', () => {
       if (id === undefined) throw new Error('Missing product');
       const product = model.getElement(id);
       if (product?.category !== 'RAILING') throw new Error('Missing railing');
-      const retained = bodySolids(product.geometry);
+      const retained = product.geometry.solids;
       const releases = retained.map((solid) => vi.spyOn(solid, Symbol.dispose));
       try {
-        expect(product.geometry.kind).toBe('EXACT');
+        expect(product.geometry.kind).toBe('AUTHORITATIVE');
         expect(retained).toHaveLength(1);
         const sourceSolid = source.solids[0];
         if (sourceSolid === undefined) throw new Error('Missing source');
@@ -106,16 +105,13 @@ describe('Families civil Product Body authority', () => {
         if (id === undefined) throw new Error('Missing product');
         const product = model.getElement(id);
         if (product?.category !== 'RAILING') throw new Error('Missing railing');
-        expect(product.geometry.kind).toBe('EXACT');
-        expect(bodySolids(product.geometry)).toHaveLength(2);
-        bodySolids(product.geometry).forEach((solid, index) => {
+        expect(product.geometry.kind).toBe('AUTHORITATIVE');
+        expect(product.geometry.solids).toHaveLength(2);
+        product.geometry.solids.forEach((solid, index) => {
           expectBoundsClose(getBounds(solid), getBounds(index === 0 ? a : b));
           expect(solid).not.toBe(source.solids[index]);
         });
-        expect(unwrap(measureProductBodyMaterial(bodySolids(product.geometry)))).toBeCloseTo(
-          1.5,
-          8
-        );
+        expect(unwrap(measureProductBodyMaterial(product.geometry.solids))).toBeCloseTo(1.5, 8);
       } finally {
         model[Symbol.dispose]();
       }
@@ -149,12 +145,9 @@ describe('Families civil Product Body authority', () => {
     const product = owned.getElement(id);
     if (product?.category !== 'WALL' && product?.category !== 'RAILING')
       throw new Error('Missing product');
-    expect(product.geometry.kind).toBe('EXACT');
-    expect(bodySolids(product.geometry)).toHaveLength(count);
-    expect(unwrap(measureProductBodyMaterial(bodySolids(product.geometry)))).toBeCloseTo(
-      volume,
-      10
-    );
+    expect(product.geometry.kind).toBe('AUTHORITATIVE');
+    expect(product.geometry.solids).toHaveLength(count);
+    expect(unwrap(measureProductBodyMaterial(product.geometry.solids))).toBeCloseTo(volume, 10);
   });
 
   it('requires an evaluator for activated civil products', () => {
@@ -183,9 +176,9 @@ describe('Families civil Product Body authority', () => {
         if (id === undefined) throw new Error('Missing retained product');
         const product = model.getElement(id);
         if (product?.category !== 'RAILING') throw new Error('Missing railing');
-        expect(product.geometry.kind).toBe('EXACT');
-        expect(bodySolids(product.geometry)).toHaveLength(count);
-        bodySolids(product.geometry).forEach((solid) =>
+        expect(product.geometry.kind).toBe('AUTHORITATIVE');
+        expect(product.geometry.solids).toHaveLength(count);
+        product.geometry.solids.forEach((solid) =>
           expect(getKernel().volume(solid.wrapped)).toBeCloseTo(count === 1 ? 2 : 0.4, 8)
         );
         if (before !== null) expect(nativeShapeCount()).toBe(before + count);

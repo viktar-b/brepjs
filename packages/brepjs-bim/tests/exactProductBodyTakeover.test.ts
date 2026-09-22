@@ -4,6 +4,7 @@ import {
   clone,
   cut,
   cylinder,
+  getKernel,
   getSolids,
   isValidSolid,
   measureVolume,
@@ -59,7 +60,7 @@ const RAILING_SPEC = {
   materialName: 'Steel',
 };
 
-describe('BimModel.takeExactProductBody', () => {
+describe('BimModel.replaceProductBody', () => {
   it('atomically transfers every exact handle and disposes the superseded Body once', () => {
     using model = new BimModel();
     const wallId = required(model.addWall(WALL_SPEC));
@@ -73,13 +74,16 @@ describe('BimModel.takeExactProductBody', () => {
     source[Symbol.dispose]();
     const releases = [vi.spyOn(first, Symbol.dispose), vi.spyOn(second, Symbol.dispose)];
 
-    const takeover = model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [first, second] });
+    const takeover = model.replaceProductBody({
+      localId: wallId,
+      body: { kind: 'AUTHORITATIVE', solids: [first, second] },
+    });
     expect(takeover.ok).toBe(true);
     expect(oldRelease).toHaveBeenCalledTimes(1);
     expect(first.disposed).toBe(false);
     expect(second.disposed).toBe(false);
     expect(requiredElement(model, wallId, 'WALL').geometry).toEqual({
-      kind: 'EXACT',
+      kind: 'AUTHORITATIVE',
       solids: [first, second],
     });
 
@@ -102,17 +106,23 @@ describe('BimModel.takeExactProductBody', () => {
     using missingInput = box(10, 10, 10);
     using categoryInput = box(20, 20, 20);
 
-    const missing = model.takeExactProductBody(localIdBeyondModel(), {
-      kind: 'EXACT',
-      solids: [missingInput],
+    const missing = model.replaceProductBody({
+      localId: localIdBeyondModel(),
+      body: {
+        kind: 'AUTHORITATIVE',
+        solids: [missingInput],
+      },
     });
-    const wrongCategory = model.takeExactProductBody(slabId, {
-      kind: 'EXACT',
-      solids: [categoryInput],
+    const wrongCategory = model.replaceProductBody({
+      localId: slabId,
+      body: {
+        kind: 'AUTHORITATIVE',
+        solids: [categoryInput],
+      },
     });
 
-    expect(errorCode(missing)).toBe('EXACT_BODY_TARGET_NOT_FOUND');
-    expect(errorCode(wrongCategory)).toBe('EXACT_BODY_UNSUPPORTED_CATEGORY');
+    expect(errorCode(missing)).toBe('BODY_TARGET_NOT_FOUND');
+    expect(errorCode(wrongCategory)).toBe('BODY_UNSUPPORTED_CATEGORY');
     expect(missingInput.disposed).toBe(false);
     expect(categoryInput.disposed).toBe(false);
     model[Symbol.dispose]();
@@ -124,16 +134,21 @@ describe('BimModel.takeExactProductBody', () => {
     const original = requiredElement(model, wallId, 'WALL').geometry;
 
     expect(
-      Reflect.apply(model.takeExactProductBody.bind(model), model, [
-        wallId,
-        { kind: 'EXACT', solids: [] },
+      Reflect.apply(model.replaceProductBody.bind(model), model, [
+        {
+          localId: wallId,
+          body: { kind: 'AUTHORITATIVE', solids: [] },
+        },
       ])
     ).toMatchObject({ ok: false, error: { code: 'BODY_INVALID_DESCRIPTOR' } });
 
     using duplicate = box(30, 30, 30);
     expect(
       errorCode(
-        model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [duplicate, duplicate] })
+        model.replaceProductBody({
+          localId: wallId,
+          body: { kind: 'AUTHORITATIVE', solids: [duplicate, duplicate] },
+        })
       )
     ).toBe('BODY_DUPLICATE_ITEM');
 
@@ -141,47 +156,63 @@ describe('BimModel.takeExactProductBody', () => {
     const disposedRelease = vi.spyOn(disposed, Symbol.dispose);
     disposed[Symbol.dispose]();
     expect(
-      errorCode(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [disposed] }))
+      errorCode(
+        model.replaceProductBody({
+          localId: wallId,
+          body: { kind: 'AUTHORITATIVE', solids: [disposed] },
+        })
+      )
     ).toBe('BODY_INVALID_ITEM');
     expect(disposedRelease).toHaveBeenCalledTimes(1);
 
     const invalid = { disposed: false };
     expect(
-      Reflect.apply(model.takeExactProductBody.bind(model), model, [
-        wallId,
-        { kind: 'EXACT', solids: [invalid] },
+      Reflect.apply(model.replaceProductBody.bind(model), model, [
+        {
+          localId: wallId,
+          body: { kind: 'AUTHORITATIVE', solids: [invalid] },
+        },
       ])
     ).toMatchObject({ ok: false, error: { code: 'BODY_INVALID_ITEM', itemIndex: 0 } });
     expect(requiredElement(model, wallId, 'WALL').geometry).toBe(original);
     model[Symbol.dispose]();
   });
 
-  it('rejects replacement of an already exact Body and leaves both collections owned correctly', () => {
-    const model = new BimModel();
+  it('replaces an authoritative Body and releases each adopted collection exactly once', () => {
+    using model = new BimModel();
     const railingId = required(model.addRailing(RAILING_SPEC));
     const selected = box(100, 20, 20);
-    const rejected = box(100, 30, 30);
-    let selectedDisposals = 0;
-    let rejectedDisposals = 0;
-    selected.onDispose(() => selectedDisposals++);
-    rejected.onDispose(() => rejectedDisposals++);
-    expect(model.takeExactProductBody(railingId, { kind: 'EXACT', solids: [selected] }).ok).toBe(
-      true
-    );
+    const replacement = box(100, 30, 30);
+    const selectedRelease = vi.spyOn(selected, Symbol.dispose);
+    const replacementRelease = vi.spyOn(replacement, Symbol.dispose);
+    expect(
+      model.replaceProductBody({
+        localId: railingId,
+        body: { kind: 'AUTHORITATIVE', solids: [selected] },
+      }).ok
+    ).toBe(true);
 
-    const second = model.takeExactProductBody(railingId, {
-      kind: 'EXACT',
-      solids: [rejected],
+    const second = model.replaceProductBody({
+      localId: railingId,
+      body: {
+        kind: 'AUTHORITATIVE',
+        solids: [replacement],
+      },
     });
-    expect(errorCode(second)).toBe('EXACT_BODY_ALREADY_EXACT');
-    expect(selected.disposed).toBe(false);
-    expect(rejected.disposed).toBe(false);
+    expect(second).toMatchObject({
+      ok: true,
+      value: { kind: 'COMMITTED', localId: railingId, cleanup: { kind: 'COMPLETE' } },
+    });
+    expect(selected.disposed).toBe(true);
+    expect(selectedRelease).toHaveBeenCalledTimes(1);
+    expect(replacementRelease).not.toHaveBeenCalled();
+    expect(requiredElement(model, railingId, 'RAILING').geometry.solids).toEqual([replacement]);
+    expect(getKernel().volume(replacement.wrapped)).toBeCloseTo(90_000, 6);
 
     model[Symbol.dispose]();
-    expect(selectedDisposals).toBe(1);
-    expect(rejectedDisposals).toBe(0);
-    rejected[Symbol.dispose]();
-    expect(rejectedDisposals).toBe(1);
+    model[Symbol.dispose]();
+    expect(selectedRelease).toHaveBeenCalledTimes(1);
+    expect(replacementRelease).toHaveBeenCalledTimes(1);
   });
 
   it('rejects reuse of the model-owned parametric solid', () => {
@@ -189,16 +220,19 @@ describe('BimModel.takeExactProductBody', () => {
     const wallId = required(model.addWall(WALL_SPEC));
     const original = requiredElement(model, wallId, 'WALL').geometry;
     if (original.kind !== 'PARAMETRIC') throw new Error('Expected a parametric wall Body');
-    const originalRelease = vi.spyOn(original.solid, Symbol.dispose);
+    const originalRelease = vi.spyOn(original.solids[0], Symbol.dispose);
 
-    const takeover = model.takeExactProductBody(wallId, {
-      kind: 'EXACT',
-      solids: [original.solid],
+    const takeover = model.replaceProductBody({
+      localId: wallId,
+      body: {
+        kind: 'AUTHORITATIVE',
+        solids: [original.solids[0]],
+      },
     });
 
     expect(errorCode(takeover)).toBe('BODY_OWNERSHIP_CONFLICT');
     expect(requiredElement(model, wallId, 'WALL').geometry).toBe(original);
-    expect(original.solid.disposed).toBe(false);
+    expect(original.solids[0].disposed).toBe(false);
     model[Symbol.dispose]();
     expect(originalRelease).toHaveBeenCalledTimes(1);
   });
@@ -209,7 +243,12 @@ describe('exact wall mutation and multi-solid placement', () => {
     using model = new BimModel();
     const wallId = required(model.addWall(WALL_SPEC));
     const exact = box(1_000, 100, 500);
-    required(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [exact] }));
+    required(
+      model.replaceProductBody({
+        localId: wallId,
+        body: { kind: 'AUTHORITATIVE', solids: [exact] },
+      })
+    );
     const bodyBefore = requiredElement(model, wallId, 'WALL').geometry;
     const relationshipsBefore = model.getAllRelationships();
     const elementsBefore = model.getAllElements();
@@ -231,8 +270,8 @@ describe('exact wall mutation and multi-solid placement', () => {
       materialName: 'Glass',
     });
 
-    expect(errorCode(door)).toBe('EXACT_WALL_BODY_IMMUTABLE');
-    expect(errorCode(window)).toBe('EXACT_WALL_BODY_IMMUTABLE');
+    expect(errorCode(door)).toBe('AUTHORITATIVE_WALL_BODY_IMMUTABLE');
+    expect(errorCode(window)).toBe('AUTHORITATIVE_WALL_BODY_IMMUTABLE');
     expect(requiredElement(model, wallId, 'WALL').geometry).toBe(bodyBefore);
     expect(model.getAllRelationships()).toEqual(relationshipsBefore);
     expect(model.getAllElements()).toEqual(elementsBefore);
@@ -244,7 +283,12 @@ describe('exact wall mutation and multi-solid placement', () => {
     const railingId = required(model.addRailing(RAILING_SPEC));
     const first = box(100, 20, 20);
     const second = box(100, 30, 30);
-    required(model.takeExactProductBody(railingId, { kind: 'EXACT', solids: [first, second] }));
+    required(
+      model.replaceProductBody({
+        localId: railingId,
+        body: { kind: 'AUTHORITATIVE', solids: [first, second] },
+      })
+    );
 
     const placed = required(placedSolids(requiredElement(model, railingId, 'RAILING')));
     expect(placed).toHaveLength(2);
@@ -277,7 +321,12 @@ describe('exact wall mutation and multi-solid placement', () => {
       throw new Error('Expected one valid curved solid');
     const exact = required(clone(item));
     const localVolume = required(measureVolume(exact));
-    required(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [exact] }));
+    required(
+      model.replaceProductBody({
+        localId: wallId,
+        body: { kind: 'AUTHORITATIVE', solids: [exact] },
+      })
+    );
 
     const placed = required(placedSolids(requiredElement(model, wallId, 'WALL')));
     try {
@@ -296,7 +345,12 @@ describe('exact wall mutation and multi-solid placement', () => {
     const railingId = required(model.addRailing(RAILING_SPEC));
     const first = box(100, 20, 20);
     const second = box(100, 30, 30);
-    required(model.takeExactProductBody(railingId, { kind: 'EXACT', solids: [first, second] }));
+    required(
+      model.replaceProductBody({
+        localId: railingId,
+        body: { kind: 'AUTHORITATIVE', solids: [first, second] },
+      })
+    );
     const placedReleases: ReturnType<typeof vi.fn>[] = [];
     setProductBodyTestHooksForTesting({
       afterAllocate: ({ solid }) => {
@@ -323,7 +377,12 @@ describe('exact Product Body IFC integration', () => {
     const source = box(1_000, 20, 20);
     const second = translate(source, [0, 0, 480]);
     source[Symbol.dispose]();
-    required(model.takeExactProductBody(railingId, { kind: 'EXACT', solids: [first, second] }));
+    required(
+      model.replaceProductBody({
+        localId: railingId,
+        body: { kind: 'AUTHORITATIVE', solids: [first, second] },
+      })
+    );
 
     const serialized = required(await toIfc(model, META));
     const text = new TextDecoder().decode(serialized);
@@ -345,7 +404,12 @@ describe('exact Product Body IFC integration', () => {
     const source = box(100, 100, 100);
     const second = translate(source, [50, 0, 0]);
     source[Symbol.dispose]();
-    required(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [first, second] }));
+    required(
+      model.replaceProductBody({
+        localId: wallId,
+        body: { kind: 'AUTHORITATIVE', solids: [first, second] },
+      })
+    );
 
     const serialized = required(await toIfc(model, META));
     const text = new TextDecoder().decode(serialized);
@@ -372,8 +436,18 @@ describe('exact Product Body IFC integration', () => {
     const railingId = required(model.addRailing(RAILING_SPEC));
     const exactWall = box(100, 100, 100);
     const exactRailing = box(200, 20, 20);
-    required(model.takeExactProductBody(wallId, { kind: 'EXACT', solids: [exactWall] }));
-    required(model.takeExactProductBody(railingId, { kind: 'EXACT', solids: [exactRailing] }));
+    required(
+      model.replaceProductBody({
+        localId: wallId,
+        body: { kind: 'AUTHORITATIVE', solids: [exactWall] },
+      })
+    );
+    required(
+      model.replaceProductBody({
+        localId: railingId,
+        body: { kind: 'AUTHORITATIVE', solids: [exactRailing] },
+      })
+    );
     let prepareCalls = 0;
     const failingPreparer: ProductBodyItemPreparer = (solid) => {
       prepareCalls++;

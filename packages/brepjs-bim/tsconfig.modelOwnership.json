@@ -12,7 +12,7 @@
     "tests/modelGenerationFailures.test.ts",
     "tests/modelTemporaryCleanup.test.ts",
     "tests/geometryCleanupDiagnostics.test.ts",
-    "tests/transactionalExactTakeover.test.ts",
+    "tests/transactionalBodyReplacement.test.ts",
     "tests/cutOpeningNativeOwnership.test.ts"
   ]
 }
