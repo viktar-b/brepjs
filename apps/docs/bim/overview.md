@@ -63,3 +63,5 @@ Civil-semantic wall and railing routes require `bodyEvaluator` or the `proxyEval
 Member and Sign are explicitly outside this profile. They remain hard unsupported-type errors unless `proxyEvaluator` is deliberately enabled, in which case `projected.proxied` reports them. This profile does not claim complete IFC infrastructure coverage or unchanged full scratch-example parity.
 
 Continue with the [element catalog](/bim/elements), [IFC export & import](/bim/ifc), [validation](/bim/validation), and [interop](/bim/interop).
+
+IfcOpenShell 0.8.5 currently reports a tessellation `Normals` schema error for the existing IFC4X3 writer, including single Proxy and retained Families Body items. The verified fixtures still produce the expected shapes and world placement. IFC4X3 schema conformance is not established by those geometry checks.
