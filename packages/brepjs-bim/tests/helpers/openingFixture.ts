@@ -74,4 +74,3 @@ export function singletonWallSolid(model: BimModel, id: LocalId) {
   if (!child || others.length !== 0 || !isValidSolid(child)) throw new Error('Expected one solid in recipe wrapper');
   return child;
 }
-
