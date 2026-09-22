@@ -44,10 +44,11 @@
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint src tests"
+    "lint": "eslint src tests",
+    "typecheck:consumers": "tsgo -p tsconfig.test.json --noEmit"
   },
   "peerDependencies": {
-    "brepjs": ">=18.0.0",
+    "brepjs": ">=19.0.5",
     "web-ifc": ">=0.0.50"
   },
   "devDependencies": {
