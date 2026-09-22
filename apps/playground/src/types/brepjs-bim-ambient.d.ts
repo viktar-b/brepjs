@@ -276,6 +276,14 @@ type ProductBody =
 /** Borrow protected Product-local items. Borrowers must not dispose the retained handles. */
 declare function bodySolids(body: ProductBody): NonEmpty<ValidSolid>;
 
+interface GeometryCleanupDiagnostic {
+  readonly operation: string;
+  readonly itemIndex: number;
+  readonly resourceKind: 'SHAPE' | 'TRANSFORM';
+  readonly localId?: number;
+  readonly cause: unknown;
+}
+
 interface FrameInput {
   readonly origin: Vec3;
   readonly axisX: Vec3;

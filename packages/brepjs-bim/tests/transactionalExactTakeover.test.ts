@@ -35,10 +35,23 @@ it.each(['before', 'after'] as const)(
     const nextRelease = vi.spyOn(next, Symbol.dispose);
     let callbackRead: unknown;
     let reentrant: unknown;
+    let metadataMutation: unknown;
+    let specReads = 0;
     let recovery = false;
     const attempt = vi.spyOn(old, Symbol.dispose).mockImplementation(() => {
       callbackRead = model.getElement(id)?.geometry;
-      reentrant = model.addWall(WALL);
+      reentrant = model.addWall({
+        ...WALL,
+        get length() {
+          specReads++;
+          return 1;
+        },
+      });
+      try {
+        model.setSurfaceStyle(id, { name: 'late', r: 1, g: 0, b: 0 });
+      } catch (error) {
+        metadataMutation = error;
+      }
       if (point === 'after') release();
       else recovery = true;
       throw cause;
@@ -51,6 +64,9 @@ it.each(['before', 'after'] as const)(
       expect(callbackRead).toBe(model.getElement(id)?.geometry);
       expect(callbackRead).toMatchObject({ kind: 'EXACT', solids: [next] });
       expect(reentrant).toMatchObject({ ok: false, error: { code: 'MODEL_BUSY' } });
+      expect(metadataMutation).toMatchObject({ cause: { code: 'MODEL_BUSY' } });
+      expect(specReads).toBe(0);
+      expect(model.getSurfaceStyle(id)).toBeNull();
       expect(model.isRecipeQuantityEligible(id)).toBe(false);
       expect(model.getGeometryCleanupDiagnostics()).toMatchObject([
         { operation: 'takeExactProductBody', localId: id, itemIndex: 0, cause },
