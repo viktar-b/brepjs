@@ -329,7 +329,7 @@ describe('element placement survives the IFC round trip', () => {
     );
     model.placeIn(wallId, storeyId);
     const doorId = unwrap(
-      model.addDoor({
+      model.addDoorAndCutWall({
         wallLocalId: wallId,
         width: 900,
         height: 2100,
